@@ -1,0 +1,955 @@
+docker compose -f docker-compose.yaml up --build -d
+#1 [internal] load local bake definitions
+#1 reading from stdin 17.93kB done
+#1 DONE 0.0s
+
+#2 [rabbitmq internal] load build definition from Dockerfile
+#2 transferring dockerfile: 106B done
+#2 DONE 0.0s
+
+#3 [filter_year_3 internal] load build definition from Dockerfile
+#3 transferring dockerfile: 293B done
+#3 DONE 0.1s
+
+#4 [client internal] load build definition from Dockerfile
+#4 transferring dockerfile: 273B done
+#4 DONE 0.1s
+
+#5 [aggregator_year_2025_3 internal] load build definition from Dockerfile
+#5 transferring dockerfile: 292B done
+#5 DONE 0.1s
+
+#6 [gateway internal] load build definition from Dockerfile
+#6 transferring dockerfile: 349B done
+#6 DONE 0.1s
+
+#7 [join_node internal] load build definition from Dockerfile
+#7 transferring dockerfile: 290B done
+#7 DONE 0.1s
+
+#8 [groupby_top_customers_1 internal] load build definition from Dockerfile
+#8 transferring dockerfile: 293B done
+#8 DONE 0.1s
+
+#9 [report_generator internal] load build definition from Dockerfile
+#9 transferring dockerfile: 355B done
+#9 DONE 0.2s
+
+#10 [report_generator internal] load metadata for docker.io/library/python:3.9-slim
+#10 DONE 0.8s
+
+#11 [filter_year_2 internal] load .dockerignore
+#11 transferring context: 2B done
+#11 DONE 0.0s
+
+#12 [filter_hour_3  1/10] FROM docker.io/library/python:3.9-slim@sha256:151b796af055298f244bc4d203bc19e19b0e63c8aa26c4fed2fc6809ea9b7caf
+#12 resolve docker.io/library/python:3.9-slim@sha256:151b796af055298f244bc4d203bc19e19b0e63c8aa26c4fed2fc6809ea9b7caf 0.0s done
+#12 DONE 0.0s
+
+#13 [aggregator_year_2024_2 internal] load build context
+#13 transferring context: 166.68kB 0.0s done
+#13 DONE 0.1s
+
+#14 [filter_hour_3 internal] load build context
+#14 transferring context: 174.96kB 0.0s done
+#14 DONE 0.1s
+
+#15 [client internal] load build context
+#15 transferring context: 88.58kB done
+#15 DONE 0.1s
+
+#16 [aggregator_year_2024_1  2/10] WORKDIR /app
+#16 CACHED
+
+#17 [groupby_semester_1 internal] load build context
+#17 transferring context: 163.19kB 0.0s done
+#17 DONE 0.1s
+
+#18 [report_generator internal] load build context
+#18 transferring context: 146.90kB done
+#18 DONE 0.1s
+
+#19 [report_generator 3/8] COPY requirements.txt .
+#19 DONE 0.1s
+
+#20 [join_node internal] load build context
+#20 transferring context: 166.72kB 0.0s done
+#20 DONE 0.2s
+
+#21 [gateway internal] load build context
+#21 transferring context: 160.85kB 0.0s done
+#21 DONE 0.2s
+
+#22 [client 3/6] COPY requirements.txt .
+#22 CACHED
+
+#23 [report_generator  3/10] COPY requirements.txt .
+#23 CACHED
+
+#24 [groupby_semester_2 3/8] COPY requirements.txt .
+#24 CACHED
+
+#25 [join_node 3/8] COPY requirements.txt .
+#25 CACHED
+
+#26 [filter_hour_1 3/8] COPY requirements.txt .
+#26 CACHED
+
+#27 [gateway 3/9] COPY requirements.txt .
+#27 CACHED
+
+#28 [filter_year_5 4/8] COPY ./server/filter/ .
+#28 DONE 0.1s
+
+#29 [join_node 4/8] COPY ./server/join/ .
+#29 DONE 0.1s
+
+#30 [client 4/6] COPY ./client/ .
+#30 DONE 0.2s
+
+#31 [groupby_top_customers_1 4/8] COPY ./server/groupby/ .
+#31 DONE 0.2s
+
+#32 [gateway 4/9] COPY ./server/gateway/ .
+#32 DONE 0.2s
+
+#33 [rabbitmq internal] load metadata for docker.io/library/rabbitmq:3.9.16-management-alpine
+#33 DONE 1.4s
+
+#34 [filter_amount_3 5/8] COPY ./rabbitmq/ ./rabbitmq/
+#34 DONE 0.2s
+
+#35 [join_node 5/8] COPY ./rabbitmq/ ./rabbitmq/
+#35 DONE 0.2s
+
+#36 [filter_year_4 6/8] COPY ./server/dtos/ ./dtos/
+#36 ...
+
+#37 [client 5/6] COPY common/ /app/common/
+#37 DONE 0.2s
+
+#38 [gateway 5/9] COPY ./rabbitmq/ ./rabbitmq/
+#38 DONE 0.2s
+
+#39 [groupby_best_selling_1 5/8] COPY ./rabbitmq/ ./rabbitmq/
+#39 DONE 0.2s
+
+#40 [rabbitmq internal] load .dockerignore
+#40 transferring context: 2B done
+#40 DONE 0.3s
+
+#36 [filter_amount_2 6/8] COPY ./server/dtos/ ./dtos/
+#36 DONE 0.2s
+
+#41 [join_node 6/8] COPY ./server/dtos/ ./dtos/
+#41 DONE 0.2s
+
+#42 [gateway 6/9] COPY common/ /app/common/
+#42 DONE 0.2s
+
+#43 [filter_hour_3 7/8] COPY common/ /app/common/
+#43 ...
+
+#44 [groupby_semester_2 6/8] COPY ./server/dtos/ ./dtos/
+#44 DONE 0.2s
+
+#43 [filter_year_1 7/8] COPY common/ /app/common/
+#43 DONE 0.2s
+
+#45 [join_node 7/8] COPY common/ /app/common/
+#45 DONE 0.2s
+
+#46 [gateway 7/9] COPY common/entities /app/entities
+#46 DONE 0.2s
+
+#47 [groupby_semester_2 7/8] COPY common/ /app/common/
+#47 DONE 0.2s
+
+#48 [filter_hour_2 8/8] RUN pip install --no-cache-dir -r requirements.txt
+#48 ...
+
+#49 [gateway 8/9] COPY ./server/dtos/ ./dtos/
+#49 DONE 0.2s
+
+#50 [rabbitmq 1/2] FROM docker.io/library/rabbitmq:3.9.16-management-alpine@sha256:3126a9d84c6061b21cc17531f1d417dbab3840158a5718c5c2ed17ddbab173c2
+#50 resolve docker.io/library/rabbitmq:3.9.16-management-alpine@sha256:3126a9d84c6061b21cc17531f1d417dbab3840158a5718c5c2ed17ddbab173c2 0.0s done
+#50 sha256:a65337662e8d11feb006a6e0ad97c41ac645522c9337aeb2cdc15048ea6338ca 14.40kB / 14.40kB done
+#50 sha256:df9b9388f04ad6279a7410b85cedfdcb2208c0a003da7ab5613af71079148139 2.81MB / 2.81MB 0.6s done
+#50 sha256:3126a9d84c6061b21cc17531f1d417dbab3840158a5718c5c2ed17ddbab173c2 1.65kB / 1.65kB done
+#50 sha256:367ecfcc737e874ea4275a24293e6d70a8c5ac59782d5eca8914b95b60682912 0B / 1.05MB 0.6s
+#50 sha256:23d2390758a14ac4d0a6f30575cf1387132f4eb1f21e2a12afb85b3a5203c809 0B / 46.99MB 0.6s
+#50 sha256:a2d501ba06ce9b5b4baa8f5be2f5d5561cf43c999cb6edf0c2399c642a96b21d 2.41kB / 2.41kB done
+#50 extracting sha256:df9b9388f04ad6279a7410b85cedfdcb2208c0a003da7ab5613af71079148139 0.1s
+#50 sha256:92f4b11a85e9cef11e70488447bed590c5bebb9cf1089dbd050962d1c54d2586 0B / 1.49kB 0.6s
+#50 sha256:367ecfcc737e874ea4275a24293e6d70a8c5ac59782d5eca8914b95b60682912 1.05MB / 1.05MB 0.7s done
+#50 extracting sha256:df9b9388f04ad6279a7410b85cedfdcb2208c0a003da7ab5613af71079148139 0.2s done
+#50 sha256:92f4b11a85e9cef11e70488447bed590c5bebb9cf1089dbd050962d1c54d2586 1.49kB / 1.49kB 0.8s done
+#50 sha256:c4e351d8d461bce6594f423bdb6bef8139480bd11171bd865665ef26897c7b6c 0B / 16.80MB 0.9s
+#50 sha256:a3c4aef59eb4920c85f670d9e5629757afc585a098a8dfba0c5456e5e3d5ae74 0B / 275B 0.9s
+#50 extracting sha256:367ecfcc737e874ea4275a24293e6d70a8c5ac59782d5eca8914b95b60682912 0.1s done
+#50 sha256:c4e351d8d461bce6594f423bdb6bef8139480bd11171bd865665ef26897c7b6c 2.10MB / 16.80MB 1.2s
+#50 sha256:c4e351d8d461bce6594f423bdb6bef8139480bd11171bd865665ef26897c7b6c 3.15MB / 16.80MB 1.6s
+#50 sha256:23d2390758a14ac4d0a6f30575cf1387132f4eb1f21e2a12afb85b3a5203c809 3.15MB / 46.99MB 1.8s
+#50 sha256:c4e351d8d461bce6594f423bdb6bef8139480bd11171bd865665ef26897c7b6c 4.19MB / 16.80MB 1.8s
+#50 sha256:c4e351d8d461bce6594f423bdb6bef8139480bd11171bd865665ef26897c7b6c 5.24MB / 16.80MB 1.9s
+#50 sha256:c4e351d8d461bce6594f423bdb6bef8139480bd11171bd865665ef26897c7b6c 6.29MB / 16.80MB 2.1s
+#50 sha256:23d2390758a14ac4d0a6f30575cf1387132f4eb1f21e2a12afb85b3a5203c809 6.29MB / 46.99MB 2.3s
+#50 sha256:c4e351d8d461bce6594f423bdb6bef8139480bd11171bd865665ef26897c7b6c 7.34MB / 16.80MB 2.3s
+#50 sha256:c4e351d8d461bce6594f423bdb6bef8139480bd11171bd865665ef26897c7b6c 8.39MB / 16.80MB 2.5s
+#50 sha256:c4e351d8d461bce6594f423bdb6bef8139480bd11171bd865665ef26897c7b6c 9.44MB / 16.80MB 2.6s
+#50 sha256:a3c4aef59eb4920c85f670d9e5629757afc585a098a8dfba0c5456e5e3d5ae74 275B / 275B 2.5s done
+#50 sha256:451e2549fa6da68381d6288d26113308bdf8f293ceec2f24f016f6011d273cb6 0B / 107B 2.6s
+#50 sha256:23d2390758a14ac4d0a6f30575cf1387132f4eb1f21e2a12afb85b3a5203c809 9.44MB / 46.99MB 2.7s
+#50 sha256:c4e351d8d461bce6594f423bdb6bef8139480bd11171bd865665ef26897c7b6c 10.49MB / 16.80MB 2.9s
+#50 sha256:c4e351d8d461bce6594f423bdb6bef8139480bd11171bd865665ef26897c7b6c 11.53MB / 16.80MB 3.0s
+#50 sha256:23d2390758a14ac4d0a6f30575cf1387132f4eb1f21e2a12afb85b3a5203c809 12.58MB / 46.99MB 3.2s
+#50 sha256:c4e351d8d461bce6594f423bdb6bef8139480bd11171bd865665ef26897c7b6c 12.58MB / 16.80MB 3.2s
+#50 sha256:451e2549fa6da68381d6288d26113308bdf8f293ceec2f24f016f6011d273cb6 107B / 107B 3.1s done
+#50 sha256:94a42f907d3fdf035038058ef2390839247da40acf669a1ba0f2c23d573bb618 0B / 501B 3.2s
+#50 sha256:c4e351d8d461bce6594f423bdb6bef8139480bd11171bd865665ef26897c7b6c 13.63MB / 16.80MB 3.4s
+#50 sha256:23d2390758a14ac4d0a6f30575cf1387132f4eb1f21e2a12afb85b3a5203c809 15.73MB / 46.99MB 3.6s
+#50 sha256:94a42f907d3fdf035038058ef2390839247da40acf669a1ba0f2c23d573bb618 501B / 501B 3.6s done
+#50 sha256:c4e351d8d461bce6594f423bdb6bef8139480bd11171bd865665ef26897c7b6c 14.68MB / 16.80MB 3.8s
+#50 sha256:36d1bbd9f27ad7ed64f05535a30802b17001432223afe2cf32779ed1c5af7e5e 0B / 833B 3.8s
+#50 sha256:c4e351d8d461bce6594f423bdb6bef8139480bd11171bd865665ef26897c7b6c 15.73MB / 16.80MB 3.9s
+#50 sha256:36d1bbd9f27ad7ed64f05535a30802b17001432223afe2cf32779ed1c5af7e5e 833B / 833B 3.8s done
+#50 sha256:ce7803317926eaa81089ea3c7433bfa0420d1a4581d7573a7dc8384ac3eed73b 0B / 14.41MB 3.9s
+#50 sha256:23d2390758a14ac4d0a6f30575cf1387132f4eb1f21e2a12afb85b3a5203c809 18.87MB / 46.99MB 4.1s
+#50 sha256:c4e351d8d461bce6594f423bdb6bef8139480bd11171bd865665ef26897c7b6c 16.80MB / 16.80MB 4.0s done
+#50 sha256:ce7803317926eaa81089ea3c7433bfa0420d1a4581d7573a7dc8384ac3eed73b 1.05MB / 14.41MB 4.4s
+#50 sha256:23d2390758a14ac4d0a6f30575cf1387132f4eb1f21e2a12afb85b3a5203c809 22.02MB / 46.99MB 4.6s
+#50 sha256:ce7803317926eaa81089ea3c7433bfa0420d1a4581d7573a7dc8384ac3eed73b 2.10MB / 14.41MB 4.6s
+#50 sha256:ce7803317926eaa81089ea3c7433bfa0420d1a4581d7573a7dc8384ac3eed73b 3.15MB / 14.41MB 4.8s
+#50 sha256:23d2390758a14ac4d0a6f30575cf1387132f4eb1f21e2a12afb85b3a5203c809 25.17MB / 46.99MB 5.0s
+#50 sha256:ce7803317926eaa81089ea3c7433bfa0420d1a4581d7573a7dc8384ac3eed73b 4.19MB / 14.41MB 5.2s
+#50 sha256:ce7803317926eaa81089ea3c7433bfa0420d1a4581d7573a7dc8384ac3eed73b 5.24MB / 14.41MB 5.3s
+#50 sha256:23d2390758a14ac4d0a6f30575cf1387132f4eb1f21e2a12afb85b3a5203c809 28.31MB / 46.99MB 5.6s
+#50 sha256:ce7803317926eaa81089ea3c7433bfa0420d1a4581d7573a7dc8384ac3eed73b 6.29MB / 14.41MB 5.6s
+#50 sha256:ce7803317926eaa81089ea3c7433bfa0420d1a4581d7573a7dc8384ac3eed73b 7.34MB / 14.41MB 5.7s
+#50 ...
+
+#48 [filter_hour_2 8/8] RUN pip install --no-cache-dir -r requirements.txt
+#48 5.584 Collecting pika>=1.3.2
+#48 5.730   Downloading pika-1.3.2-py3-none-any.whl (155 kB)
+#48 5.819      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 155.4/155.4 kB 1.8 MB/s eta 0:00:00
+#48 6.773 Collecting pandas>=2.3.3
+#48 6.944   Downloading pandas-2.3.3-cp39-cp39-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (12.8 MB)
+#48 ...
+
+#51 [report_generator  4/10] RUN pip install --no-cache-dir -r requirements.txt
+#51 5.663 Collecting pika>=1.3.2
+#51 5.844   Downloading pika-1.3.2-py3-none-any.whl (155 kB)
+#51 5.948      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 155.4/155.4 kB 1.6 MB/s eta 0:00:00
+#51 7.055 Collecting pandas>=2.3.3
+#51 7.103   Downloading pandas-2.3.3-cp39-cp39-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (12.8 MB)
+#51 ...
+
+#50 [rabbitmq 1/2] FROM docker.io/library/rabbitmq:3.9.16-management-alpine@sha256:3126a9d84c6061b21cc17531f1d417dbab3840158a5718c5c2ed17ddbab173c2
+#50 sha256:23d2390758a14ac4d0a6f30575cf1387132f4eb1f21e2a12afb85b3a5203c809 40.89MB / 46.99MB 9.7s
+#50 sha256:ce7803317926eaa81089ea3c7433bfa0420d1a4581d7573a7dc8384ac3eed73b 14.41MB / 14.41MB 8.2s done
+#50 ...
+
+#52 [client 6/6] RUN pip install --no-cache-dir -r requirements.txt
+#52 5.367 Collecting pika>=1.3.2
+#52 5.530   Downloading pika-1.3.2-py3-none-any.whl (155 kB)
+#52 5.644      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 155.4/155.4 kB 1.4 MB/s eta 0:00:00
+#52 6.760 Collecting pandas>=2.3.3
+#52 6.834   Downloading pandas-2.3.3-cp39-cp39-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (12.8 MB)
+#52 ...
+
+#50 [rabbitmq 1/2] FROM docker.io/library/rabbitmq:3.9.16-management-alpine@sha256:3126a9d84c6061b21cc17531f1d417dbab3840158a5718c5c2ed17ddbab173c2
+#50 ...
+
+#53 [groupby_best_selling_2 8/8] RUN pip install --no-cache-dir -r requirements.txt
+#53 5.867 Collecting pika>=1.3.2
+#53 6.030   Downloading pika-1.3.2-py3-none-any.whl (155 kB)
+#53 6.142      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 155.4/155.4 kB 1.4 MB/s eta 0:00:00
+#53 7.068 Collecting pandas>=2.3.3
+#53 7.132   Downloading pandas-2.3.3-cp39-cp39-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (12.8 MB)
+#53 ...
+
+#54 [join_node 8/8] RUN pip install --no-cache-dir -r requirements.txt
+#54 5.744 Collecting pika>=1.3.2
+#54 5.904   Downloading pika-1.3.2-py3-none-any.whl (155 kB)
+#54 6.013      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 155.4/155.4 kB 1.5 MB/s eta 0:00:00
+#54 6.920 Collecting pandas>=2.3.3
+#54 7.042   Downloading pandas-2.3.3-cp39-cp39-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (12.8 MB)
+#54 ...
+
+#55 [gateway 9/9] RUN pip install --no-cache-dir -r requirements.txt
+#55 5.758 Collecting pika>=1.3.2
+#55 5.937   Downloading pika-1.3.2-py3-none-any.whl (155 kB)
+#55 6.054      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 155.4/155.4 kB 1.4 MB/s eta 0:00:00
+#55 7.414 Collecting pandas>=2.3.3
+#55 7.502   Downloading pandas-2.3.3-cp39-cp39-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (12.8 MB)
+#55 ...
+
+#50 [rabbitmq 1/2] FROM docker.io/library/rabbitmq:3.9.16-management-alpine@sha256:3126a9d84c6061b21cc17531f1d417dbab3840158a5718c5c2ed17ddbab173c2
+#50 sha256:23d2390758a14ac4d0a6f30575cf1387132f4eb1f21e2a12afb85b3a5203c809 44.04MB / 46.99MB 10.7s
+#50 sha256:23d2390758a14ac4d0a6f30575cf1387132f4eb1f21e2a12afb85b3a5203c809 46.99MB / 46.99MB 11.3s done
+#50 extracting sha256:23d2390758a14ac4d0a6f30575cf1387132f4eb1f21e2a12afb85b3a5203c809 0.1s
+#50 extracting sha256:23d2390758a14ac4d0a6f30575cf1387132f4eb1f21e2a12afb85b3a5203c809 1.3s done
+#50 extracting sha256:92f4b11a85e9cef11e70488447bed590c5bebb9cf1089dbd050962d1c54d2586 done
+#50 extracting sha256:c4e351d8d461bce6594f423bdb6bef8139480bd11171bd865665ef26897c7b6c 0.1s
+#50 extracting sha256:c4e351d8d461bce6594f423bdb6bef8139480bd11171bd865665ef26897c7b6c 0.6s done
+#50 extracting sha256:a3c4aef59eb4920c85f670d9e5629757afc585a098a8dfba0c5456e5e3d5ae74
+#50 extracting sha256:a3c4aef59eb4920c85f670d9e5629757afc585a098a8dfba0c5456e5e3d5ae74 done
+#50 extracting sha256:451e2549fa6da68381d6288d26113308bdf8f293ceec2f24f016f6011d273cb6 done
+#50 extracting sha256:94a42f907d3fdf035038058ef2390839247da40acf669a1ba0f2c23d573bb618 done
+#50 extracting sha256:36d1bbd9f27ad7ed64f05535a30802b17001432223afe2cf32779ed1c5af7e5e done
+#50 extracting sha256:ce7803317926eaa81089ea3c7433bfa0420d1a4581d7573a7dc8384ac3eed73b 0.1s
+#50 extracting sha256:ce7803317926eaa81089ea3c7433bfa0420d1a4581d7573a7dc8384ac3eed73b 1.2s done
+#50 DONE 14.9s
+
+#56 [rabbitmq 2/2] RUN apk update && apk add curl
+#56 0.379 fetch https://dl-cdn.alpinelinux.org/alpine/v3.15/main/x86_64/APKINDEX.tar.gz
+#56 1.020 fetch https://dl-cdn.alpinelinux.org/alpine/v3.15/community/x86_64/APKINDEX.tar.gz
+#56 1.891 v3.15.11-13-gfc6cef18272 [https://dl-cdn.alpinelinux.org/alpine/v3.15/main]
+#56 1.892 v3.15.10-165-g73b5f3b6fbe [https://dl-cdn.alpinelinux.org/alpine/v3.15/community]
+#56 1.892 OK: 15872 distinct packages available
+#56 2.552 (1/5) Installing ca-certificates (20230506-r0)
+#56 2.847 (2/5) Installing brotli-libs (1.0.9-r5)
+#56 2.950 (3/5) Installing nghttp2-libs (1.46.0-r2)
+#56 2.987 (4/5) Installing libcurl (8.5.0-r0)
+#56 3.048 (5/5) Installing curl (8.5.0-r0)
+#56 3.106 Executing busybox-1.34.1-r5.trigger
+#56 3.118 Executing ca-certificates-20230506-r0.trigger
+#56 3.183 OK: 60 MiB in 38 packages
+#56 DONE 3.5s
+
+#52 [client 6/6] RUN pip install --no-cache-dir -r requirements.txt
+#52 16.52      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.8/12.8 MB 2.1 MB/s eta 0:00:00
+#52 16.95 Collecting pytest>=8.4.2
+#52 17.11   Downloading pytest-8.4.2-py3-none-any.whl (365 kB)
+#52 17.25      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 365.8/365.8 kB 2.6 MB/s eta 0:00:00
+#52 17.77 Collecting pytz>=2020.1
+#52 17.79   Downloading pytz-2025.2-py2.py3-none-any.whl (509 kB)
+#52 17.99      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 509.2/509.2 kB 2.6 MB/s eta 0:00:00
+#52 18.09 Collecting python-dateutil>=2.8.2
+#52 18.12   Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+#52 18.21      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 229.9/229.9 kB 3.2 MB/s eta 0:00:00
+#52 ...
+
+#57 [rabbitmq] exporting to image
+#57 exporting layers 0.1s done
+#57 writing image sha256:066af1ed7aa03e3aaa7a481ad341d3ca5d65842b96571696d441e4c6dd1dbc42 done
+#57 naming to docker.io/library/coffee-shop-analysis-rabbitmq done
+#57 DONE 0.1s
+
+#58 [rabbitmq] resolving provenance for metadata file
+#58 DONE 0.0s
+
+#54 [join_node 8/8] RUN pip install --no-cache-dir -r requirements.txt
+#54 15.51      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.8/12.8 MB 1.9 MB/s eta 0:00:00
+#54 16.00 Collecting pytest>=8.4.2
+#54 16.07   Downloading pytest-8.4.2-py3-none-any.whl (365 kB)
+#54 16.16      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 365.8/365.8 kB 4.4 MB/s eta 0:00:00
+#54 16.57 Collecting python-dateutil>=2.8.2
+#54 16.59   Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+#54 16.65      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 229.9/229.9 kB 4.8 MB/s eta 0:00:00
+#54 16.76 Collecting tzdata>=2022.7
+#54 16.78   Downloading tzdata-2025.2-py2.py3-none-any.whl (347 kB)
+#54 16.85      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 347.8/347.8 kB 5.9 MB/s eta 0:00:00
+#54 17.14 Collecting pytz>=2020.1
+#54 17.18   Downloading pytz-2025.2-py2.py3-none-any.whl (509 kB)
+#54 17.36      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 509.2/509.2 kB 2.9 MB/s eta 0:00:00
+#54 18.92 Collecting numpy>=1.22.4
+#54 18.97   Downloading numpy-2.0.2-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (19.5 MB)
+#54 ...
+
+#55 [gateway 9/9] RUN pip install --no-cache-dir -r requirements.txt
+#55 12.99      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.8/12.8 MB 2.3 MB/s eta 0:00:00
+#55 13.60 Collecting pytest>=8.4.2
+#55 13.64   Downloading pytest-8.4.2-py3-none-any.whl (365 kB)
+#55 13.81      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 365.8/365.8 kB 2.1 MB/s eta 0:00:00
+#55 14.51 Collecting pytz>=2020.1
+#55 14.54   Downloading pytz-2025.2-py2.py3-none-any.whl (509 kB)
+#55 14.77      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 509.2/509.2 kB 2.3 MB/s eta 0:00:00
+#55 14.89 Collecting tzdata>=2022.7
+#55 14.94   Downloading tzdata-2025.2-py2.py3-none-any.whl (347 kB)
+#55 15.07      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 347.8/347.8 kB 2.8 MB/s eta 0:00:00
+#55 16.81 Collecting numpy>=1.22.4
+#55 16.84   Downloading numpy-2.0.2-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (19.5 MB)
+#55 ...
+
+#48 [filter_hour_2 8/8] RUN pip install --no-cache-dir -r requirements.txt
+#48 14.56      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.8/12.8 MB 1.7 MB/s eta 0:00:00
+#48 15.10 Collecting pytest>=8.4.2
+#48 15.14   Downloading pytest-8.4.2-py3-none-any.whl (365 kB)
+#48 15.27      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 365.8/365.8 kB 2.9 MB/s eta 0:00:00
+#48 15.71 Collecting pytz>=2020.1
+#48 15.76   Downloading pytz-2025.2-py2.py3-none-any.whl (509 kB)
+#48 15.92      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 509.2/509.2 kB 3.1 MB/s eta 0:00:00
+#48 16.06 Collecting python-dateutil>=2.8.2
+#48 16.10   Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+#48 16.16      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 229.9/229.9 kB 4.6 MB/s eta 0:00:00
+#48 16.26 Collecting tzdata>=2022.7
+#48 16.29   Downloading tzdata-2025.2-py2.py3-none-any.whl (347 kB)
+#48 16.39      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 347.8/347.8 kB 3.9 MB/s eta 0:00:00
+#48 17.80 Collecting numpy>=1.22.4
+#48 17.83   Downloading numpy-2.0.2-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (19.5 MB)
+#48 ...
+
+#51 [report_generator  4/10] RUN pip install --no-cache-dir -r requirements.txt
+#51 15.70      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.8/12.8 MB 1.7 MB/s eta 0:00:00
+#51 16.06 Collecting pytest>=8.4.2
+#51 16.09   Downloading pytest-8.4.2-py3-none-any.whl (365 kB)
+#51 16.25      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 365.8/365.8 kB 2.2 MB/s eta 0:00:00
+#51 18.15 Collecting numpy>=1.22.4
+#51 18.18   Downloading numpy-2.0.2-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (19.5 MB)
+#51 ...
+
+#53 [groupby_best_selling_2 8/8] RUN pip install --no-cache-dir -r requirements.txt
+#53 15.11      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.8/12.8 MB 1.8 MB/s eta 0:00:00
+#53 15.60 Collecting pytest>=8.4.2
+#53 15.63   Downloading pytest-8.4.2-py3-none-any.whl (365 kB)
+#53 15.75      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 365.8/365.8 kB 3.1 MB/s eta 0:00:00
+#53 16.08 Collecting python-dateutil>=2.8.2
+#53 16.11   Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+#53 16.16      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 229.9/229.9 kB 4.8 MB/s eta 0:00:00
+#53 18.28 Collecting numpy>=1.22.4
+#53 18.32   Downloading numpy-2.0.2-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (19.5 MB)
+#53 ...
+
+#55 [gateway 9/9] RUN pip install --no-cache-dir -r requirements.txt
+#55 26.07      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 19.5/19.5 MB 1.9 MB/s eta 0:00:00
+#55 26.35 Collecting python-dateutil>=2.8.2
+#55 26.40   Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+#55 26.52      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 229.9/229.9 kB 1.9 MB/s eta 0:00:00
+#55 26.61 Collecting iniconfig>=1
+#55 26.65   Downloading iniconfig-2.1.0-py3-none-any.whl (6.0 kB)
+#55 26.76 Collecting packaging>=20
+#55 26.80   Downloading packaging-25.0-py3-none-any.whl (66 kB)
+#55 26.84      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 66.5/66.5 kB 1.8 MB/s eta 0:00:00
+#55 26.97 Collecting tomli>=1
+#55 27.00   Downloading tomli-2.2.1-py3-none-any.whl (14 kB)
+#55 27.07 Collecting exceptiongroup>=1
+#55 27.10   Downloading exceptiongroup-1.3.0-py3-none-any.whl (16 kB)
+#55 27.20 Collecting pluggy<2,>=1.5
+#55 27.25   Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
+#55 27.39 Collecting pygments>=2.7.2
+#55 27.41   Downloading pygments-2.19.2-py3-none-any.whl (1.2 MB)
+#55 27.82      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 3.1 MB/s eta 0:00:00
+#55 27.94 Collecting typing-extensions>=4.6.0
+#55 27.97   Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+#55 27.98      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 44.6/44.6 kB 3.1 MB/s eta 0:00:00
+#55 28.09 Collecting six>=1.5
+#55 28.13   Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+#55 28.55 Installing collected packages: pytz, tzdata, typing-extensions, tomli, six, pygments, pluggy, pika, packaging, numpy, iniconfig, python-dateutil, exceptiongroup, pytest, pandas
+#55 ...
+
+#52 [client 6/6] RUN pip install --no-cache-dir -r requirements.txt
+#52 19.59 Collecting numpy>=1.22.4
+#52 19.65   Downloading numpy-2.0.2-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (19.5 MB)
+#52 29.45      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 19.5/19.5 MB 2.8 MB/s eta 0:00:00
+#52 29.69 Collecting tzdata>=2022.7
+#52 29.71   Downloading tzdata-2025.2-py2.py3-none-any.whl (347 kB)
+#52 29.78      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 347.8/347.8 kB 6.1 MB/s eta 0:00:00
+#52 ...
+
+#51 [report_generator  4/10] RUN pip install --no-cache-dir -r requirements.txt
+#51 27.82      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 19.5/19.5 MB 1.9 MB/s eta 0:00:00
+#51 28.10 Collecting pytz>=2020.1
+#51 28.13   Downloading pytz-2025.2-py2.py3-none-any.whl (509 kB)
+#51 28.32      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 509.2/509.2 kB 2.7 MB/s eta 0:00:00
+#51 28.46 Collecting python-dateutil>=2.8.2
+#51 28.49   Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+#51 28.58      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 229.9/229.9 kB 3.1 MB/s eta 0:00:00
+#51 28.67 Collecting tzdata>=2022.7
+#51 28.70   Downloading tzdata-2025.2-py2.py3-none-any.whl (347 kB)
+#51 28.82      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 347.8/347.8 kB 3.2 MB/s eta 0:00:00
+#51 28.93 Collecting tomli>=1
+#51 28.97   Downloading tomli-2.2.1-py3-none-any.whl (14 kB)
+#51 29.06 Collecting pluggy<2,>=1.5
+#51 29.11   Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
+#51 29.18 Collecting iniconfig>=1
+#51 29.21   Downloading iniconfig-2.1.0-py3-none-any.whl (6.0 kB)
+#51 29.34 Collecting pygments>=2.7.2
+#51 29.38   Downloading pygments-2.19.2-py3-none-any.whl (1.2 MB)
+#51 29.74      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 3.5 MB/s eta 0:00:00
+#51 29.86 Collecting packaging>=20
+#51 29.89   Downloading packaging-25.0-py3-none-any.whl (66 kB)
+#51 29.91      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 66.5/66.5 kB 5.9 MB/s eta 0:00:00
+#51 29.97 Collecting exceptiongroup>=1
+#51 29.99   Downloading exceptiongroup-1.3.0-py3-none-any.whl (16 kB)
+#51 30.13 Collecting typing-extensions>=4.6.0
+#51 30.16   Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+#51 30.17      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 44.6/44.6 kB 12.8 MB/s eta 0:00:00
+#51 30.32 Collecting six>=1.5
+#51 30.34   Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+#51 30.92 Installing collected packages: pytz, tzdata, typing-extensions, tomli, six, pygments, pluggy, pika, packaging, numpy, iniconfig, python-dateutil, exceptiongroup, pytest, pandas
+#51 ...
+
+#53 [groupby_best_selling_2 8/8] RUN pip install --no-cache-dir -r requirements.txt
+#53 26.70      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 19.5/19.5 MB 2.4 MB/s eta 0:00:00
+#53 26.97 Collecting tzdata>=2022.7
+#53 27.04   Downloading tzdata-2025.2-py2.py3-none-any.whl (347 kB)
+#53 27.16      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 347.8/347.8 kB 3.5 MB/s eta 0:00:00
+#53 27.40 Collecting pytz>=2020.1
+#53 27.44   Downloading pytz-2025.2-py2.py3-none-any.whl (509 kB)
+#53 27.57      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 509.2/509.2 kB 4.2 MB/s eta 0:00:00
+#53 27.72 Collecting packaging>=20
+#53 27.75   Downloading packaging-25.0-py3-none-any.whl (66 kB)
+#53 27.77      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 66.5/66.5 kB 5.4 MB/s eta 0:00:00
+#53 27.86 Collecting tomli>=1
+#53 27.89   Downloading tomli-2.2.1-py3-none-any.whl (14 kB)
+#53 28.03 Collecting pluggy<2,>=1.5
+#53 28.06   Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
+#53 28.18 Collecting pygments>=2.7.2
+#53 28.21   Downloading pygments-2.19.2-py3-none-any.whl (1.2 MB)
+#53 28.54      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 3.7 MB/s eta 0:00:00
+#53 28.62 Collecting iniconfig>=1
+#53 28.65   Downloading iniconfig-2.1.0-py3-none-any.whl (6.0 kB)
+#53 28.72 Collecting exceptiongroup>=1
+#53 28.75   Downloading exceptiongroup-1.3.0-py3-none-any.whl (16 kB)
+#53 28.87 Collecting typing-extensions>=4.6.0
+#53 28.90   Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+#53 28.90      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 44.6/44.6 kB 71.2 MB/s eta 0:00:00
+#53 28.99 Collecting six>=1.5
+#53 29.05   Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+#53 29.58 Installing collected packages: pytz, tzdata, typing-extensions, tomli, six, pygments, pluggy, pika, packaging, numpy, iniconfig, python-dateutil, exceptiongroup, pytest, pandas
+#53 ...
+
+#48 [filter_hour_2 8/8] RUN pip install --no-cache-dir -r requirements.txt
+#48 26.99      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 19.5/19.5 MB 2.0 MB/s eta 0:00:00
+#48 27.20 Collecting exceptiongroup>=1
+#48 27.22   Downloading exceptiongroup-1.3.0-py3-none-any.whl (16 kB)
+#48 27.35 Collecting pluggy<2,>=1.5
+#48 27.38   Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
+#48 27.46 Collecting iniconfig>=1
+#48 27.50   Downloading iniconfig-2.1.0-py3-none-any.whl (6.0 kB)
+#48 27.60 Collecting tomli>=1
+#48 27.63   Downloading tomli-2.2.1-py3-none-any.whl (14 kB)
+#48 27.85 Collecting packaging>=20
+#48 27.88   Downloading packaging-25.0-py3-none-any.whl (66 kB)
+#48 27.92      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 66.5/66.5 kB 1.8 MB/s eta 0:00:00
+#48 28.04 Collecting pygments>=2.7.2
+#48 28.07   Downloading pygments-2.19.2-py3-none-any.whl (1.2 MB)
+#48 28.44      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 3.3 MB/s eta 0:00:00
+#48 28.61 Collecting typing-extensions>=4.6.0
+#48 28.64   Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+#48 28.67      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 44.6/44.6 kB 3.7 MB/s eta 0:00:00
+#48 28.81 Collecting six>=1.5
+#48 28.85   Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+#48 29.25 Installing collected packages: pytz, tzdata, typing-extensions, tomli, six, pygments, pluggy, pika, packaging, numpy, iniconfig, python-dateutil, exceptiongroup, pytest, pandas
+#48 ...
+
+#52 [client 6/6] RUN pip install --no-cache-dir -r requirements.txt
+#52 29.90 Collecting iniconfig>=1
+#52 29.93   Downloading iniconfig-2.1.0-py3-none-any.whl (6.0 kB)
+#52 30.16 Collecting packaging>=20
+#52 30.19   Downloading packaging-25.0-py3-none-any.whl (66 kB)
+#52 30.21      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 66.5/66.5 kB 3.0 MB/s eta 0:00:00
+#52 30.32 Collecting pluggy<2,>=1.5
+#52 30.34   Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
+#52 30.43 Collecting tomli>=1
+#52 30.45   Downloading tomli-2.2.1-py3-none-any.whl (14 kB)
+#52 30.61 Collecting exceptiongroup>=1
+#52 30.63   Downloading exceptiongroup-1.3.0-py3-none-any.whl (16 kB)
+#52 30.79 Collecting pygments>=2.7.2
+#52 30.94   Downloading pygments-2.19.2-py3-none-any.whl (1.2 MB)
+#52 31.44      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 2.4 MB/s eta 0:00:00
+#52 31.62 Collecting typing-extensions>=4.6.0
+#52 31.64   Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+#52 31.66      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 44.6/44.6 kB 5.2 MB/s eta 0:00:00
+#52 31.81 Collecting six>=1.5
+#52 31.83   Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+#52 32.39 Installing collected packages: pytz, tzdata, typing-extensions, tomli, six, pygments, pluggy, pika, packaging, numpy, iniconfig, python-dateutil, exceptiongroup, pytest, pandas
+#52 ...
+
+#54 [join_node 8/8] RUN pip install --no-cache-dir -r requirements.txt
+#54 28.34      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 19.5/19.5 MB 2.2 MB/s eta 0:00:00
+#54 28.60 Collecting packaging>=20
+#54 28.62   Downloading packaging-25.0-py3-none-any.whl (66 kB)
+#54 28.66      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 66.5/66.5 kB 3.3 MB/s eta 0:00:00
+#54 28.75 Collecting tomli>=1
+#54 28.77   Downloading tomli-2.2.1-py3-none-any.whl (14 kB)
+#54 28.83 Collecting iniconfig>=1
+#54 28.86   Downloading iniconfig-2.1.0-py3-none-any.whl (6.0 kB)
+#54 29.25 Collecting exceptiongroup>=1
+#54 29.28   Downloading exceptiongroup-1.3.0-py3-none-any.whl (16 kB)
+#54 29.38 Collecting pluggy<2,>=1.5
+#54 29.40   Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
+#54 29.50 Collecting pygments>=2.7.2
+#54 29.52   Downloading pygments-2.19.2-py3-none-any.whl (1.2 MB)
+#54 29.81      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 4.4 MB/s eta 0:00:00
+#54 29.94 Collecting typing-extensions>=4.6.0
+#54 29.97   Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+#54 29.98      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 44.6/44.6 kB 4.6 MB/s eta 0:00:00
+#54 30.18 Collecting six>=1.5
+#54 30.21   Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+#54 30.88 Installing collected packages: pytz, tzdata, typing-extensions, tomli, six, pygments, pluggy, pika, packaging, numpy, iniconfig, python-dateutil, exceptiongroup, pytest, pandas
+#54 ...
+
+#53 [groupby_best_selling_2 8/8] RUN pip install --no-cache-dir -r requirements.txt
+#53 45.77 Successfully installed exceptiongroup-1.3.0 iniconfig-2.1.0 numpy-2.0.2 packaging-25.0 pandas-2.3.3 pika-1.3.2 pluggy-1.6.0 pygments-2.19.2 pytest-8.4.2 python-dateutil-2.9.0.post0 pytz-2025.2 six-1.17.0 tomli-2.2.1 typing-extensions-4.15.0 tzdata-2025.2
+#53 45.78 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#53 46.14 
+#53 46.14 [notice] A new release of pip is available: 23.0.1 -> 25.2
+#53 46.14 [notice] To update, run: pip install --upgrade pip
+#53 DONE 47.6s
+
+#55 [gateway 9/9] RUN pip install --no-cache-dir -r requirements.txt
+#55 46.04 Successfully installed exceptiongroup-1.3.0 iniconfig-2.1.0 numpy-2.0.2 packaging-25.0 pandas-2.3.3 pika-1.3.2 pluggy-1.6.0 pygments-2.19.2 pytest-8.4.2 python-dateutil-2.9.0.post0 pytz-2025.2 six-1.17.0 tomli-2.2.1 typing-extensions-4.15.0 tzdata-2025.2
+#55 46.04 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#55 46.48 
+#55 46.48 [notice] A new release of pip is available: 23.0.1 -> 25.2
+#55 46.48 [notice] To update, run: pip install --upgrade pip
+#55 DONE 47.5s
+
+#59 [gateway] exporting to image
+#59 exporting layers
+#59 ...
+
+#48 [filter_hour_2 8/8] RUN pip install --no-cache-dir -r requirements.txt
+#48 49.44 Successfully installed exceptiongroup-1.3.0 iniconfig-2.1.0 numpy-2.0.2 packaging-25.0 pandas-2.3.3 pika-1.3.2 pluggy-1.6.0 pygments-2.19.2 pytest-8.4.2 python-dateutil-2.9.0.post0 pytz-2025.2 six-1.17.0 tomli-2.2.1 typing-extensions-4.15.0 tzdata-2025.2
+#48 49.44 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#48 49.87 
+#48 49.87 [notice] A new release of pip is available: 23.0.1 -> 25.2
+#48 49.87 [notice] To update, run: pip install --upgrade pip
+#48 DONE 50.3s
+
+#60 [filter_hour_2] exporting to image
+#60 ...
+
+#61 [groupby_best_selling_1] exporting to image
+#61 exporting layers 2.9s done
+#61 writing image sha256:bb52166be007bafbb39e5564554792acd462dc2dd65ee4cc1d4dfd7c32be43e0 done
+#61 naming to docker.io/library/coffee-shop-analysis-groupby_best_selling_1 0.0s done
+#61 DONE 2.9s
+
+#62 [groupby_best_selling_2] exporting to image
+#62 exporting layers 2.9s done
+#62 writing image sha256:4eb05df5b14773fd2efc22b2b5dc232e54457518beb6c90e49045d5eac478bf5 done
+#62 naming to docker.io/library/coffee-shop-analysis-groupby_best_selling_2 0.0s done
+#62 DONE 2.9s
+
+#63 [groupby_semester_2] exporting to image
+#63 exporting layers 2.9s done
+#63 writing image sha256:205e299be560ab56cc1de913541bc04a7107ec94f2d6889e0594684633951e5b 0.0s done
+#63 naming to docker.io/library/coffee-shop-analysis-groupby_semester_2 0.0s done
+#63 DONE 3.0s
+
+#64 [groupby_top_customers_1] exporting to image
+#64 exporting layers 2.9s done
+#64 writing image sha256:654a6bd2fc7ea1281274517bf51cf228dd32b1bb5da3492ec47388d6ee92b5b2 0.0s done
+#64 naming to docker.io/library/coffee-shop-analysis-groupby_top_customers_1 0.0s done
+#64 DONE 3.0s
+
+#65 [groupby_semester_1] exporting to image
+#65 exporting layers 2.9s done
+#65 writing image sha256:194a2a8c093c5c3e562df38a560b0c6b23d7aab4ae121375426fded5a24a9ea0 done
+#65 naming to docker.io/library/coffee-shop-analysis-groupby_semester_1 0.0s done
+#65 DONE 3.0s
+
+#59 [gateway] exporting to image
+#59 exporting layers 2.9s done
+#59 writing image sha256:92a7a79e15a389fcbe8cd2f51da40f61441bd8c076edb0651fd391b311c78051 done
+#59 naming to docker.io/library/coffee-shop-analysis-gateway done
+#59 DONE 3.0s
+
+#66 [groupby_best_selling_2] resolving provenance for metadata file
+#66 DONE 0.2s
+
+#67 [groupby_semester_1] resolving provenance for metadata file
+#67 DONE 0.0s
+
+#68 [groupby_best_selling_1] resolving provenance for metadata file
+#68 DONE 0.1s
+
+#69 [groupby_top_customers_1] resolving provenance for metadata file
+#69 DONE 0.1s
+
+#70 [groupby_semester_2] resolving provenance for metadata file
+#70 DONE 0.1s
+
+#71 [gateway] resolving provenance for metadata file
+#71 DONE 0.0s
+
+#51 [report_generator  4/10] RUN pip install --no-cache-dir -r requirements.txt
+#51 51.41 Successfully installed exceptiongroup-1.3.0 iniconfig-2.1.0 numpy-2.0.2 packaging-25.0 pandas-2.3.3 pika-1.3.2 pluggy-1.6.0 pygments-2.19.2 pytest-8.4.2 python-dateutil-2.9.0.post0 pytz-2025.2 six-1.17.0 tomli-2.2.1 typing-extensions-4.15.0 tzdata-2025.2
+#51 51.41 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#51 51.81 
+#51 51.81 [notice] A new release of pip is available: 23.0.1 -> 25.2
+#51 51.81 [notice] To update, run: pip install --upgrade pip
+#51 DONE 52.2s
+
+#72 [aggregator_year_2024_1 4/8] RUN pip install --no-cache-dir -r requirements.txt
+#72 CACHED
+
+#73 [aggregator_best_selling_final 5/8] COPY common/ /app/common/
+#73 DONE 0.1s
+
+#74 [report_generator  5/10] COPY rabbitmq/ ./rabbitmq/
+#74 DONE 0.1s
+
+#75 [top_consumers_aggregator_final 6/8] COPY ./rabbitmq /app/rabbitmq
+#75 DONE 0.1s
+
+#76 [report_generator  6/10] COPY server/report_generator/ ./
+#76 DONE 0.1s
+
+#77 [aggregator_best_selling_final 7/8] COPY ./server/aggregator /app/
+#77 DONE 0.1s
+
+#78 [report_generator  7/10] COPY server/config.ini ./config.ini
+#78 DONE 0.1s
+
+#79 [aggregator_year_2024_3 8/8] COPY ./server/dtos/ ./dtos/
+#79 DONE 0.1s
+
+#80 [report_generator  8/10] COPY ./server/dtos/ ./dtos/
+#80 DONE 0.1s
+
+#81 [report_generator  9/10] COPY common/ /app/common/
+#81 DONE 0.1s
+
+#82 [top_consumers_aggregator_1] exporting to image
+#82 ...
+
+#83 [report_generator 10/10] RUN mkdir -p /app/reports
+#83 DONE 0.3s
+
+#84 [report_generator] exporting to image
+#84 ...
+
+#85 [filter_hour_3] exporting to image
+#85 exporting layers 2.7s done
+#85 writing image sha256:821ac59a5a6d7ef446a495e86dafcea99953066515c531e00eb400ade3dd71f3 done
+#85 naming to docker.io/library/coffee-shop-analysis-filter_hour_3 0.0s done
+#85 DONE 2.7s
+
+#86 [filter_amount_2] exporting to image
+#86 exporting layers 2.7s done
+#86 writing image sha256:3be1d0d3c63d1462a8798cea855d36e715a02302fbc093328e5fda6bff57b915 done
+#86 naming to docker.io/library/coffee-shop-analysis-filter_amount_2 0.0s done
+#86 DONE 2.8s
+
+#87 [filter_year_2] exporting to image
+#87 exporting layers 2.7s done
+#87 writing image sha256:f3cf9be68272a0d1e7a30efffed04c2b070d39af9e60fef3726b7f234e331e9d done
+#87 naming to docker.io/library/coffee-shop-analysis-filter_year_2 0.0s done
+#87 DONE 2.8s
+
+#88 [filter_year_5] exporting to image
+#88 exporting layers 2.7s done
+#88 writing image sha256:2cb94e356255155634a04f764c32a74c0ff5d7038c505bb3f039fa07b36105c7 0.0s done
+#88 naming to docker.io/library/coffee-shop-analysis-filter_year_5 0.0s done
+#88 DONE 2.8s
+
+#89 [filter_year_4] exporting to image
+#89 exporting layers 2.6s done
+#89 writing image sha256:3e9c98d9c569625101dc7101f2fe5fc99dee882a009e130360f9b516aa880fb6 0.0s done
+#89 naming to docker.io/library/coffee-shop-analysis-filter_year_4 0.0s done
+#89 DONE 2.8s
+
+#90 [filter_amount_3] exporting to image
+#90 exporting layers 2.7s done
+#90 writing image sha256:4e76355068ec5cd33ef22f4ab22a37b36c127a578b5f8e63e3b0fd5c94f7037e 0.0s done
+#90 naming to docker.io/library/coffee-shop-analysis-filter_amount_3 0.0s done
+#90 DONE 2.8s
+
+#91 [filter_amount_1] exporting to image
+#91 exporting layers 2.6s done
+#91 writing image sha256:388e39a3c278509930dec43d2994a555a8e79c52d9e43dddf93bbb503a0e4f3b 0.0s done
+#91 naming to docker.io/library/coffee-shop-analysis-filter_amount_1 0.0s done
+#91 DONE 2.8s
+
+#92 [filter_year_3] exporting to image
+#92 exporting layers 2.6s done
+#92 writing image sha256:400a92360cd1f15ea2f3cfdb86d3e71b2853f23ba61446bafc87b312c4cfa0ff 0.0s done
+#92 naming to docker.io/library/coffee-shop-analysis-filter_year_3 0.0s done
+#92 DONE 2.8s
+
+#93 [filter_year_1] exporting to image
+#93 exporting layers 2.6s done
+#93 writing image sha256:90d5f63ddfe593967ff859542bb2017f2c78d368929eaeccaf465ea39202edf3 0.0s done
+#93 naming to docker.io/library/coffee-shop-analysis-filter_year_1 0.0s done
+#93 DONE 2.8s
+
+#60 [filter_hour_2] exporting to image
+#60 exporting layers 2.6s done
+#60 writing image sha256:b54163ce6d0a1848c5fa8ae8c9da0e3e39080055e7bdb0e68aaf5e31948150c5 0.0s done
+#60 naming to docker.io/library/coffee-shop-analysis-filter_hour_2 0.0s done
+#60 DONE 2.8s
+
+#94 [filter_year_6] exporting to image
+#94 exporting layers 2.6s done
+#94 writing image sha256:b83da3b49472fa107df95d797b1440c55438d7be6499aacadb440c2f39aa41cc 0.0s done
+#94 naming to docker.io/library/coffee-shop-analysis-filter_year_6 0.0s done
+#94 DONE 2.8s
+
+#95 [filter_hour_1] exporting to image
+#95 exporting layers 2.6s done
+#95 writing image sha256:c83b304264da142db48c823978c12cf248df3fa0a1059d4b594aa0fb8a14807c 0.0s done
+#95 naming to docker.io/library/coffee-shop-analysis-filter_hour_1 0.0s done
+#95 DONE 2.8s
+
+#54 [join_node 8/8] RUN pip install --no-cache-dir -r requirements.txt
+#54 52.89 Successfully installed exceptiongroup-1.3.0 iniconfig-2.1.0 numpy-2.0.2 packaging-25.0 pandas-2.3.3 pika-1.3.2 pluggy-1.6.0 pygments-2.19.2 pytest-8.4.2 python-dateutil-2.9.0.post0 pytz-2025.2 six-1.17.0 tomli-2.2.1 typing-extensions-4.15.0 tzdata-2025.2
+#54 52.90 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#54 53.31 
+#54 53.31 [notice] A new release of pip is available: 23.0.1 -> 25.2
+#54 53.31 [notice] To update, run: pip install --upgrade pip
+#54 DONE 53.7s
+
+#96 [filter_hour_3] resolving provenance for metadata file
+#96 DONE 0.4s
+
+#97 [join_node] exporting to image
+#97 ...
+
+#98 [filter_year_3] resolving provenance for metadata file
+#98 DONE 0.2s
+
+#99 [filter_year_2] resolving provenance for metadata file
+#99 DONE 0.3s
+
+#100 [filter_year_5] resolving provenance for metadata file
+#100 DONE 0.3s
+
+#101 [filter_amount_2] resolving provenance for metadata file
+#101 DONE 0.4s
+
+#102 [filter_year_4] resolving provenance for metadata file
+#102 DONE 0.3s
+
+#103 [filter_hour_2] resolving provenance for metadata file
+#103 DONE 0.1s
+
+#104 [filter_year_6] resolving provenance for metadata file
+#104 DONE 0.2s
+
+#105 [filter_amount_3] resolving provenance for metadata file
+#105 DONE 0.3s
+
+#106 [filter_year_1] resolving provenance for metadata file
+#106 DONE 0.1s
+
+#107 [filter_amount_1] resolving provenance for metadata file
+#107 DONE 0.2s
+
+#108 [filter_hour_1] resolving provenance for metadata file
+#108 DONE 0.0s
+
+#109 [aggregator_year_2024_3] exporting to image
+#109 ...
+
+#110 [aggregator_year_2024_2] exporting to image
+#110 exporting layers 2.9s done
+#110 writing image sha256:39a8955d24c52d6c5649de61e910adf6a395441cce223023746eca50df60506e 0.0s done
+#110 naming to docker.io/library/coffee-shop-analysis-aggregator_year_2024_2 0.0s done
+#110 DONE 2.9s
+
+#111 [aggregator_year_2025_3] exporting to image
+#111 exporting layers 2.8s done
+#111 writing image sha256:2fd8390dc7b58cdbeceeff2a5dacda13057d1ed999ab058c92f5e0b6695ba59d 0.0s done
+#111 naming to docker.io/library/coffee-shop-analysis-aggregator_year_2025_3 0.0s done
+#111 DONE 2.9s
+
+#112 [aggregator_year_2024_1] exporting to image
+#112 exporting layers 2.9s done
+#112 writing image sha256:947768d87739ae1b7a55e0d31336af514867e444ca008dd59a66162a3eda513f 0.0s done
+#112 naming to docker.io/library/coffee-shop-analysis-aggregator_year_2024_1 0.0s done
+#112 DONE 3.0s
+
+#109 [aggregator_year_2024_3] exporting to image
+#109 exporting layers 2.8s done
+#109 writing image sha256:3ac55230cc4a17abc306e2489f018f5256491a551419b828a9a3ae5bdf045c80 0.0s done
+#109 naming to docker.io/library/coffee-shop-analysis-aggregator_year_2024_3 0.0s done
+#109 DONE 3.0s
+
+#113 [top_consumers_aggregator_final] exporting to image
+#113 exporting layers 2.8s done
+#113 writing image sha256:60d8a17c6020f0a2d3655ea6be042c503b96262ea07274f4e345442aa713a1d1 0.0s done
+#113 naming to docker.io/library/coffee-shop-analysis-top_consumers_aggregator_final 0.0s done
+#113 DONE 3.0s
+
+#114 [aggregator_year_2025_1] exporting to image
+#114 exporting layers 2.9s done
+#114 writing image sha256:511316df05de18bda5beb7195f9ebf7161c261b1f1420f678029c7cacfc8665c 0.0s done
+#114 naming to docker.io/library/coffee-shop-analysis-aggregator_year_2025_1 0.0s done
+#114 DONE 3.0s
+
+#115 [aggregator_year_2025_2] exporting to image
+#115 exporting layers 2.8s done
+#115 writing image sha256:3faf7cc0080ce7e21d8a745e6e87093d2d43de006310f5f123bf3e7b9de44dbb 0.0s done
+#115 naming to docker.io/library/coffee-shop-analysis-aggregator_year_2025_2 0.0s done
+#115 DONE 3.0s
+
+#82 [top_consumers_aggregator_1] exporting to image
+#82 exporting layers 2.8s done
+#82 writing image sha256:76e833518e6510705330fd25d726767653372f4f3f4a5af8313b7cc2ae879a8d 0.0s done
+#82 naming to docker.io/library/coffee-shop-analysis-top_consumers_aggregator_1 0.0s done
+#82 DONE 3.0s
+
+#116 [aggregator_best_selling_final] exporting to image
+#116 exporting layers 2.9s done
+#116 writing image sha256:7a5ecdb2dc6b08c8dfdbd9ff8652ca8e89f9edecc9ee6507b4a36d15090d2e86 0.0s done
+#116 naming to docker.io/library/coffee-shop-analysis-aggregator_best_selling_final 0.0s done
+#116 DONE 3.0s
+
+#84 [report_generator] exporting to image
+#84 exporting layers 2.5s done
+#84 writing image sha256:2fa9de84f9d717b93b20691d7412081935be714f6bfc36a231cb2c280993fbe2 done
+#84 naming to docker.io/library/coffee-shop-analysis-report_generator done
+#84 DONE 2.6s
+
+#52 [client 6/6] RUN pip install --no-cache-dir -r requirements.txt
+#52 55.02 Successfully installed exceptiongroup-1.3.0 iniconfig-2.1.0 numpy-2.0.2 packaging-25.0 pandas-2.3.3 pika-1.3.2 pluggy-1.6.0 pygments-2.19.2 pytest-8.4.2 python-dateutil-2.9.0.post0 pytz-2025.2 six-1.17.0 tomli-2.2.1 typing-extensions-4.15.0 tzdata-2025.2
+#52 55.02 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#52 55.42 
+#52 55.42 [notice] A new release of pip is available: 23.0.1 -> 25.2
+#52 55.42 [notice] To update, run: pip install --upgrade pip
+#52 ...
+
+#117 [aggregator_year_2024_3] resolving provenance for metadata file
+#117 DONE 0.1s
+
+#118 [aggregator_year_2024_2] resolving provenance for metadata file
+#118 DONE 0.2s
+
+#119 [aggregator_year_2025_1] resolving provenance for metadata file
+#119 DONE 0.1s
+
+#120 [report_generator] resolving provenance for metadata file
+#120 DONE 0.0s
+
+#121 [aggregator_year_2025_3] resolving provenance for metadata file
+#121 DONE 0.2s
+
+#122 [aggregator_year_2025_2] resolving provenance for metadata file
+#122 DONE 0.2s
+
+#123 [aggregator_best_selling_final] resolving provenance for metadata file
+#123 DONE 0.1s
+
+#124 [top_consumers_aggregator_final] resolving provenance for metadata file
+#124 DONE 0.2s
+
+#125 [top_consumers_aggregator_1] resolving provenance for metadata file
+#125 DONE 0.1s
+
+#126 [aggregator_year_2024_1] resolving provenance for metadata file
+#126 DONE 0.0s
+
+#52 [client 6/6] RUN pip install --no-cache-dir -r requirements.txt
+#52 DONE 55.8s
+
+#97 [join_node] exporting to image
+#97 exporting layers 2.3s done
+#97 writing image sha256:779ed9a5b5625f584561e20acec29d74a31bc29749ba65ef3d66c1d395a31424 done
+#97 naming to docker.io/library/coffee-shop-analysis-join_node done
+#97 DONE 2.3s
+
+#127 [join_node] resolving provenance for metadata file
+#127 DONE 0.0s
+
+#128 [client] exporting to image
+#128 exporting layers 2.0s done
+#128 writing image sha256:9c75e5b93b9bf6582b6c98d84a584479b689526f578f2d29397a237862cec15d done
+#128 naming to docker.io/library/coffee-shop-analysis-client done
+#128 DONE 2.0s
+
+#129 [client] resolving provenance for metadata file
+#129 DONE 0.0s

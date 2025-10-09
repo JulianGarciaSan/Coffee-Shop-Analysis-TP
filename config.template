@@ -1,0 +1,26 @@
+# Configuration file for configure_nodes.sh
+# Each line represents one parameter in order:
+# 1. Filename for the generated docker-compose file
+# 2. Number of year_transactions workers
+# 3. Number of year_transaction_items workers  
+# 4. Number of hour filter workers
+# 5. Number of amount filter workers
+# 6. Number of groupby workers for 2024
+# 7. Number of groupby workers for 2025
+# 8. Number of aggregator workers for 2024
+# 9. Number of aggregator workers for 2025
+# 10. Number of groupby workers for top customers
+# 11. Number of top consumers aggregator workers
+
+# Example configuration (uncomment and modify as needed):
+docker-compose.yaml
+2
+2
+3
+3
+2
+1
+1
+1
+2
+2
