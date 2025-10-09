@@ -1,7 +1,6 @@
 import logging
 import os
 import sys
-from typing import Optional
 from rabbitmq.middleware import MessageMiddlewareQueue
 from strategies import FilterStrategyFactory
 from configurators import NodeConfiguratorFactory
@@ -92,29 +91,28 @@ class FilterNode:
 
 
 
-    def process_message(self, body: bytes, routing_key: str = None, client_id: Optional[int] = None) -> bool:
+    def process_message(self, body: bytes, routing_key: str = None):
         if self.shutdown.is_shutting_down():
             logger.warning("Shutdown en progreso, ignorando mensaje")
             return True
         
         try:
-            
             should_stop, batch_type, dto, is_eof = self.node_configurator.process_message(
                 body, routing_key
             )
             
             if is_eof:
-                return self._handle_eof_message(dto, batch_type, client_id)
+                return self._handle_eof_message(dto, batch_type)
             
             if should_stop:
                 return True
                         
             decoded_data = body.decode('utf-8').strip()
             
-            # if decoded_data.startswith("D:"):
-            #     decoded_data = decoded_data[2:]
-            # elif decoded_data.startswith("I:"):
-            #     decoded_data = decoded_data[2:]
+            if decoded_data.startswith("D:"):
+                decoded_data = decoded_data[2:]
+            elif decoded_data.startswith("I:"):
+                decoded_data = decoded_data[2:]
             
             if hasattr(self.filter_strategy, 'set_dto_helper'):
                 self.filter_strategy.set_dto_helper(dto)
@@ -129,7 +127,7 @@ class FilterNode:
                 return True
                         
             processed_data = self.node_configurator.process_filtered_data(filtered_csv)
-            self.node_configurator.send_data(processed_data, self.middlewares, batch_type,client_id)
+            self.node_configurator.send_data(processed_data, self.middlewares, batch_type)
             
             return False
 
@@ -137,7 +135,7 @@ class FilterNode:
             logger.error(f"Error procesando mensaje: {e}")
             return False
         
-    def _handle_eof_message(self, dto: TransactionBatchDTO, eof_type: str,client_id: Optional[int] = None) -> bool:
+    def _handle_eof_message(self, dto: TransactionBatchDTO, eof_type: str):
         try:
             eof_data = dto.data.strip()
             if ":" in eof_data:
@@ -153,8 +151,7 @@ class FilterNode:
                 total_filters=self.total_filters,
                 eof_type=eof_type,
                 middlewares=self.middlewares,
-                input_middleware=self.input_middleware,
-                client_id=client_id
+                input_middleware=self.input_middleware
             )
             
             if should_stop:
@@ -173,16 +170,9 @@ class FilterNode:
                 logger.warning("Shutdown solicitado, deteniendo consumo")
                 ch.stop_consuming()
                 return
-            client_id = None
-            if properties and properties.headers:
-                client_id = properties.headers.get('client_id')
             
-            if client_id is None:
-                logger.warning("Mensaje sin client_id, descartando")
-                return
-        
             routing_key = method.routing_key if hasattr(method, 'routing_key') else None
-            should_stop = self.process_message(body, routing_key,client_id)
+            should_stop = self.process_message(body, routing_key)
             
             if should_stop:
                 logger.info("EOF procesado - deteniendo consuming")

@@ -38,14 +38,4 @@ class NodeConfigurator(ABC):
     @abstractmethod
     def process_message(self, body: bytes, routing_key: str = None) -> tuple:
         pass
-    
-    def extract_client_id(self, properties) -> Optional[int]:
-        if properties and properties.headers:
-            return properties.headers.get('client_id')
-        return None
-    
-    def create_headers(self, client_id: Optional[int]) -> Dict[str, Any]:
-        if client_id is not None:
-            return {'client_id': client_id}
-        return {}
 

@@ -78,7 +78,7 @@ class MessageMiddlewareExchange(MessageMiddleware):
             logger.error(f"Error conectando a RabbitMQ: {e}")
             raise MessageMiddlewareDisconnectedError("No se pudo conectar a RabbitMQ")
 
-    def send(self, message: str, routing_key: str = None, headers: dict = None):
+    def send(self, message: str, routing_key: str = None):
         try:
             if not self.channel:
                 raise MessageMiddlewareDisconnectedError("No hay conexión activa con RabbitMQ")
@@ -90,8 +90,7 @@ class MessageMiddlewareExchange(MessageMiddleware):
                 routing_key=key,
                 body=message,
                 properties=pika.BasicProperties(
-                    delivery_mode=1,
-                    headers=headers or {}
+                    delivery_mode=1
                 )
             )
         except MessageMiddlewareDisconnectedError:
@@ -229,7 +228,7 @@ class MessageMiddlewareQueue(MessageMiddleware):
             logger.error(f"Error conectando a RabbitMQ: {e}")
             raise MessageMiddlewareDisconnectedError("No se pudo conectar a RabbitMQ")
 
-    def send(self, message: str,headers: dict = None):
+    def send(self, message: str):
         try:
             if not self.channel:
                 raise MessageMiddlewareDisconnectedError("No hay conexión activa con RabbitMQ")
@@ -238,8 +237,7 @@ class MessageMiddlewareQueue(MessageMiddleware):
                 routing_key=self.queue_name,
                 body=message,
                 properties=pika.BasicProperties(
-                    delivery_mode=2,
-                    headers=headers or {}
+                    delivery_mode=2
                 )
             )
         except MessageMiddlewareDisconnectedError:

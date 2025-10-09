@@ -19,8 +19,7 @@ class Client:
         self.client_socket = None
         self.protocol = None  
         self.processor = None
-        #self.expected_reports = 5
-        self.expected_reports = 1
+        self.expected_reports = 5
 
     def _on_shutdown_signal(self):
         logger.info("Señal de shutdown recibida en Client")
@@ -55,12 +54,12 @@ class Client:
     def process_and_send_files_from_volumes(self):
         mounted_folders = {
             #"D": "/data/transactions",
-            "D": "/data/transactions_test",
+            "D": "/data/transactions",
+            "I": "/data/transaction_items",
             #"I": "/data/transaction_items",
-            #"I": "/data/transaction_items_test",
-            #"U": "/data/users",
-            #"S": "/data/stores",
-            #"M": "/data/menu_items",
+            "U": "/data/users",
+            "S": "/data/stores",
+            "M": "/data/menu_items",
             #"payment_methods": "/data/payment_methods",
             #"vouchers": "/data/vouchers"
         }

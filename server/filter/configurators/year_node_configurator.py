@@ -45,7 +45,6 @@ class YearNodeConfigurator(NodeConfigurator):
                 return (None, 'transaction_items', dto, True)
         
         if self.file_mode == 'transactions':
-            logger.debug(f"YearNode: Mensaje recibido para 'transactions', tamaño {len(decoded_data)} bytes")
             dto = TransactionBatchDTO(decoded_data, BatchType.RAW_CSV)
             return (False, 'transactions', dto, False)
         else:
@@ -83,13 +82,12 @@ class YearNodeConfigurator(NodeConfigurator):
     def process_filtered_data(self, filtered_csv: str) -> str:
         return filtered_csv
     
-    def send_data(self, data: str, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None):
-        headers = self.create_headers(client_id)
+    def send_data(self, data: str, middlewares: Dict[str, Any], batch_type: str = "transactions"):
         if batch_type == "transactions":
             filtered_dto = TransactionBatchDTO(data, batch_type=BatchType.RAW_CSV)
             
             if 'q1' in middlewares:
-                middlewares['q1'].send(filtered_dto.to_bytes_fast(), headers=headers)
+                middlewares['q1'].send(filtered_dto.to_bytes_fast())
             
             if 'q4' in middlewares:
                 middlewares['q4'].send(filtered_dto.to_bytes_fast())
@@ -98,14 +96,13 @@ class YearNodeConfigurator(NodeConfigurator):
             logger.info(f"Procesando líneas de TransactionItems para Q2")
             if 'q2' in middlewares:
                 self._send_transaction_items_by_year(data, middlewares['q2'])
-
-    def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None):
-        headers = self.create_headers(client_id)
+    
+    def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions"):
         if batch_type == "transactions":
             eof_dto = TransactionBatchDTO("EOF:1", batch_type=BatchType.EOF)
             
             if 'q1' in middlewares:
-                middlewares['q1'].send(eof_dto.to_bytes_fast(), headers=headers)
+                middlewares['q1'].send(eof_dto.to_bytes_fast())
                 logger.info("EOF:1 (TransactionBatch) enviado a Q1 queue")
             
             if 'q4' in middlewares:
@@ -120,33 +117,32 @@ class YearNodeConfigurator(NodeConfigurator):
                 logger.info("EOF:1 (TransactionItemBatch) enviado a Q2 exchange con routing keys 2024 y 2025")
     
     def handle_eof(self, counter: int, total_filters: int, eof_type: str, 
-            middlewares: Dict[str, Any], input_middleware: Any, client_id: Optional[int] = None) -> bool:
+            middlewares: Dict[str, Any], input_middleware: Any) -> bool:
         logger.info(f"YearNode: EOF counter={counter}/{total_filters}")
         
         if counter < total_filters:
-            self._forward_eof(counter + 1, eof_type, input_middleware, client_id=client_id)
-
+            self._forward_eof(counter + 1, eof_type, input_middleware)
+        
         elif counter == total_filters:
             logger.info(f"YearNode: EOF llegó al último - enviando downstream y cerrando")
             
             if self.file_mode == 'transactions':
-                self.send_eof(middlewares, "transactions",client_id=client_id)
+                self.send_eof(middlewares, "transactions")
             else:
                 self.send_eof(middlewares, "transaction_items")
             
         
         return True
-
-    def _forward_eof(self, new_counter: int, eof_type: str, input_middleware: Any, client_id: Optional[int] = None):
-        headers = self.create_headers(client_id)
-        eof_message = f"EOF:{new_counter}" 
+        
+    def _forward_eof(self, new_counter: int, eof_type: str, input_middleware: Any):
+        eof_message = f"EOF:{new_counter}"  # Sin D: ni I:
         
         if self.file_mode == 'transactions':
             eof_dto = TransactionBatchDTO(eof_message, batch_type=BatchType.EOF)
         else:
             eof_dto = TransactionItemBatchDTO(eof_message, batch_type=BatchType.EOF)
         
-        input_middleware.send(eof_dto.to_bytes_fast(), headers=headers)
+        input_middleware.send(eof_dto.to_bytes_fast())
         logger.info(f"YearNode: {eof_message} reenviado")
     
     def _send_transaction_items_by_year(self, data: str, q2_middleware):
