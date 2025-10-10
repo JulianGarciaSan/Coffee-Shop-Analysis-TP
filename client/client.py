@@ -9,17 +9,19 @@ from common.graceful_shutdown import GracefulShutdown
 logger = logging.getLogger(__name__)
 
 class Client:
-    def __init__(self, server_port, max_batch_size):
+    def __init__(self, server_port, max_batch_size, client_id):
         self.shutdown = GracefulShutdown()
         self.shutdown.register_callback(self._on_shutdown_signal)
         
         self.server_port = server_port
         self.max_batch_size = int(max_batch_size)
+        self.client_id = client_id
         self.keep_running = False
         self.client_socket = None
         self.protocol = None  
         self.processor = None
-        self.expected_reports = 5
+        #self.expected_reports = 5
+        self.expected_reports = 1
 
     def _on_shutdown_signal(self):
         logger.info("Señal de shutdown recibida en Client")
@@ -54,12 +56,12 @@ class Client:
     def process_and_send_files_from_volumes(self):
         mounted_folders = {
             #"D": "/data/transactions",
-            "D": "/data/transactions",
-            "I": "/data/transaction_items",
+            "D": "/data/transactions_test",
             #"I": "/data/transaction_items",
-            "U": "/data/users",
-            "S": "/data/stores",
-            "M": "/data/menu_items",
+            #"I": "/data/transaction_items_test",
+            #"U": "/data/users",
+            #"S": "/data/stores",
+            #"M": "/data/menu_items",
             #"payment_methods": "/data/payment_methods",
             #"vouchers": "/data/vouchers"
         }
@@ -174,8 +176,8 @@ class Client:
     def _save_report_to_file(self, report_type, content):
         """Guarda un reporte en un archivo."""
         try:
-            # Crear directorio report si no existe
-            report_dir = "/app/report"
+            # Crear directorio report_<client_id> si no existe
+            report_dir = f"/app/report_{self.client_id}"
             os.makedirs(report_dir, exist_ok=True)
             
             # Guardar en la carpeta mapeada

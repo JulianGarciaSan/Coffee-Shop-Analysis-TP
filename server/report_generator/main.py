@@ -2,6 +2,7 @@ import logging
 import os
 from datetime import datetime
 import sys
+from typing import Optional
 from rabbitmq.middleware import MessageMiddlewareExchange
 from dtos.dto import TransactionBatchDTO, BatchType, ReportBatchDTO
 from common.graceful_shutdown import GracefulShutdown
@@ -17,6 +18,8 @@ class ReportGenerator:
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.report_exchange = os.getenv('REPORT_EXCHANGE', 'report.exchange')
         self.reports_exchange = os.getenv('REPORTS_EXCHANGE', 'reports_exchange')
+        
+        self.client_data = {}
 
         self.input_middleware = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
@@ -38,10 +41,10 @@ class ReportGenerator:
             self.publisher.shutdown = self.shutdown
             
         self.expected_queries = {'q1'
-                                 ,'q3'
-                                 ,'q4'
-                                 ,'q2_most_profit'
-                                 ,'q2_best_selling'
+                                 #,'q3'
+                                 #,'q4'
+                                 #,'q2_most_profit'
+                                 #,'q2_best_selling'
                                  }
         self.total_expected = len(self.expected_queries)
         
@@ -57,55 +60,51 @@ class ReportGenerator:
         if self.input_middleware:
             self.input_middleware.stop_consuming()
   
-    def process_message(self, message: bytes, routing_key: str):
+    def process_message(self, message: bytes, routing_key: str, client_id: Optional[int]):
         if self.shutdown.is_shutting_down():
             logger.warning("Shutdown en progreso, ignorando mensaje")
             return True
         
+        if client_id is None:
+            logger.warning("Mensaje sin client_id, descartando")
+            return False
+        
         try:
             dto = TransactionBatchDTO.from_bytes_fast(message)
+            query_name = routing_key.split('.')[0]
             
-            query_name = routing_key.split('.')[0]                       
+            if client_id not in self.client_data:
+                self.client_data[client_id] = {
+                    'csv_files': {},
+                    'eof_received': set()
+                }
+                logger.info(f"Nuevo cliente detectado: {client_id}")
             
             if dto.batch_type == BatchType.EOF:
-                logger.info(f"EOF recibido para {query_name}")
-                self._close_csv_file(query_name)
-                self.eof_received.add(query_name)
+                logger.info(f"EOF recibido para cliente {client_id}, query {query_name}")
+                self._close_csv_file(client_id, query_name)
+                self.client_data[client_id]['eof_received'].add(query_name)
                 
-                logger.info(f"EOF recibidos: {self.eof_received}")
-                logger.info(f"Total expected recibidos: {self.total_expected}")
+                logger.info(f"Cliente {client_id} - EOF recibidos: {self.client_data[client_id]['eof_received']}")
+                logger.info(f"Cliente {client_id} - Total esperados: {self.total_expected}")
 
-                if len(self.eof_received) >= self.total_expected:
-                    if self.eof_received == self.expected_queries:
-                        logger.info("Todos los reportes completados: {}".format(self.eof_received))
-                        self._publish_reports()
-                        return True
+                if len(self.client_data[client_id]['eof_received']) >= self.total_expected:
+                    if self.client_data[client_id]['eof_received'] == self.expected_queries:
+                        logger.info(f"Cliente {client_id}: Todos los reportes completados")
+                        self._publish_reports_for_client(client_id)
+                        del self.client_data[client_id]
                     else:
-                        logger.warning(f"EOF co   if dto.batch_type == BatchType.EOF:unt = 3 pero queries incorrectas: {self.eof_received}")
+                        logger.warning(f"Cliente {client_id}: EOF count correcto pero queries incorrectas: {self.client_data[client_id]['eof_received']}")
+                
                 return False
             
-            # if routing_key.endswith('.data'):
-            #     if message == b"EOF:1":
-            #         logger.info(f"EOF recibido para {query_name}")
-            #         self._close_csv_file(query_name)
-            #         self.eof_received.add(query_name)
-                
-            #         if len(self.eof_received) >= 3:
-            #             expected_queries = {'q1', 'q3', 'q4'}
-            #             if self.eof_received == expected_queries:
-            #                 logger.info("Todos los reportes completados (Q1, Q3, Q4)")
-            #                 self._publish_reports()
-            #                 return False
-            #             else:
-            #                 logger.warning(f"EOF count = 3 pero queries incorrectas: {self.eof_received}")
-            
             if dto.batch_type == BatchType.RAW_CSV:
-                self._write_to_csv(dto.data, query_name)
+                self._write_to_csv(dto.data, query_name, client_id)
             
             return False
             
         except Exception as e:
-            logger.error(f"Error procesando mensaje: {e}")
+            logger.error(f"Error procesando mensaje para cliente {client_id}: {e}")
             return False
 
     def on_message_callback(self, ch, method, properties, body):
@@ -115,8 +114,11 @@ class ReportGenerator:
             return
 
         try:
-            routing_key = method.routing_key  
-            should_stop = self.process_message(body, routing_key)  
+            client_id = None
+            if properties and properties.headers:
+                client_id = properties.headers.get('client_id')
+            routing_key = method.routing_key
+            should_stop = self.process_message(body, routing_key, client_id)
 
             if should_stop:
                 logger.info("Todos los reportes generados - deteniendo consuming")
@@ -139,8 +141,10 @@ class ReportGenerator:
 
     def _cleanup(self):
         try:
-            for query_name in list(self.csv_files.keys()):
-                self._close_csv_file(query_name)
+            for client_id in list(self.client_data.keys()):
+                csv_files = self.client_data[client_id]['csv_files']
+                for query_name in list(csv_files.keys()):
+                    self._close_csv_file(client_id, query_name)
             
             if self.input_middleware:
                 self.input_middleware.close()
@@ -148,98 +152,143 @@ class ReportGenerator:
         except Exception as e:
             logger.error(f"Error durante cleanup: {e}")
 
-    def _initialize_csv_file(self, query_name: str, sample_data: str):
-        """Inicializa el archivo CSV con headers."""
+    def _initialize_csv_file(self, client_id: int, query_name: str, sample_data: str):
+        """Inicializa el archivo CSV con headers para un cliente específico."""
         try:
-            reports_dir = './reports'
+            reports_dir = f'./reports/client_{client_id}'
             os.makedirs(reports_dir, exist_ok=True)
             os.chmod(reports_dir, 0o755)
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"{reports_dir}/{query_name}_{timestamp}.csv"
             
-            self.csv_files[query_name] = open(filename, 'w', encoding='utf-8')
+            # Crear el file handle
+            file_handle = open(filename, 'w', encoding='utf-8')
             
+            # Asegurar que csv_files existe para este cliente
+            if 'csv_files' not in self.client_data[client_id]:
+                self.client_data[client_id]['csv_files'] = {}
+            
+            self.client_data[client_id]['csv_files'][query_name] = file_handle
+            
+            # Escribir header
             header_line = sample_data.strip().split('\n')[0]
-            self.csv_files[query_name].write(header_line + '\n')
-            self.csv_files[query_name].flush()
+            file_handle.write(header_line + '\n')
+            file_handle.flush()
             
-            logger.info(f"Archivo CSV inicializado: {filename}")
+            logger.info(f"Cliente {client_id}: Archivo CSV inicializado para {query_name}: {filename}")
 
         except Exception as e:
-            logger.error(f"Error inicializando el archivo CSV para {query_name}: {e}")
+            logger.error(f"Cliente {client_id}: Error inicializando CSV para {query_name}: {e}")
             raise
 
-    def _write_to_csv(self, csv_data: str, query_name: str):
-        """Escribe datos al archivo CSV correspondiente."""
+    def _write_to_csv(self, csv_data: str, query_name: str, client_id: int):
+        """Escribe datos al archivo CSV correspondiente del cliente."""
         try:
-            if query_name not in self.csv_files:
-                self._initialize_csv_file(query_name, csv_data)
+            # Inicializar archivo si no existe para este cliente
+            if query_name not in self.client_data[client_id]['csv_files']:
+                self._initialize_csv_file(client_id, query_name, csv_data)
             
             lines = csv_data.strip().split('\n')
+            file_handle = self.client_data[client_id]['csv_files'][query_name]
+            
             for line in lines:
                 line = line.strip()
                 if not line:
                     continue
                 
-                if any(header in line.lower() for header in ['transaction_id', 'year_half', 'store_name,birthdate', 'year_month_created_at', 'year_month_created_at', 'sellings_qty', 'profit_sum']):
+                # Filtrar headers (tu lógica original)
+                if any(header in line.lower() for header in [
+                    'transaction_id', 'year_half', 'store_name,birthdate',
+                    'year_month_created_at', 'sellings_qty', 'profit_sum'
+                ]):
                     continue
                 
-                self.csv_files[query_name].write(line + '\n')
+                file_handle.write(line + '\n')
             
-            self.csv_files[query_name].flush()
-            
-            # processed_lines = len([l for l in lines if l.strip() and not any(h in l.lower() for h in ['transaction_id', 'year_half', 'store_name,birthdate','sellings_qty','profit_sum'])])
-            # if processed_lines > 0:
-            #     logger.info(f"Escritas {processed_lines} líneas en archivo {query_name}")
+            file_handle.flush()
             
         except Exception as e:
-            logger.error(f"Error escribiendo en CSV para {query_name}: {e}")
+            logger.error(f"Cliente {client_id}: Error escribiendo en CSV para {query_name}: {e}")
             raise
 
-    def _close_csv_file(self, query_name: str):
+    def _close_csv_file(self, client_id: int, query_name: str):
+        """Cierra el archivo CSV de un cliente."""
         try:
-            if query_name in self.csv_files:
-                self.csv_files[query_name].close()
-                logger.info(f"Archivo CSV cerrado para {query_name}")
-                del self.csv_files[query_name]
+            if client_id in self.client_data:
+                csv_files = self.client_data[client_id]['csv_files']
+                if query_name in csv_files:
+                    csv_files[query_name].close()
+                    logger.info(f"Cliente {client_id}: Archivo CSV cerrado para {query_name}")
+                    del csv_files[query_name]
         except Exception as e:
-            logger.error(f"Error cerrando el archivo CSV para {query_name}: {e}")
+            logger.error(f"Cliente {client_id}: Error cerrando CSV para {query_name}: {e}")
 
-    def _publish_reports(self):
+    def _publish_reports_for_client(self, client_id: int):
+        """
+        Publica todos los reportes de un cliente específico
+        usando routing keys con formato: client.{id}.{query}.{type}
+        """
         try:
-            
             batch_size = 150
+            reports_dir = f'./reports/client_{client_id}'
+            
+            if not os.path.exists(reports_dir):
+                logger.warning(f"Cliente {client_id}: No se encontró directorio de reportes")
+                return
 
-            for query_name in self.expected_queries:  # Las 3 queries activas
+            for query_name in self.expected_queries:
+                # Buscar archivos CSV para esta query
+                files = [f for f in os.listdir(reports_dir) 
+                        if f.startswith(query_name) and f.endswith('.csv')]
 
-                reports_dir = './reports'
-                files = [f for f in os.listdir(reports_dir) if f.startswith(query_name) and f.endswith('.csv')]
+                if not files:
+                    logger.warning(f"Cliente {client_id}: No se encontraron archivos para {query_name}")
+                    continue
 
-                logger.info(f"Publicando reportes para {query_name}, archivos encontrados: {files}")
+                logger.info(f"Cliente {client_id}: Publicando {query_name}, archivos: {files}")
+                
                 for file in files:
                     file_path = os.path.join(reports_dir, file)
+                    
                     with open(file_path, 'r', encoding='utf-8') as f:
                         lines = f.readlines()
                         total_lines = len(lines)
+                        
+                        # Enviar en batches
                         for i in range(0, total_lines, batch_size):
                             batch_lines = lines[i:i+batch_size]
                             batch_data = ''.join(batch_lines)
+                            
                             report_dto = ReportBatchDTO(
                                 batch_data,
                                 BatchType.RAW_CSV,
                                 query_name
                             )
-                            self.publisher.send(report_dto.to_bytes_fast(), routing_key=f'{query_name}.data')
+                            
+                            # CRÍTICO: Routing key con client_id
+                            routing_key = f'client.{client_id}.{query_name}.data'
+                            
+                            self.publisher.send(
+                                report_dto.to_bytes_fast(),
+                                routing_key=routing_key
+                            )
                         
+                        # Enviar EOF
                         eof_dto = ReportBatchDTO.create_eof(query_name)
-                        self.publisher.send(eof_dto.to_bytes_fast(), routing_key=f'{query_name}.data')
-                        logger.info(f"Enviados {total_lines} líneas y EOF para {query_name}")
+                        eof_routing_key = f'client.{client_id}.{query_name}.eof'
+                        
+                        self.publisher.send(
+                            eof_dto.to_bytes_fast(),
+                            routing_key=eof_routing_key
+                        )
+                        
+                        logger.info(f"Cliente {client_id}: Enviadas {total_lines} líneas y EOF para {query_name}")
 
-            logger.info("Todos los reportes publicados exitosamente")
+            logger.info(f"Cliente {client_id}: Todos los reportes publicados exitosamente")
             
         except Exception as e:
-            logger.error(f"Error publicando reportes: {e}")
+            logger.error(f"Cliente {client_id}: Error publicando reportes: {e}")
 
 if __name__ == "__main__":
     try:

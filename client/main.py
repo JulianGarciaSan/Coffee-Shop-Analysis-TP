@@ -28,6 +28,8 @@ def initialize_config():
         config_params["port"] = int(os.getenv('PORT', config["DEFAULT"]["PORT"]))
         config_params["max_batch_size"] = int(os.getenv('MAX_BATCH_SIZE', config["DEFAULT"]["MAX_BATCH_SIZE"]))
         config_params["logging_level"] = os.getenv('LOGGING_LEVEL', config["DEFAULT"]["LOGGING_LEVEL"])
+        config_params["client_id"] = os.getenv('CLIENT_ID', config["DEFAULT"]["CLIENT_ID"])
+
     except KeyError as e:
         raise KeyError("Key was not found. Error: {} .Aborting server".format(e))
     except ValueError as e:
@@ -55,11 +57,12 @@ def main():
         logging_level = config_params["logging_level"]
         server_port = config_params["port"]
         max_batch_size = config_params["max_batch_size"]
+        client_id = config_params["client_id"]
 
         initialize_log(logging_level)
 
         #signal.signal(signal.SIGTERM, signal_handler) GRACEFUL SHUTDOWN
-        client = Client(server_port, max_batch_size)
+        client = Client(server_port, max_batch_size, client_id)
         client.run()
         sys.exit(0) 
         
