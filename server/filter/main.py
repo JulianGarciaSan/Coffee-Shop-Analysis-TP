@@ -8,7 +8,6 @@ from strategies import FilterStrategyFactory
 from configurators import NodeConfiguratorFactory
 from dtos.dto import TransactionBatchDTO, TransactionItemBatchDTO, BatchType, FileType
 from common.graceful_shutdown import GracefulShutdown  
-from coordinator import PeerCoordinator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

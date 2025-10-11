@@ -5,8 +5,7 @@ from typing import Optional, Dict, Any
 from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
 from dtos.dto import TransactionBatchDTO, TransactionItemBatchDTO, BatchType, CoordinationMessageDTO
 from .base_configurator import NodeConfigurator
-from coordinator import PeerCoordinator
-
+from coordinator.coordinator import PeerCoordinator 
 logger = logging.getLogger(__name__)
 
 
@@ -21,6 +20,7 @@ class YearNodeConfigurator(NodeConfigurator):
         all_node_ids_str = os.getenv('ALL_NODE_IDS', self.node_id)
         all_node_ids = [nid.strip() for nid in all_node_ids_str.split(',')]
         
+        # Crear coordinador (helper)
         self.coordinator = PeerCoordinator(
             node_id=self.node_id,
             rabbitmq_host=rabbitmq_host,
@@ -30,6 +30,7 @@ class YearNodeConfigurator(NodeConfigurator):
         )
 
         
+        # Middleware de coordinación
         self.coordination_queue = MessageMiddlewareQueue(
             host=rabbitmq_host,
             queue_name=f'coordination_{self.node_id}',
@@ -41,6 +42,7 @@ class YearNodeConfigurator(NodeConfigurator):
         self.coordination_thread: Optional[threading.Thread] = None
         self.coordination_running = False
         
+        # Referencias que se setean después
         self.output_middlewares: Optional[Dict[str, Any]] = None
         
         # Iniciar thread de coordinación
@@ -250,7 +252,10 @@ class YearNodeConfigurator(NodeConfigurator):
     
     def handle_eof(self, counter: int, total_filters: int, eof_type: str, 
             middlewares: Dict[str, Any], input_middleware: Any, client_id: Optional[int] = None) -> bool:
- 
+        """
+        Ya NO se usa - el coordinador maneja todo el flujo de EOF.
+        Se mantiene por compatibilidad con la interfaz base.
+        """
         logger.warning("handle_eof llamado pero ya no se usa (coordinador maneja EOF)")
         return False
     

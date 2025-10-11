@@ -15,7 +15,7 @@ services:
       - RABBITMQ_DEFAULT_USER=admin
       - RABBITMQ_DEFAULT_PASS=admin
 
-  client_0:
+  client_1:
     build:
       context: .
       dockerfile: ./client/Dockerfile
@@ -23,7 +23,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
-      - CLIENT_ID=client_0
+      - CLIENT_ID=client_1
     depends_on:
       gateway:
         condition: service_started
@@ -40,7 +40,7 @@ services:
       - ./report_client_1:/app/report_client_1
       - ./data/transactions_items_test:/data/transactions_items_test
 
-  client_1:
+  client_2:
     build:
       context: .
       dockerfile: ./client/Dockerfile
@@ -48,7 +48,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
-      - CLIENT_ID=client_1
+      - CLIENT_ID=client_2
     depends_on:
       gateway:
         condition: service_started
@@ -296,43 +296,48 @@ services:
     volumes:
       - ./server/config.ini:/app/config.ini
 
-  # groupby_semester_1:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/groupby/Dockerfile
-  #   container_name: groupby_semester_1
-  #   restart: on-failure
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - SEMESTER=1
-  #     - INPUT_Q3=groupby.join.exchange
-  #     - TOTAL_GROUPBY_NODES=2
-  #     - JOIN_EXCHANGE=join.exchange
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
+  groupby_semester_1:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_semester_1
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - SEMESTER=1
+      - INPUT_Q3=groupby.join.exchange
+      - TOTAL_GROUPBY_NODES=2
+      - JOIN_EXCHANGE=join.exchange
+      - NODE_ID=groupby_node_1
+      - ALL_NODE_IDS=groupby_node_1,groupby_node_2
 
-  # groupby_semester_2:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/groupby/Dockerfile
-  #   container_name: groupby_semester_2
-  #   restart: on-failure
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - SEMESTER=2
-  #     - INPUT_Q3=groupby.join.exchange
-  #     - TOTAL_GROUPBY_NODES=2
-  #     - JOIN_EXCHANGE=join.exchange
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  groupby_semester_2:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_semester_2
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - SEMESTER=2
+      - INPUT_Q3=groupby.join.exchange
+      - TOTAL_GROUPBY_NODES=2
+      - JOIN_EXCHANGE=join.exchange
+      - NODE_ID=groupby_node_2
+      - ALL_NODE_IDS=groupby_node_1,groupby_node_2
+    volumes:
+      - ./server/config.ini:/app/config.ini
 
   filter_amount_1:
     build:
@@ -418,22 +423,22 @@ services:
       - ./server/config.ini:/app/config.ini
       - ./reports:/app/reports
 
-  # join_node:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/join/Dockerfile
-  #   container_name: join_node
-  #   restart: on-failure
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - INPUT_EXCHANGE=join.exchange
-  #     - OUTPUT_EXCHANGE=report.exchange
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
+  join_node:
+    build:
+      context: .
+      dockerfile: ./server/join/Dockerfile
+    container_name: join_node
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - INPUT_EXCHANGE=join.exchange
+      - OUTPUT_EXCHANGE=report.exchange
+    volumes:
+      - ./server/config.ini:/app/config.ini
 
   # groupby_best_selling_1:
   #   build:

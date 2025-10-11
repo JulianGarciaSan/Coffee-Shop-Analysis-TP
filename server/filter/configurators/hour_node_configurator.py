@@ -1,3 +1,5 @@
+# hour_node_configurator.py
+
 import logging
 import os
 import threading
@@ -5,8 +7,7 @@ from typing import Optional, Dict, Any
 from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
 from dtos.dto import TransactionBatchDTO, BatchType, CoordinationMessageDTO
 from .base_configurator import NodeConfigurator
-from coordinator import PeerCoordinator
-
+from coordinator.coordinator import PeerCoordinator 
 logger = logging.getLogger(__name__)
 
 
@@ -231,7 +232,10 @@ class HourNodeConfigurator(NodeConfigurator):
     
     def handle_eof(self, counter: int, total_filters: int, eof_type: str, 
                    middlewares: Dict[str, Any], input_middleware: Any, client_id: Optional[int] = None) -> bool:
-
+        """
+        Ya NO se usa - el coordinador maneja todo el flujo de EOF.
+        Se mantiene por compatibilidad con la interfaz base.
+        """
         logger.warning("handle_eof llamado pero ya no se usa (coordinador maneja EOF)")
         return False
     

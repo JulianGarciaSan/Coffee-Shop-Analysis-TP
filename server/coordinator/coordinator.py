@@ -7,7 +7,11 @@ from dtos.dto import CoordinationMessageDTO
 logger = logging.getLogger(__name__)
 
 
-class PeerCoordinator: 
+class PeerCoordinator:
+    """
+    Helper de coordinación para manejo de EOF multi-cliente.
+    """
+    
     def __init__(self, node_id: str, rabbitmq_host: str, total_nodes: int, all_node_ids: list,exchange_name: str = 'coordination_exchange'):
         self.node_id = node_id
         self.rabbitmq_host = rabbitmq_host
@@ -29,6 +33,9 @@ class PeerCoordinator:
         # ACKs pendientes por cliente (cuando soy líder)
         self.pending_acks: Dict[str, Dict] = {}
         
+        # Lock para sincronizar acceso al exchang, tenemos un RC con Rabbit sino
+        self._exchange_lock = threading.Lock()
+        
         # Exchange único para toda la coordinación
         self.coordination_exchange = MessageMiddlewareExchange(
             host=rabbitmq_host,
@@ -41,6 +48,7 @@ class PeerCoordinator:
         logger.info(f"  Nodos: {all_node_ids}")
     
     def should_process_message(self, client_id: str) -> bool:
+        """Verifica si debo procesar un mensaje de este cliente"""
         event = self.eof_events.get(client_id)
         
         if event is None or not event.is_set():
@@ -58,12 +66,14 @@ class PeerCoordinator:
         return True
     
     def should_send_ack_after_processing(self, client_id: str) -> bool:
+        """Verifica si debo enviar ACK después de procesar"""
         event = self.eof_events.get(client_id)
         if event and event.is_set() and self.eof_processed.get(client_id, False):
             return True
         return False
     
     def send_ack(self, client_id: str, batch_type: str):
+        """Envía ACK al líder"""
         # Verificar que no hayamos enviado ACK ya
         if self.eof_processed.get(f"{client_id}_ack_sent", False):
             logger.debug(f"ACK ya enviado para cliente {client_id}, ignorando")
@@ -78,17 +88,24 @@ class PeerCoordinator:
         )
         
         routing_key = f'coord.{client_id}.ack'
-        self.coordination_exchange.send(msg.to_bytes_fast(), routing_key=routing_key)
         
+        with self._exchange_lock:
+            self.coordination_exchange.send(msg.to_bytes_fast(), routing_key=routing_key)
+                    
         logger.info(f"ACK enviado para cliente {client_id}")
     
     def _cancel_ack_timer(self, client_id: str):
+        """Cancela el timer de ACK si existe"""
         if client_id in self.ack_timers:
             self.ack_timers[client_id].cancel()
             del self.ack_timers[client_id]
             logger.debug(f"Timer de ACK cancelado para cliente {client_id}")
     
     def _timeout_ack(self, client_id: str, batch_type: str):
+        """
+        Callback del timer: envía ACK si no se procesó ningún mensaje.
+        Esto maneja el caso donde no había mensajes pendientes.
+        """
         if not self.eof_processed.get(client_id, False):
             logger.info(f"Timeout ACK para cliente {client_id}: no había mensajes pendientes, enviando ACK")
             self.eof_processed[client_id] = True
@@ -97,6 +114,9 @@ class PeerCoordinator:
             logger.debug(f"Timer expiró pero mensaje ya procesado para cliente {client_id}")
     
     def take_leadership(self, client_id: str, batch_type: str, on_all_acks_callback):
+        """
+        Este nodo se convierte en líder para el cliente especificado.
+        """
         logger.info(f"Tomando liderazgo para cliente {client_id}")
         
         self.leader_clients.add(client_id)
@@ -118,7 +138,9 @@ class PeerCoordinator:
         )
         
         routing_key = f'coord.{client_id}.eof'
-        self.coordination_exchange.send(msg.to_bytes_fast(), routing_key=routing_key)
+        
+        with self._exchange_lock:
+            self.coordination_exchange.send(msg.to_bytes_fast(), routing_key=routing_key)        
         
         logger.info(f"EOF_FANOUT publicado para cliente {client_id}")
         
@@ -130,6 +152,7 @@ class PeerCoordinator:
             self.leader_clients.discard(client_id)
     
     def handle_ack_received(self, client_id: str, node_id: str, batch_type: str):
+        """Procesa un ACK recibido"""
         if client_id not in self.leader_clients:
             return
         
@@ -155,6 +178,7 @@ class PeerCoordinator:
             self.leader_clients.discard(client_id)
     
     def handle_eof_fanout_received(self, client_id: str, leader_node: str, batch_type: str):
+        """Procesa un EOF_FANOUT recibido"""
         if leader_node == self.node_id:
             logger.debug(f"Ignorando EOF_FANOUT propio de {client_id}")
             return
