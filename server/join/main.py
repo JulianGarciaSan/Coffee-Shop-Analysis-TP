@@ -15,6 +15,7 @@ from message_router import MessageRouter
 from menu_item_processor import MenuItemProcessor
 from store_processor import StoreProcessor
 from user_processor import UserProcessor
+from client_routing.client_routing import ClientRouter
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -77,6 +78,10 @@ class JoinNode:
         self.input_exchange = os.getenv('INPUT_EXCHANGE', 'join.exchange')
         self.output_exchange = os.getenv('OUTPUT_EXCHANGE', 'report.exchange')
         
+        self.node_id = int(os.getenv('JOIN_NODE_ID', '0'))
+        self.total_join_nodes = int(os.getenv('TOTAL_JOIN_NODES', '3'))
+        self.node_name = f"join_node_{self.node_id}"
+        
         self.client_states: Dict[str, ClientProcessingState] = defaultdict(ClientProcessingState)
         
         self.store_processors: Dict[str, StoreProcessor] = {}
@@ -100,6 +105,11 @@ class JoinNode:
         logger.info(f"  RabbitMQ Host: {self.rabbitmq_host}")
         logger.info(f"  Input Exchange: {self.input_exchange}")
         logger.info(f"  Output Exchange: {self.output_exchange}")
+        
+        self.client_router = ClientRouter(
+            total_join_nodes=self.total_join_nodes,
+            node_prefix="join_node"
+        )
     
     def _get_or_create_processors(self, client_id: str):
         if client_id not in self.store_processors:
@@ -134,11 +144,9 @@ class JoinNode:
         routes = {
             'stores.data': self._handle_stores_message,
             'users.data': self._handle_users_message,
-            'users.eof': self._handle_users_message,
             'menu_items.data': self._handle_menu_items_message,
             'menu_items.eof': self._handle_menu_items_message,
             'tpv.data': self._handle_tpv_message,
-            'tpv.eof': self._handle_tpv_message,
             'top_customers.data': self._handle_top_customers_message,
             'top_customers.eof': self._handle_top_customers_message,
             'q2_best_selling.data': self._handle_best_selling_message,
@@ -152,18 +160,29 @@ class JoinNode:
         
         logger.info(f"Registradas {len(routes)} rutas de mensajes")
     
-    def _setup_middleware(self):
+    def _setup_middleware(self):        
+        base_keys = [
+            'stores.data',
+            'users.data',
+            'menu_items.data',
+            'tpv.data',
+            'top_customers.data', 'top_customers.eof',
+            'q2_best_selling.data',
+            'q2_most_profit.data', 'q2_most_profit.eof'
+        ]
+        
+        routing_keys = [f"{self.node_name}.{key}" for key in base_keys]
+        
+        logger.info(f"Configurando {len(routing_keys)} routing keys para {self.node_name}")
+        logger.info(f"Ejemplos: {routing_keys[:3]}")
+        
         self.input_middleware = MessageMiddlewareQueue(
             host=self.rabbitmq_host,
-            queue_name='join_input_queue',
+            queue_name=f'join_input_queue_{self.node_name}',  
             exchange_name=self.input_exchange,
-            routing_keys=['stores.data', 'tpv.data', 'tpv.eof', 
-                       'top_customers.data', 'top_customers.eof',
-                       'users.data', 'users.eof',
-                       'menu_items.data', 'menu_items.eof',
-                       'q2_best_selling.data', 'q2_best_selling.eof',
-                       'q2_most_profit.data', 'q2_most_profit.eof']
+            routing_keys=routing_keys
         )
+
         
         if hasattr(self.input_middleware, 'shutdown'):
             self.input_middleware.shutdown = self.shutdown
@@ -562,9 +581,13 @@ class JoinNode:
             
             routing_key = method.routing_key
             headers = properties.headers if properties and hasattr(properties, 'headers') else None
-            
-            should_stop = self.process_message(body, routing_key, headers)
-            
+            if '.' in routing_key:
+                parts = routing_key.split('.', 1) 
+                base_routing_key = parts[1] if len(parts) > 1 else routing_key
+            else:
+                base_routing_key = routing_key
+            should_stop = self.process_message(body, base_routing_key, headers)
+
             if should_stop:
                 logger.info("Procesamiento completado - deteniendo consuming")
                 ch.stop_consuming()

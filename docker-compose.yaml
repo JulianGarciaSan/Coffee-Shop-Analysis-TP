@@ -64,6 +64,31 @@ services:
       - ./data/transactions_test:/data/transactions_test
       - ./report_client_2:/app/report_client_2
       - ./data/transactions_items_test:/data/transactions_items_test
+  
+  client_3:
+    build:
+      context: .
+      dockerfile: ./client/Dockerfile
+    restart: on-failure
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - CLIENT_ID=client_3
+    depends_on:
+      gateway:
+        condition: service_started
+    volumes:
+      - ./client/config.ini:/config.ini
+      - ./data/transaction_items:/data/transaction_items
+      - ./data/users:/data/users
+      - ./data/stores:/data/stores
+      - ./data/menu_items:/data/menu_items
+      - ./data/payment_methods:/data/payment_methods
+      - ./data/vouchers:/data/vouchers
+      - ./data/transactions:/data/transactions
+      - ./data/transactions_test:/data/transactions_test
+      - ./report_client_3:/app/report_client_3
+      - ./data/transactions_items_test:/data/transactions_items_test
 
   gateway:
     build:
@@ -80,6 +105,7 @@ services:
       - REPORTS_EXCHANGE=reports_exchange
       - JOIN_EXCHANGE=join.exchange
       - OUTPUT_EXCHANGE=raw_data_exchange
+      - TOTAL_JOIN_NODES=2
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -314,7 +340,7 @@ services:
       - JOIN_EXCHANGE=join.exchange
       - NODE_ID=groupby_node_1
       - ALL_NODE_IDS=groupby_node_1,groupby_node_2
-
+      - TOTAL_JOIN_NODES=2
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -336,6 +362,7 @@ services:
       - JOIN_EXCHANGE=join.exchange
       - NODE_ID=groupby_node_2
       - ALL_NODE_IDS=groupby_node_1,groupby_node_2
+      - TOTAL_JOIN_NODES=2
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -423,11 +450,11 @@ services:
       - ./server/config.ini:/app/config.ini
       - ./reports:/app/reports
 
-  join_node:
+  join_node_0:
     build:
       context: .
       dockerfile: ./server/join/Dockerfile
-    container_name: join_node
+    container_name: join_node_0
     restart: on-failure
     depends_on:
       rabbitmq:
@@ -437,6 +464,27 @@ services:
       - RABBITMQ_HOST=rabbitmq
       - INPUT_EXCHANGE=join.exchange
       - OUTPUT_EXCHANGE=report.exchange
+      - JOIN_NODE_ID=0
+      - TOTAL_JOIN_NODES=2
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  join_node_1:
+    build:
+      context: .
+      dockerfile: ./server/join/Dockerfile
+    container_name: join_node_1
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - INPUT_EXCHANGE=join.exchange
+      - OUTPUT_EXCHANGE=report.exchange
+      - JOIN_NODE_ID=1
+      - TOTAL_JOIN_NODES=2
     volumes:
       - ./server/config.ini:/app/config.ini
 
