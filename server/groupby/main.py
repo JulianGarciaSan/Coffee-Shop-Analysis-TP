@@ -1,9 +1,9 @@
 import logging
 import os
 import sys
-from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
-from dtos.dto import TransactionBatchDTO, TransactionItemBatchDTO, BatchType
-from groupby_strategy import GroupByStrategyFactory
+from configurators import GroupByConfiguratorFactory
+# from server.groupby.strategies.groupby_strategy import GroupByStrategyFactory
+from dtos.dto import BatchType
 from common.graceful_shutdown import GracefulShutdown
 
 logging.basicConfig(level=logging.INFO)
@@ -19,18 +19,19 @@ class GroupByNode:
         self.groupby_mode = os.getenv('GROUPBY_MODE', 'tpv')
         self.output_exchange = os.getenv('OUTPUT_EXCHANGE', 'join.exchange')
         
-        self.groupby_strategy = self._create_groupby_strategy()
+        logger.info(f"GroupByNode inicializado en modo {self.groupby_mode}")
         
-        self._setup_input_middleware()
-        
-        if hasattr(self.input_middleware, 'shutdown'):
-            self.input_middleware.shutdown = self.shutdown
-        
-        self.output_middlewares = self.groupby_strategy.setup_output_middleware(
+        self.configurator = GroupByConfiguratorFactory.create_configurator(
+            self.groupby_mode,
             self.rabbitmq_host,
             self.output_exchange
         )
         
+        self.input_middleware = self.configurator.create_input_middleware()
+        if hasattr(self.input_middleware, 'shutdown'):
+            self.input_middleware.shutdown = self.shutdown
+        
+        self.output_middlewares = self.configurator.create_output_middlewares()
         for name, middleware in self.output_middlewares.items():
             if middleware and hasattr(middleware, 'shutdown'):
                 middleware.shutdown = self.shutdown
@@ -38,65 +39,21 @@ class GroupByNode:
         if self.groupby_mode in ['top_customers', 'best_selling']:
             self.output_middlewares['input_queue'] = self.input_middleware
         
-        logger.info(f"GroupByNode inicializado en modo {self.groupby_mode}")
+        # strategy_config = self.configurator.get_strategy_config()
+        # self.groupby_strategy = GroupByStrategyFactory.create_strategy(
+        #     self.groupby_mode, 
+        #     **strategy_config
+        # )
+        
+        # self.groupby_strategy.setup_output_middleware(
+        #     self.rabbitmq_host,
+        #     self.output_exchange
+        # )
    
     def _on_shutdown_signal(self):
         logger.info("Señal de shutdown recibida en GroupByNode")
         if self.input_middleware:
             self.input_middleware.stop_consuming()
-                
-    def _setup_input_middleware(self):
-        if self.groupby_mode == 'tpv':
-            self.input_exchange = os.getenv('INPUT_EXCHANGE', 'groupby.join.exchange')
-            semester = os.getenv('SEMESTER')
-            if semester not in ['1', '2']:
-                raise ValueError("SEMESTER debe ser '1' o '2'")
-            
-            self.input_middleware = MessageMiddlewareExchange(
-                host=self.rabbitmq_host,
-                exchange_name=self.input_exchange,
-                route_keys=[f'semester.{semester}', 'eof.all']
-            )
-            logger.info(f"  Input: Exchange {self.input_exchange}, semestre {semester}")
-        
-        elif self.groupby_mode == 'top_customers':
-            self.input_queue = os.getenv('INPUT_QUEUE', 'year_filtered_q4')
-            self.input_middleware = MessageMiddlewareQueue(
-                host=self.rabbitmq_host,
-                queue_name=self.input_queue
-            )
-            logger.info(f"  Input: Queue {self.input_queue} (round-robin)")
-        
-        elif self.groupby_mode == 'best_selling':
-            year_routing_key = os.getenv('AGGREGATOR_YEAR', '2024')
-            exchange_name = os.getenv('INPUT_EXCHANGE', 'year_filtered_q2')
-            queue_name = f"best_selling_{year_routing_key}_queue"
-            
-            self.input_middleware = MessageMiddlewareQueue(
-                host=self.rabbitmq_host,
-                queue_name=queue_name,
-                exchange_name=exchange_name,
-                routing_keys=[year_routing_key]
-            )
-            logger.info(f"  Input: Queue {queue_name} bindeada a exchange {exchange_name} con routing key {year_routing_key}")
-    
-    def _create_groupby_strategy(self):
-        config = {}
-        
-        if self.groupby_mode == 'tpv':
-            semester = os.getenv('SEMESTER')
-            if semester not in ['1', '2']:
-                raise ValueError("SEMESTER debe ser '1' o '2'")
-            config['semester'] = semester
-        
-        elif self.groupby_mode == 'top_customers':
-            config['input_queue_name'] = os.getenv('INPUT_QUEUE', 'year_filtered_q4')
-        
-        elif self.groupby_mode == 'best_selling':
-            year_routing_key = os.getenv('AGGREGATOR_YEAR', '2024')
-            config['input_queue_name'] = f"best_selling_{year_routing_key}_queue"
-        
-        return GroupByStrategyFactory.create_strategy(self.groupby_mode, **config)
     
     def process_message(self, message: bytes) -> bool:
         if self.shutdown.is_shutting_down():
@@ -104,18 +61,18 @@ class GroupByNode:
             return True
         
         try:
-            if self.groupby_mode == 'best_selling':
-                dto = TransactionItemBatchDTO.from_bytes_fast(message)
-            else:
-                dto = TransactionBatchDTO.from_bytes_fast(message)
-            logger.info(f"Mensaje recibido: batch_type={dto.batch_type}, tamaño={len(dto.data)} bytes")
-            if dto.batch_type == BatchType.EOF:
-                return self.groupby_strategy.handle_eof_message(dto, self.output_middlewares)
+            should_stop, dto, is_eof = self.configurator.process_message(message)
+            
+            if should_stop:
+                return True
+            
+            if is_eof:
+                return self.configurator.handle_eof(dto, self.output_middlewares)
             
             if dto.batch_type == BatchType.RAW_CSV:
                 for line in dto.data.split('\n'):
                     if line.strip():
-                        self.groupby_strategy.process_csv_line(line.strip())
+                        self.configurator.process_csv_line(line.strip())
             
             return False
             
@@ -134,6 +91,7 @@ class GroupByNode:
             if should_stop:
                 logger.info("EOF procesado - deteniendo consuming")
                 ch.stop_consuming()
+                
         except Exception as e:
             logger.error(f"Error en callback: {e}")
     
@@ -147,15 +105,22 @@ class GroupByNode:
             self._cleanup()
     
     def _cleanup(self):
+        logger.info("Iniciando cleanup del GroupByNode...")
+        
         try:
             if self.input_middleware:
                 self.input_middleware.close()
                 logger.info("Input middleware cerrado")
             
-            self.groupby_strategy.cleanup_middlewares(self.output_middlewares)
-                
+            if self.output_middlewares:
+                for name, middleware in self.output_middlewares.items():
+                    middleware.close()
+                    logger.info(f"Output middleware '{name}' cerrado")
+
         except Exception as e:
             logger.error(f"Error en cleanup: {e}")
+        
+        logger.info("Cleanup completado")
 
 
 if __name__ == "__main__":

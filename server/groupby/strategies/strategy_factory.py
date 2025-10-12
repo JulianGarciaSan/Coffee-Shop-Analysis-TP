@@ -1,9 +1,9 @@
 
 from typing import List
-from base_strategy import GroupByStrategy
-from tpv_groupby_strategy import TPVGroupByStrategy
-from top_customers_groupby_strategy import TopCustomersGroupByStrategy
-from best_selling_groupby_strategy import BestSellingGroupByStrategy
+from server.groupby.strategies.base_strategy import GroupByStrategy
+from server.groupby.strategies.tpv_groupby_strategy import TPVGroupByStrategy
+from server.groupby.strategies.top_customers_groupby_strategy import TopCustomersGroupByStrategy
+from server.groupby.strategies.best_selling_groupby_strategy import BestSellingGroupByStrategy
 
 
 class GroupByStrategyFactory:

@@ -24,7 +24,7 @@ class JoinNode:
             host=self.rabbitmq_host,
             queue_name='join_input_queue',
             exchange_name=self.input_exchange,
-            routing_keys=['stores.data', 'tpv.data', 'tpv.eof', 
+            routing_keys=['stores.data', 'tpv.data', 
                        'top_customers.data', 'top_customers.eof',
                        'users.data', 'users.eof',
                        'menu_items.data',
@@ -668,7 +668,7 @@ class JoinNode:
                 if dto.batch_type == BatchType.RAW_CSV:
                     self._process_menu_item_batch(dto.data)
                     
-            elif routing_key in ['tpv.data', 'tpv.eof']:
+            elif routing_key in ['tpv.data']:
                 dto = TransactionBatchDTO.from_bytes_fast(message)
                 if dto.batch_type == BatchType.EOF:
                     return self._handle_tpv_eof()

@@ -2,8 +2,8 @@ import logging
 import os
 from collections import defaultdict
 from typing import Dict
-from base_strategy import GroupByStrategy
-from user_purchase_count import UserPurchaseCount
+from server.groupby.strategies.base_strategy import GroupByStrategy
+from server.groupby.strategies.user_purchase_count import UserPurchaseCount
 from dtos.dto import TransactionBatchDTO, BatchType
 from rabbitmq.middleware import MessageMiddlewareExchange
 
