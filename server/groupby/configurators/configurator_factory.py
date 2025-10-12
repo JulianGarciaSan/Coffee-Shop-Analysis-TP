@@ -1,14 +1,14 @@
 from .base_configurators import GroupByConfigurator
 from .tpv_configurator import TPVConfigurator
 from .top_customer_configurator import TopCustomerConfigurator
-#from best_selling_configurator import BestSellingConfigurator
+from .best_selling_configurator import BestSellingConfigurator
 
 
 class GroupByConfiguratorFactory:    
     _configurators = {
         'tpv': TPVConfigurator,
         'top_customers': TopCustomerConfigurator,
-        #'best_selling': BestSellingConfigurator
+        'best_selling': BestSellingConfigurator
     }
     
     @staticmethod

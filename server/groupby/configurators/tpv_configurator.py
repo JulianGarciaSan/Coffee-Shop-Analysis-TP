@@ -58,17 +58,14 @@ class TPVConfigurator(GroupByConfigurator):
     def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict, strategy) -> bool:
         logger.info("EOF recibido. Obteniendo resultados TPV de la strategy")
         
-        # Obtener datos de la strategy
         results_csv = strategy.generate_results_csv()
         
-        # Enviar resultados
         result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
         middlewares["output"].send(
             result_dto.to_bytes_fast(),
             routing_key='tpv.data'
         )
         
-        # Enviar EOF final
         eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
         middlewares["output"].send(
             eof_dto.to_bytes_fast(),

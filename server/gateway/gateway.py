@@ -23,13 +23,13 @@ class Gateway:
         self._server_socket.listen(listener_backlog)
 
         self._is_running = False
-        self.max_expected_reports = 3
+        self.max_expected_reports = 5
         self.reports_config = [
             ('q1', self._convert_q1_to_csv, "Q1", "transacciones"),
             ('q3', self._convert_q3_to_csv, "Q3", "registros"),
             ('q4', self._convert_q4_to_csv, "Q4", "cumpleanos"),
-            #('q2_most_profit', self._convert_q2_most_profit_to_csv, "Q2_MOST_PROFIT", "items"),
-            #('q2_best_selling', self._convert_q2_best_selling_to_csv, "Q2_BEST_SELLING", "items")
+            ('q2_most_profit', self._convert_q2_most_profit_to_csv, "Q2_MOST_PROFIT", "items"),
+            ('q2_best_selling', self._convert_q2_best_selling_to_csv, "Q2_BEST_SELLING", "items")
         ]
         
         self._middleware = MessageMiddlewareExchange(

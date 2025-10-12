@@ -57,10 +57,8 @@ class TopCustomerConfigurator(GroupByConfigurator):
             
             logger.info(f"EOF recibido con counter={counter}, total={self.total_groupby_nodes}")
             
-            # Obtener datos de la strategy y enviarlos por store
             self._send_data_by_store(middlewares["output"], strategy)
             
-            # Lógica de EOF round-robin
             if counter < self.total_groupby_nodes:
                 new_counter = counter + 1
                 eof_dto = TransactionBatchDTO(f"EOF:{new_counter}", BatchType.EOF)
@@ -69,7 +67,6 @@ class TopCustomerConfigurator(GroupByConfigurator):
                     middlewares["input_queue"].send(eof_dto.to_bytes_fast())
                     logger.info(f"EOF:{new_counter} reenviado a input queue")
             else:
-                # Último nodo, enviar EOF final al agregador
                 eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
                 middlewares["output"].send(eof_dto.to_bytes_fast(), 'aggregated.eof')
                 logger.info("EOF final enviado a TopK intermedios (último nodo)")

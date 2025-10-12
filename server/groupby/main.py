@@ -64,13 +64,11 @@ class GroupByNode:
                 return True
             
             if is_eof:
-                # El configurator maneja el EOF y usa la strategy para obtener los datos
                 return self.configurator.handle_eof(dto, self.output_middlewares, self.strategy)
             
             if dto.batch_type == BatchType.RAW_CSV:
                 for line in dto.data.split('\n'):
                     if line.strip():
-                        # Delegar procesamiento de líneas a la strategy
                         self.strategy.process_csv_line(line.strip())
             
             return False

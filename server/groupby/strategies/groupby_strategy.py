@@ -6,7 +6,6 @@ from .user_purchase_count import UserPurchaseCount
 from .top_customers_groupby_strategy import TopCustomersGroupByStrategy
 from .strategy_factory import GroupByStrategyFactory
 
-# Make all classes available when importing from this module
 __all__ = [
     'GroupByStrategy',
     'TPVAggregation',

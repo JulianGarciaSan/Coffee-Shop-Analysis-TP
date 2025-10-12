@@ -36,9 +36,10 @@ class GroupByStrategyFactory:
         
         elif groupby_mode == 'best_selling':
             input_queue_name = config.get('input_queue_name')
+            year = config.get('year', '2024')
             if not input_queue_name:
                 raise ValueError("input_queue_name is required for best_selling")
-            return strategy_class(input_queue_name)
+            return strategy_class(input_queue_name, year)
         
         return strategy_class(**config)
     
