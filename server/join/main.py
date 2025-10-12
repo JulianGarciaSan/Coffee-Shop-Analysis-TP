@@ -351,10 +351,10 @@ class JoinNode:
             eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
             self.output_middleware.send(eof_dto.to_bytes_fast(), routing_key='q3.eof')
             
-            logger.info(f"✓ Resultados Q3 enviados: {len(self.q3_joined_data)} registros")
+            logger.info(f"Resultados Q3 enviados: {len(self.q3_joined_data)} registros")
             
         except Exception as e:
-            logger.error(f"✗ Error enviando resultados Q3: {e}", exc_info=True)
+            logger.error(f"Error enviando resultados Q3: {e}", exc_info=True)
     
     def _send_q4_results(self, joined_data: List[Dict]):
         try:
@@ -376,10 +376,10 @@ class JoinNode:
             eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
             self.output_middleware.send(eof_dto.to_bytes_fast(), routing_key='q4.eof')
             
-            logger.info(f"✓ Resultados Q4 enviados: {len(joined_data)} registros")
+            logger.info(f"Resultados Q4 enviados: {len(joined_data)} registros")
             
         except Exception as e:
-            logger.error(f"✗ Error enviando resultados Q4: {e}", exc_info=True)
+            logger.error(f"Error enviando resultados Q4: {e}", exc_info=True)
     
     def _send_best_selling_results(self, joined_data: List[Dict]):
         try:
@@ -401,10 +401,10 @@ class JoinNode:
             eof_dto = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
             self.output_middleware.send(eof_dto.to_bytes_fast(), routing_key='q2_best_selling.data')
             
-            logger.info(f"✓ Resultados Q2 best_selling enviados: {len(joined_data)} registros")
+            logger.info(f"Resultados Q2 best_selling enviados: {len(joined_data)} registros")
             
         except Exception as e:
-            logger.error(f"✗ Error enviando resultados Q2 best_selling: {e}", exc_info=True)
+            logger.error(f"Error enviando resultados Q2 best_selling: {e}", exc_info=True)
     
     def _send_most_profit_results(self, joined_data: List[Dict]):
         try:
@@ -426,10 +426,10 @@ class JoinNode:
             eof_dto = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
             self.output_middleware.send(eof_dto.to_bytes_fast(), routing_key='q2_most_profit.data')
             
-            logger.info(f"✓ Resultados Q2 most_profit enviados: {len(joined_data)} registros")
+            logger.info(f"Resultados Q2 most_profit enviados: {len(joined_data)} registros")
             
         except Exception as e:
-            logger.error(f"✗ Error enviando resultados Q2 most_profit: {e}", exc_info=True)
+            logger.error(f"Error enviando resultados Q2 most_profit: {e}", exc_info=True)
     
     
     def process_message(self, message: bytes, routing_key: str) -> bool:
