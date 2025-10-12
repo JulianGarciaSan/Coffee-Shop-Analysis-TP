@@ -15,7 +15,7 @@ services:
       - RABBITMQ_DEFAULT_USER=admin
       - RABBITMQ_DEFAULT_PASS=admin
 
-  client:
+  client_1:
     build:
       context: .
       dockerfile: ./client/Dockerfile
@@ -23,6 +23,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
+      - CLIENT_ID=client_1
     depends_on:
       gateway:
         condition: service_started
@@ -36,7 +37,32 @@ services:
       - ./data/vouchers:/data/vouchers
       - ./data/transactions:/data/transactions
       - ./data/transactions_test:/data/transactions_test
-      - ./report:/app/report
+      - ./report_client_1:/app/report_client_1
+      - ./data/transactions_items_test:/data/transactions_items_test
+
+  client_2:
+    build:
+      context: .
+      dockerfile: ./client/Dockerfile
+    restart: on-failure
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - CLIENT_ID=client_2
+    depends_on:
+      gateway:
+        condition: service_started
+    volumes:
+      - ./client/config.ini:/config.ini
+      - ./data/transaction_items:/data/transaction_items
+      - ./data/users:/data/users
+      - ./data/stores:/data/stores
+      - ./data/menu_items:/data/menu_items
+      - ./data/payment_methods:/data/payment_methods
+      - ./data/vouchers:/data/vouchers
+      - ./data/transactions:/data/transactions
+      - ./data/transactions_test:/data/transactions_test
+      - ./report_client_2:/app/report_client_2
       - ./data/transactions_items_test:/data/transactions_items_test
 
   gateway:
@@ -51,7 +77,6 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
-      - OUTPUT_QUEUE=raw_data
       - REPORTS_EXCHANGE=reports_exchange
       - JOIN_EXCHANGE=join.exchange
       - OUTPUT_EXCHANGE=raw_data_exchange
@@ -71,7 +96,6 @@ services:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
       - FILTER_MODE=year
-      - INPUT_QUEUE=raw_data
       - OUTPUT_Q1=year_filtered
       - TOTAL_YEAR_FILTERS=3
       - FILTER_YEARS=2024,2025
@@ -79,6 +103,8 @@ services:
       - OUTPUT_Q2=year_data.exchange
       - INPUT_EXCHANGE=raw_data_exchange
       - FILE_MODE=transactions
+      - NODE_ID=year_node_1
+      - ALL_NODE_IDS=year_node_1,year_node_2,year_node_3
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -95,7 +121,6 @@ services:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
       - FILTER_MODE=year
-      - INPUT_QUEUE=raw_data
       - OUTPUT_Q1=year_filtered
       - TOTAL_YEAR_FILTERS=3
       - FILTER_YEARS=2024,2025
@@ -103,6 +128,8 @@ services:
       - OUTPUT_Q2=year_data.exchange
       - INPUT_EXCHANGE=raw_data_exchange
       - FILE_MODE=transactions
+      - NODE_ID=year_node_2
+      - ALL_NODE_IDS=year_node_1,year_node_2,year_node_3
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -119,7 +146,6 @@ services:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
       - FILTER_MODE=year
-      - INPUT_QUEUE=raw_data
       - OUTPUT_Q1=year_filtered
       - TOTAL_YEAR_FILTERS=3
       - FILTER_YEARS=2024,2025
@@ -127,80 +153,79 @@ services:
       - OUTPUT_Q2=year_data.exchange
       - INPUT_EXCHANGE=raw_data_exchange
       - FILE_MODE=transactions
+      - NODE_ID=year_node_3
+      - ALL_NODE_IDS=year_node_1,year_node_2,year_node_3
     volumes:
       - ./server/config.ini:/app/config.ini
 
-  filter_year_4:
-    build:
-      context: .
-      dockerfile: ./server/filter/Dockerfile
-    container_name: filter_year_4
-    restart: on-failure
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    environment:
-      - PYTHONUNBUFFERED=1
-      - RABBITMQ_HOST=rabbitmq
-      - FILTER_MODE=year
-      - INPUT_QUEUE=raw_data
-      - OUTPUT_Q1=year_filtered
-      - TOTAL_YEAR_FILTERS=3
-      - FILTER_YEARS=2024,2025
-      - OUTPUT_Q4=year_filtered_q4
-      - OUTPUT_Q2=year_data.exchange
-      - INPUT_EXCHANGE=raw_data_exchange
-      - FILE_MODE=transaction_items
-    volumes:
-      - ./server/config.ini:/app/config.ini
+  # filter_year_4:
+  #   build:
+  #     context: .
+  #     dockerfile: ./server/filter/Dockerfile
+  #   container_name: filter_year_4
+  #   restart: on-failure
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #     - RABBITMQ_HOST=rabbitmq
+  #     - FILTER_MODE=year
+  #     - OUTPUT_Q1=year_filtered
+  #     - TOTAL_YEAR_FILTERS=3
+  #     - FILTER_YEARS=2024,2025
+  #     - OUTPUT_Q4=year_filtered_q4
+  #     - OUTPUT_Q2=year_data.exchange
+  #     - INPUT_EXCHANGE=raw_data_exchange
+  #     - FILE_MODE=transaction_items
+  #   volumes:
+  #     - ./server/config.ini:/app/config.ini
 
-  filter_year_5:
-    build:
-      context: .
-      dockerfile: ./server/filter/Dockerfile
-    container_name: filter_year_5
-    restart: on-failure
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    environment:
-      - PYTHONUNBUFFERED=1
-      - RABBITMQ_HOST=rabbitmq
-      - FILTER_MODE=year
-      - INPUT_QUEUE=raw_data
-      - OUTPUT_Q1=year_filtered
-      - TOTAL_YEAR_FILTERS=3
-      - FILTER_YEARS=2024,2025
-      - OUTPUT_Q4=year_filtered_q4
-      - OUTPUT_Q2=year_data.exchange
-      - INPUT_EXCHANGE=raw_data_exchange
-      - FILE_MODE=transaction_items
-    volumes:
-      - ./server/config.ini:/app/config.ini
+  # filter_year_5:
+  #   build:
+  #     context: .
+  #     dockerfile: ./server/filter/Dockerfile
+  #   container_name: filter_year_5
+  #   restart: on-failure
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #     - RABBITMQ_HOST=rabbitmq
+  #     - FILTER_MODE=year
+  #     - OUTPUT_Q1=year_filtered
+  #     - TOTAL_YEAR_FILTERS=3
+  #     - FILTER_YEARS=2024,2025
+  #     - OUTPUT_Q4=year_filtered_q4
+  #     - OUTPUT_Q2=year_data.exchange
+  #     - INPUT_EXCHANGE=raw_data_exchange
+  #     - FILE_MODE=transaction_items
+  #   volumes:
+  #     - ./server/config.ini:/app/config.ini
 
-  filter_year_6:
-    build:
-      context: .
-      dockerfile: ./server/filter/Dockerfile
-    container_name: filter_year_6
-    restart: on-failure
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    environment:
-      - PYTHONUNBUFFERED=1
-      - RABBITMQ_HOST=rabbitmq
-      - FILTER_MODE=year
-      - INPUT_QUEUE=raw_data
-      - OUTPUT_Q1=year_filtered
-      - TOTAL_YEAR_FILTERS=3
-      - FILTER_YEARS=2024,2025
-      - OUTPUT_Q4=year_filtered_q4
-      - OUTPUT_Q2=year_data.exchange
-      - INPUT_EXCHANGE=raw_data_exchange
-      - FILE_MODE=transaction_items
-    volumes:
-      - ./server/config.ini:/app/config.ini
+  # filter_year_6:
+  #   build:
+  #     context: .
+  #     dockerfile: ./server/filter/Dockerfile
+  #   container_name: filter_year_6
+  #   restart: on-failure
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #     - RABBITMQ_HOST=rabbitmq
+  #     - FILTER_MODE=year
+  #     - OUTPUT_Q1=year_filtered
+  #     - TOTAL_YEAR_FILTERS=3
+  #     - FILTER_YEARS=2024,2025
+  #     - OUTPUT_Q4=year_filtered_q4
+  #     - OUTPUT_Q2=year_data.exchange
+  #     - INPUT_EXCHANGE=raw_data_exchange
+  #     - FILE_MODE=transaction_items
+  #   volumes:
+  #     - ./server/config.ini:/app/config.ini
 
   filter_hour_1:
     build:
@@ -220,6 +245,8 @@ services:
       - TOTAL_HOUR_FILTERS=3
       - FILTER_HOURS=06:00-22:59
       - OUTPUT_Q3=groupby.join.exchange
+      - NODE_ID=hour_node_1
+      - ALL_NODE_IDS=hour_node_1,hour_node_2,hour_node_3
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -241,6 +268,8 @@ services:
       - TOTAL_HOUR_FILTERS=3
       - FILTER_HOURS=06:00-22:59
       - OUTPUT_Q3=groupby.join.exchange
+      - NODE_ID=hour_node_2
+      - ALL_NODE_IDS=hour_node_1,hour_node_2,hour_node_3
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -262,6 +291,8 @@ services:
       - TOTAL_HOUR_FILTERS=3
       - FILTER_HOURS=06:00-22:59
       - OUTPUT_Q3=groupby.join.exchange
+      - NODE_ID=hour_node_3
+      - ALL_NODE_IDS=hour_node_1,hour_node_2,hour_node_3
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -281,6 +312,9 @@ services:
       - INPUT_Q3=groupby.join.exchange
       - TOTAL_GROUPBY_NODES=2
       - JOIN_EXCHANGE=join.exchange
+      - NODE_ID=groupby_node_1
+      - ALL_NODE_IDS=groupby_node_1,groupby_node_2
+
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -300,6 +334,8 @@ services:
       - INPUT_Q3=groupby.join.exchange
       - TOTAL_GROUPBY_NODES=2
       - JOIN_EXCHANGE=join.exchange
+      - NODE_ID=groupby_node_2
+      - ALL_NODE_IDS=groupby_node_1,groupby_node_2
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -320,6 +356,8 @@ services:
       - OUTPUT_Q1=report.exchange
       - TOTAL_AMOUNT_FILTERS=3
       - MIN_AMOUNT=75
+      - NODE_ID=amount_node_1
+      - ALL_NODE_IDS=amount_node_1,amount_node_2,amount_node_3
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -340,6 +378,8 @@ services:
       - OUTPUT_Q1=report.exchange
       - TOTAL_AMOUNT_FILTERS=3
       - MIN_AMOUNT=75
+      - NODE_ID=amount_node_2
+      - ALL_NODE_IDS=amount_node_1,amount_node_2,amount_node_3
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -360,6 +400,8 @@ services:
       - OUTPUT_Q1=report.exchange
       - TOTAL_AMOUNT_FILTERS=3
       - MIN_AMOUNT=75
+      - NODE_ID=amount_node_3
+      - ALL_NODE_IDS=amount_node_1,amount_node_2,amount_node_3
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -375,7 +417,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
-      - INPUT_EXCHANGE=report.exchange
+      - REPORT_EXCHANGE=report.exchange
       - REPORTS_EXCHANGE=reports_exchange
     volumes:
       - ./server/config.ini:/app/config.ini

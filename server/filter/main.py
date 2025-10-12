@@ -1,6 +1,8 @@
 import logging
 import os
 import sys
+import threading
+from typing import Optional
 from rabbitmq.middleware import MessageMiddlewareQueue
 from strategies import FilterStrategyFactory
 from configurators import NodeConfiguratorFactory
@@ -27,6 +29,11 @@ class FilterNode:
         
         total_env_var = f'TOTAL_{self.filter_mode.upper()}_FILTERS'
         self.total_filters = int(os.getenv(total_env_var, '1'))
+        
+        self.node_id = os.getenv('NODE_ID', None)
+        all_node_ids_str = os.getenv('ALL_NODE_IDS', self.node_id)
+        all_node_ids = all_node_ids_str.split(',') if all_node_ids_str else [self.node_id]
+        
         
         logger.info(f"FilterNode inicializado:")
         logger.info(f"  Modo: {self.filter_mode}")
@@ -63,8 +70,8 @@ class FilterNode:
             if middleware and hasattr(middleware, 'shutdown'):
                 middleware.shutdown = self.shutdown
 
+
     def _on_shutdown_signal(self):
-        """Callback ejecutado cuando se recibe señal de shutdown"""
         logger.info("FilterNode: Señal de shutdown recibida, deteniendo consumo...")
         try:
             if self.input_middleware:
@@ -89,30 +96,33 @@ class FilterNode:
             logger.error(f"Error creando estrategia de filtro: {e}")
             raise
 
+    def _extract_client_id(self, data: str) -> str:
+        if data.startswith("EOF:"):
+            parts = data.split(':', 2)
+            if len(parts) >= 2:
+                return parts[1]
+        elif ':' in data:
+            return data.split(':', 1)[0]
+        
+        return "default"
 
-
-    def process_message(self, body: bytes, routing_key: str = None):
+    def process_message(self, body: bytes, routing_key: str = None, client_id: int = None):
         if self.shutdown.is_shutting_down():
             logger.warning("Shutdown en progreso, ignorando mensaje")
-            return True
         
         try:
             should_stop, batch_type, dto, is_eof = self.node_configurator.process_message(
-                body, routing_key
+                body, routing_key, client_id
             )
             
             if is_eof:
-                return self._handle_eof_message(dto, batch_type)
+                return self._handle_eof_message(dto, batch_type, client_id)
             
             if should_stop:
                 return True
                         
             decoded_data = body.decode('utf-8').strip()
             
-            if decoded_data.startswith("D:"):
-                decoded_data = decoded_data[2:]
-            elif decoded_data.startswith("I:"):
-                decoded_data = decoded_data[2:]
             
             if hasattr(self.filter_strategy, 'set_dto_helper'):
                 self.filter_strategy.set_dto_helper(dto)
@@ -127,7 +137,8 @@ class FilterNode:
                 return True
                         
             processed_data = self.node_configurator.process_filtered_data(filtered_csv)
-            self.node_configurator.send_data(processed_data, self.middlewares, batch_type)
+            logger.info(f"Enviando datos downstream - client_id: {client_id}, batch_type: {batch_type}")
+            self.node_configurator.send_data(processed_data, self.middlewares, batch_type, client_id=client_id)
             
             return False
 
@@ -135,7 +146,7 @@ class FilterNode:
             logger.error(f"Error procesando mensaje: {e}")
             return False
         
-    def _handle_eof_message(self, dto: TransactionBatchDTO, eof_type: str):
+    def _handle_eof_message(self, dto: TransactionBatchDTO, eof_type: str, client_id: Optional[int] = None):
         try:
             eof_data = dto.data.strip()
             if ":" in eof_data:
@@ -144,14 +155,15 @@ class FilterNode:
             else:
                 counter = 1
             
-            logger.info(f"EOF recibido: tipo={eof_type}, counter={counter}, total_filters={self.total_filters}")
+            logger.info(f"EOF recibido: tipo={eof_type}, counter={counter}, total_filters={self.total_filters}, client_id={client_id}")
             
             should_stop = self.node_configurator.handle_eof(
                 counter=counter,
                 total_filters=self.total_filters,
                 eof_type=eof_type,
                 middlewares=self.middlewares,
-                input_middleware=self.input_middleware
+                input_middleware=self.input_middleware,
+                client_id=client_id
             )
             
             if should_stop:
@@ -171,8 +183,15 @@ class FilterNode:
                 ch.stop_consuming()
                 return
             
+            # Extraer client_id de los headers
+            client_id = None
+            if properties and properties.headers:
+                client_id = properties.headers.get('client_id')
+            
+            logger.info(f"Mensaje recibido - client_id: {client_id}, routing_key: {method.routing_key if hasattr(method, 'routing_key') else None}")
+            
             routing_key = method.routing_key if hasattr(method, 'routing_key') else None
-            should_stop = self.process_message(body, routing_key)
+            should_stop = self.process_message(body, routing_key, client_id)
             
             if should_stop:
                 logger.info("EOF procesado - deteniendo consuming")
@@ -198,6 +217,8 @@ class FilterNode:
         logger.info("Iniciando cleanup del FilterNode...")
         
         try:
+            if hasattr(self.node_configurator, 'close'):
+                self.node_configurator.close()
             # Cerrar middleware de entrada
             if self.input_middleware:
                 self.input_middleware.close()

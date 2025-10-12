@@ -350,6 +350,64 @@ class ReportBatchDTO(BaseDTO):
         
     def get_column_index(self, column_name: str) -> int:
         raise NotImplementedError("ReportBatchBatchDTO no tiene columnas específicas.")
+    
+class CoordinationMessageDTO(BaseDTO):
+    EOF_FANOUT = "EOF_FANOUT"
+    ACK = "ACK"
+    
+    def __init__(self, msg_type: str, client_id: str, node_id: str, 
+                 batch_type: str = "transactions"):
+        self.msg_type = msg_type
+        self.client_id = client_id
+        self.node_id = node_id
+        self.batch_type_str = batch_type
+        
+        # Formato simple: tipo|client_id|node_id|batch_type
+        data = f"{msg_type}|{client_id}|{node_id}|{batch_type}"
+        
+        super().__init__(data, BatchType.CONTROL, None)
+    
+    @classmethod
+    def create_eof_fanout(cls, client_id: str, node_id: str, batch_type: str) -> 'CoordinationMessageDTO':
+        """Helper para crear mensaje EOF_FANOUT"""
+        return cls(cls.EOF_FANOUT, client_id, node_id, batch_type)
+    
+    @classmethod
+    def create_ack(cls, client_id: str, node_id: str, batch_type: str) -> 'CoordinationMessageDTO':
+        """Helper para crear mensaje ACK"""
+        return cls(cls.ACK, client_id, node_id, batch_type)
+    
+    @classmethod
+    def from_bytes_fast(cls, data: bytes) -> 'CoordinationMessageDTO':
+        """Deserializa desde bytes (formato: tipo|client_id|node_id|batch_type)"""
+        decoded_data = data.decode('utf-8').strip()
+        parts = decoded_data.split('|')
+        
+        if len(parts) != 4:
+            raise ValueError(f"Formato inválido de CoordinationMessageDTO: {decoded_data}")
+        
+        return cls(
+            msg_type=parts[0],
+            client_id=parts[1],
+            node_id=parts[2],
+            batch_type=parts[3]
+        )
+    def get_csv_headers(self) -> List[str]:
+        """No aplica para mensajes de coordinación"""
+        return []
+    
+    def dict_to_csv_line(self, record: Dict) -> str:
+        """No aplica para mensajes de coordinación"""
+        return ""
+    
+    def csv_line_to_dict(self, csv_line: str) -> Dict:
+        """No aplica para mensajes de coordinación"""
+        return {}
+    
+    def get_column_index(self, column_name: str) -> int:
+        """No aplica para mensajes de coordinación"""
+        raise NotImplementedError("CoordinationMessageDTO no tiene columnas")
+    
 class DTOFactory:
     """
     Factory para crear DTOs según el tipo de archivo.

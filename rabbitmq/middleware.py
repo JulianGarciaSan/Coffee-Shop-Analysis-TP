@@ -78,7 +78,7 @@ class MessageMiddlewareExchange(MessageMiddleware):
             logger.error(f"Error conectando a RabbitMQ: {e}")
             raise MessageMiddlewareDisconnectedError("No se pudo conectar a RabbitMQ")
 
-    def send(self, message: str, routing_key: str = None):
+    def send(self, message: str, routing_key: str = None, headers: dict = None):
         try:
             if not self.channel:
                 raise MessageMiddlewareDisconnectedError("No hay conexión activa con RabbitMQ")
@@ -90,7 +90,8 @@ class MessageMiddlewareExchange(MessageMiddleware):
                 routing_key=key,
                 body=message,
                 properties=pika.BasicProperties(
-                    delivery_mode=1
+                    delivery_mode=1,
+                    headers=headers or {}
                 )
             )
         except MessageMiddlewareDisconnectedError:
@@ -228,7 +229,7 @@ class MessageMiddlewareQueue(MessageMiddleware):
             logger.error(f"Error conectando a RabbitMQ: {e}")
             raise MessageMiddlewareDisconnectedError("No se pudo conectar a RabbitMQ")
 
-    def send(self, message: str):
+    def send(self, message: str,headers: dict = None):
         try:
             if not self.channel:
                 raise MessageMiddlewareDisconnectedError("No hay conexión activa con RabbitMQ")
@@ -237,7 +238,8 @@ class MessageMiddlewareQueue(MessageMiddleware):
                 routing_key=self.queue_name,
                 body=message,
                 properties=pika.BasicProperties(
-                    delivery_mode=2
+                    delivery_mode=2,
+                    headers=headers or {}
                 )
             )
         except MessageMiddlewareDisconnectedError:
@@ -252,7 +254,7 @@ class MessageMiddlewareQueue(MessageMiddleware):
                 raise MessageMiddlewareDisconnectedError("No hay conexión activa con RabbitMQ")
             
             # Optimizado para throughput
-            self.channel.basic_qos(prefetch_count=10)
+            self.channel.basic_qos(prefetch_count=1)
             
             for method_frame, properties, body in self.channel.consume(
                 self.queue_name,
