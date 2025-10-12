@@ -2,7 +2,7 @@ import logging
 import os
 import sys
 from configurators import GroupByConfiguratorFactory
-# from server.groupby.strategies.groupby_strategy import GroupByStrategyFactory
+from strategies.groupby_strategy import GroupByStrategyFactory
 from dtos.dto import BatchType
 from common.graceful_shutdown import GracefulShutdown
 
@@ -21,10 +21,18 @@ class GroupByNode:
         
         logger.info(f"GroupByNode inicializado en modo {self.groupby_mode}")
         
+        # Crear configurator (maneja middlewares y routing)
         self.configurator = GroupByConfiguratorFactory.create_configurator(
             self.groupby_mode,
             self.rabbitmq_host,
             self.output_exchange
+        )
+        
+        # Crear strategy (maneja lógica de negocio)
+        strategy_config = self.configurator.get_strategy_config()
+        self.strategy = GroupByStrategyFactory.create_strategy(
+            self.groupby_mode, 
+            **strategy_config
         )
         
         self.input_middleware = self.configurator.create_input_middleware()
@@ -38,17 +46,6 @@ class GroupByNode:
         
         if self.groupby_mode in ['top_customers', 'best_selling']:
             self.output_middlewares['input_queue'] = self.input_middleware
-        
-        # strategy_config = self.configurator.get_strategy_config()
-        # self.groupby_strategy = GroupByStrategyFactory.create_strategy(
-        #     self.groupby_mode, 
-        #     **strategy_config
-        # )
-        
-        # self.groupby_strategy.setup_output_middleware(
-        #     self.rabbitmq_host,
-        #     self.output_exchange
-        # )
    
     def _on_shutdown_signal(self):
         logger.info("Señal de shutdown recibida en GroupByNode")
@@ -67,12 +64,14 @@ class GroupByNode:
                 return True
             
             if is_eof:
-                return self.configurator.handle_eof(dto, self.output_middlewares)
+                # El configurator maneja el EOF y usa la strategy para obtener los datos
+                return self.configurator.handle_eof(dto, self.output_middlewares, self.strategy)
             
             if dto.batch_type == BatchType.RAW_CSV:
                 for line in dto.data.split('\n'):
                     if line.strip():
-                        self.configurator.process_csv_line(line.strip())
+                        # Delegar procesamiento de líneas a la strategy
+                        self.strategy.process_csv_line(line.strip())
             
             return False
             

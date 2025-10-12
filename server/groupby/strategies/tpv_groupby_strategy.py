@@ -1,10 +1,8 @@
 import logging
 from collections import defaultdict
 from typing import Dict, Tuple
-from server.groupby.strategies.base_strategy import GroupByStrategy
-from server.groupby.configurators.tpv_aggregation import TPVAggregation
-from dtos.dto import TransactionBatchDTO, BatchType
-from rabbitmq.middleware import MessageMiddlewareExchange
+from .base_strategy import GroupByStrategy
+from configurators.tpv_aggregation import TPVAggregation
 
 logger = logging.getLogger(__name__)
 
@@ -35,3 +33,18 @@ class TPVGroupByStrategy(GroupByStrategy):
             
         except (ValueError, IndexError) as e:
             logger.warning(f"Error procesando línea para TPV: {e}")
+    
+    def generate_results_csv(self) -> str:
+        """Genera el CSV final con los resultados agregados"""
+        if not self.tpv_aggregations:
+            logger.warning("No hay datos TPV para generar resultados")
+            return "year_half_created_at,store_id,total_payment_value,transaction_count"
+        
+        csv_lines = ["year_half_created_at,store_id,total_payment_value,transaction_count"]
+        
+        for (year_half, store_id) in sorted(self.tpv_aggregations.keys()):
+            aggregation = self.tpv_aggregations[(year_half, store_id)]
+            csv_lines.append(aggregation.to_csv_line(year_half, store_id))
+        
+        logger.info(f"Resultados TPV generados para {len(self.tpv_aggregations)} grupos")
+        return '\n'.join(csv_lines)

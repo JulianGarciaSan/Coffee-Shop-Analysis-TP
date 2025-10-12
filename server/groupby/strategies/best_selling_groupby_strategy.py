@@ -2,7 +2,7 @@ import logging
 import os
 from collections import defaultdict
 from typing import Dict
-from base_strategy import GroupByStrategy
+from .base_strategy import GroupByStrategy
 from dtos.dto import TransactionItemBatchDTO, BatchType
 from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
 
