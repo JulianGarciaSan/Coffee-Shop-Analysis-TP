@@ -14,7 +14,12 @@ class TPVConfigurator(GroupByConfigurator):
     def __init__(self, rabbitmq_host: str, output_exchange: str):
         super().__init__(rabbitmq_host, output_exchange)
         self.semester = os.getenv('SEMESTER', '1')
-        self.tpv_aggregations: Dict[Tuple[str, str], TPVAggregation] = defaultdict(TPVAggregation)
+        
+        self.tpv_aggregations_by_client: Dict[str, Dict[Tuple[str, str], TPVAggregation]] = defaultdict(
+            lambda: defaultdict(TPVAggregation)
+        )
+        self.eof_received_by_client: Dict[str, bool] = {}
+
         logger.info(f"TPVGroupByStrategy inicializada para semestre {self.semester}")
 
         if self.semester not in ['1', '2']:
@@ -48,10 +53,18 @@ class TPVConfigurator(GroupByConfigurator):
         
         return {"output": output_middleware}
     
-    def process_message(self, body: bytes) -> tuple:
+    def process_message(self, body: bytes, headers: dict = None) -> tuple:
         dto = TransactionBatchDTO.from_bytes_fast(body)
         
-        logger.info(f"Mensaje recibido: batch_type={dto.batch_type}, tamaño={len(dto.data)} bytes")
+        client_id = 'default_client'
+        if headers and 'client_id' in headers:
+            client_id = headers['client_id']
+            if isinstance(client_id, bytes):
+                client_id = client_id.decode('utf-8')
+        
+        dto.client_id = client_id
+        
+        logger.info(f"Mensaje recibido de cliente '{client_id}': batch_type={dto.batch_type}, tamaño={len(dto.data)} bytes")
         
         is_eof = (dto.batch_type == BatchType.EOF)
         should_stop = False
@@ -59,37 +72,54 @@ class TPVConfigurator(GroupByConfigurator):
         return (should_stop, dto, is_eof)
     
     def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict) -> bool:
-        logger.info("EOF recibido. Generando resultados TPV finales")
+        client_id = getattr(dto, 'client_id', 'default_client')
         
-        results_csv = self.generate_results_csv()
+        if self.eof_received_by_client.get(client_id, False):
+            logger.warning(f"EOF duplicado de cliente '{client_id}', ignorando")
+            return False
+        
+        logger.info(f"EOF recibido de cliente '{client_id}'")
+        self.eof_received_by_client[client_id] = True
+        
+        self._send_results_for_client(client_id, middlewares)
+        
+        return False  
+    
+    def _send_results_for_client(self, client_id: str, middlewares: dict):
+        logger.info(f"Generando resultados TPV para cliente '{client_id}'")
+        
+        results_csv = self.generate_results_csv_for_client(client_id)
         
         result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
         middlewares["output"].send(
             result_dto.to_bytes_fast(),
-            routing_key='tpv.data'
+            routing_key='tpv.data',
+            headers={'client_id': client_id}
         )
         
-        eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
+        eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
         middlewares["output"].send(
             eof_dto.to_bytes_fast(),
-            routing_key='tpv.data'
+            routing_key='tpv.eof',
+            headers={'client_id': client_id}
         )
         
-        logger.info("Resultados TPV enviados al siguiente nodo")
-        return True
+        logger.info(f"Resultados TPV enviados para cliente '{client_id}'")
     
-    def generate_results_csv(self) -> str:
-        if not self.tpv_aggregations:
-            logger.warning("No hay datos TPV para generar resultados")
+    def generate_results_csv_for_client(self, client_id: str) -> str:
+        client_aggregations = self.tpv_aggregations_by_client.get(client_id, {})
+        
+        if not client_aggregations:
+            logger.warning(f"No hay datos TPV para cliente '{client_id}'")
             return "year_half_created_at,store_id,total_payment_value,transaction_count"
         
         csv_lines = ["year_half_created_at,store_id,total_payment_value,transaction_count"]
         
-        for (year_half, store_id) in sorted(self.tpv_aggregations.keys()):
-            aggregation = self.tpv_aggregations[(year_half, store_id)]
+        for (year_half, store_id) in sorted(client_aggregations.keys()):
+            aggregation = client_aggregations[(year_half, store_id)]
             csv_lines.append(aggregation.to_csv_line(year_half, store_id))
         
-        logger.info(f"Resultados TPV generados para {len(self.tpv_aggregations)} grupos")
+        logger.info(f"Resultados TPV generados para cliente '{client_id}': {len(client_aggregations)} grupos")
         return '\n'.join(csv_lines)
     
     def get_strategy_config(self) -> dict:
@@ -97,7 +127,7 @@ class TPVConfigurator(GroupByConfigurator):
             'semester': self.semester
         }
         
-    def process_csv_line(self, csv_line: str):
+    def process_csv_line(self, csv_line: str, client_id: str = 'default_client'):
         try:
             store_id = self.dto_helper.get_column_value(csv_line, 'store_id')
             created_at = self.dto_helper.get_column_value(csv_line, 'created_at')
@@ -111,7 +141,7 @@ class TPVConfigurator(GroupByConfigurator):
             final_amount = float(final_amount_str)
             
             key = (year_half, store_id)
-            self.tpv_aggregations[key].add_transaction(final_amount)
+            self.tpv_aggregations_by_client[client_id][key].add_transaction(final_amount)
             
         except (ValueError, IndexError) as e:
-            logger.warning(f"Error procesando línea para TPV: {e}")
+            logger.warning(f"Error procesando línea para TPV (cliente '{client_id}'): {e}")

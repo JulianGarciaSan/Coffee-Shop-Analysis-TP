@@ -135,12 +135,12 @@ class ClientHandler(threading.Thread):
                 
             elif file_type == "S":
                 eof_dto = StoreBatchDTO("EOF:1", batch_type=BatchType.EOF)
-                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key='stores.data')
+                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key='stores.data',headers={'client_id': self.client_id})
                 logger.info("EOF:1 enviado para tipo S (stores)")
 
             elif file_type == "U":
                 eof_dto = UserBatchDTO("EOF:1", batch_type=BatchType.EOF)
-                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key='users.eof')
+                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key='users.eof',headers={'client_id': self.client_id})
                 logger.info("EOF:1 enviado para tipo U (users)")
                 
             elif file_type == "I":
@@ -150,7 +150,7 @@ class ClientHandler(threading.Thread):
 
             elif file_type == "M":
                 eof_dto = MenuItemBatchDTO("EOF:1", batch_type=BatchType.EOF)
-                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key='menu_items.data')
+                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key='menu_items.data',headers={'client_id': self.client_id})
                 logger.info("EOF:1 enviado para tipo M (menu_items)")
 
         except Exception as e:
@@ -178,7 +178,7 @@ class ClientHandler(threading.Thread):
             serialized_data = dto.to_bytes_fast()
 
 
-            self._join_middleware.send(serialized_data, routing_key='stores.data')
+            self._join_middleware.send(serialized_data, routing_key='stores.data',headers={'client_id': self.client_id})
 
 
             line_count = len([line for line in dto.data.split('\n') if line.strip()])
@@ -193,7 +193,7 @@ class ClientHandler(threading.Thread):
             serialized_data = dto.to_bytes_fast()
 
 
-            self._join_middleware.send(serialized_data, routing_key='users.data')
+            self._join_middleware.send(serialized_data, routing_key='users.data',headers={'client_id': self.client_id})
 
 
             line_count = len([line for line in dto.data.split('\n') if line.strip()])
@@ -208,7 +208,7 @@ class ClientHandler(threading.Thread):
             serialized_data = dto.to_bytes_fast()
 
 
-            self._join_middleware.send(serialized_data, routing_key='menu_items.data')
+            self._join_middleware.send(serialized_data, routing_key='menu_items.data',headers={'client_id': self.client_id})
 
 
             line_count = len([line for line in dto.data.split('\n') if line.strip()])

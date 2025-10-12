@@ -10,10 +10,10 @@ class MessageRouter:
     def register(self, routing_key: str, handler: Callable):
         self.handlers[routing_key] = handler
     
-    def route(self, routing_key: str, message: bytes) -> bool:
+    def route(self, routing_key: str, message: bytes, headers: dict = None) -> bool:
         handler = self.handlers.get(routing_key)
         if handler:
-            return handler(message)
+            return handler(message, headers)
         else:
             logger.warning(f"No handler registrado para routing key: {routing_key}")
             return False
