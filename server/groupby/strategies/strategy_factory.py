@@ -1,9 +1,9 @@
 
 from typing import List
-from server.groupby.strategies.base_strategy import GroupByStrategy
-from server.groupby.strategies.tpv_groupby_strategy import TPVGroupByStrategy
-from server.groupby.strategies.top_customers_groupby_strategy import TopCustomersGroupByStrategy
-from server.groupby.strategies.best_selling_groupby_strategy import BestSellingGroupByStrategy
+from .base_strategy import GroupByStrategy
+from .tpv_groupby_strategy import TPVGroupByStrategy
+from .top_customers_groupby_strategy import TopCustomersGroupByStrategy
+from .best_selling_groupby_strategy import BestSellingGroupByStrategy
 
 
 class GroupByStrategyFactory:
@@ -36,9 +36,10 @@ class GroupByStrategyFactory:
         
         elif groupby_mode == 'best_selling':
             input_queue_name = config.get('input_queue_name')
+            year = config.get('year', '2024')
             if not input_queue_name:
                 raise ValueError("input_queue_name is required for best_selling")
-            return strategy_class(input_queue_name)
+            return strategy_class(input_queue_name, year)
         
         return strategy_class(**config)
     

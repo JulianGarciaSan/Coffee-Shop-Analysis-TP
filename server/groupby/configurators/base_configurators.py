@@ -30,9 +30,5 @@ class GroupByConfigurator(ABC):
         pass
     
     @abstractmethod
-    def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict) -> bool:
-        pass
-    
-    @abstractmethod
-    def process_csv_line(self, csv_line: str):
+    def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict, strategy) -> bool:
         pass
