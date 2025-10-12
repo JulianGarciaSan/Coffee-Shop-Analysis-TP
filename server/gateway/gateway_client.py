@@ -36,14 +36,14 @@ class ClientHandler(threading.Thread):
         
         self.report_data = {
             'q1': [],
-            #'q3': [],
+            'q3': [],
             #'q4': [],
             #'q2_most_profit': [],
             #'q2_best_selling': []
         }
         self.eof_count = 0
         #self.max_expected_reports = 5
-        self.max_expected_reports = 1
+        self.max_expected_reports = 2
         
         self.reports_config = [
             ('q1', self._convert_q1_to_csv, "Q1", "transacciones"),
@@ -236,13 +236,6 @@ class ClientHandler(threading.Thread):
 
     def _collect_reports_from_pipeline(self):
         """Recopila todos los reportes del pipeline."""
-        report_data = {
-            'q1': [],
-            #'q3': [],
-            #'q4': [],
-            #'q2_most_profit': [],
-            #'q2_best_selling': []
-        }
         eof_count = 0
         
         def report_callback(ch, method, properties, body):
@@ -273,14 +266,14 @@ class ClientHandler(threading.Thread):
                     return
                 
                 if dto.batch_type == BatchType.RAW_CSV:
-                    self._process_report_batch(dto.data, query_name, report_data)
+                    self._process_report_batch(dto.data, query_name, self.report_data)
                     #logger.info(f"Batch procesado: Q1={len(report_data['q1'])}, Q3={len(report_data['q3'])}, Q4={len(report_data['q4'])}")
                     
             except Exception as e:
                 logger.error(f"Error procesando batch del reporte: {e}")
         
         self.report_middleware.start_consuming(report_callback)
-        return report_data
+        return self.report_data
 
     def _process_report_batch(self, data, query_name, report_data):
         lines = data.strip().split('\n')
