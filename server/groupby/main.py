@@ -52,13 +52,13 @@ class GroupByNode:
         if self.input_middleware:
             self.input_middleware.stop_consuming()
     
-    def process_message(self, message: bytes) -> bool:
+    def process_message(self, message: bytes, headers: dict = None) -> bool:
         if self.shutdown.is_shutting_down():
             logger.warning("Shutdown en progreso, ignorando mensaje")
             return True
         
         try:
-            should_stop, dto, is_eof = self.configurator.process_message(message)
+            should_stop, dto, is_eof = self.configurator.process_message(message, headers)
             
             if should_stop:
                 return True
@@ -67,16 +67,19 @@ class GroupByNode:
                 return self.configurator.handle_eof(dto, self.output_middlewares, self.strategy)
             
             if dto.batch_type == BatchType.RAW_CSV:
+                client_id = getattr(dto, 'client_id', 'default_client')
+                
                 for line in dto.data.split('\n'):
                     if line.strip():
-                        self.strategy.process_csv_line(line.strip())
+                        # Delegar procesamiento de líneas a la strategy
+                        self.strategy.process_csv_line(line.strip(), client_id)
             
             return False
             
         except Exception as e:
             logger.error(f"Error procesando mensaje: {e}")
             return False
-    
+        
     def on_message_callback(self, ch, method, properties, body):
         try:
             if self.shutdown.is_shutting_down():
@@ -84,7 +87,9 @@ class GroupByNode:
                 ch.stop_consuming()
                 return
             
-            should_stop = self.process_message(body)
+            headers = properties.headers if properties and hasattr(properties, 'headers') else None
+            
+            should_stop = self.process_message(body, headers)
             if should_stop:
                 logger.info("EOF procesado - deteniendo consuming")
                 ch.stop_consuming()

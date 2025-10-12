@@ -22,7 +22,17 @@ class GroupByConfigurator(ABC):
         pass
     
     @abstractmethod
-    def process_message(self, body: bytes) -> tuple:
+    def process_message(self, body: bytes, headers: dict = None) -> tuple:
+        """
+        Procesa un mensaje recibido.
+        
+        Args:
+            body: El cuerpo del mensaje en bytes
+            headers: Headers del mensaje (puede contener client_id)
+            
+        Returns:
+            tuple: (should_stop, dto, is_eof)
+        """
         pass
     
     @abstractmethod

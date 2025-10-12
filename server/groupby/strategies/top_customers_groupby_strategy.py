@@ -16,7 +16,7 @@ class TopCustomersGroupByStrategy(GroupByStrategy):
         )
         logger.info(f"TopCustomersGroupByStrategy inicializada para queue {input_queue_name}")
     
-    def process_csv_line(self, csv_line: str):
+    def process_csv_line(self, csv_line: str, client_id: str = 'default_client'):
         try:
             store_id = self.dto_helper.get_column_value(csv_line, 'store_id')
             user_id = self.dto_helper.get_column_value(csv_line, 'user_id')

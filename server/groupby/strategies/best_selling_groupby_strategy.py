@@ -35,7 +35,7 @@ class BestSellingGroupByStrategy(GroupByStrategy):
 
         logger.info(f"BestSellingGroupByStrategy inicializada para año {year}")
     
-    def process_csv_line(self, csv_line: str):
+    def process_csv_line(self, csv_line: str, client_id: str = 'default_client'):
         try:
             item_id = self.dto_helper.get_column_value(csv_line, 'item_id')
             created_at = self.dto_helper.get_column_value(csv_line, 'created_at')

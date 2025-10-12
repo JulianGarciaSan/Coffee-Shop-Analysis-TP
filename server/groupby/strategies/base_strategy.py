@@ -16,6 +16,6 @@ class GroupByStrategy(ABC):
         self.dto_helper = TransactionBatchDTO("", BatchType.RAW_CSV)
     
     @abstractmethod
-    def process_csv_line(self, csv_line: str):
+    def process_csv_line(self, csv_line: str, client_id: str = 'default_client'):
         """Procesa una línea CSV y acumula datos"""
         pass

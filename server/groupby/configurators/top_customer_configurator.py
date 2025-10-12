@@ -40,7 +40,7 @@ class TopCustomerConfigurator(GroupByConfigurator):
         
         return {"output": output_middleware}
     
-    def process_message(self, body: bytes) -> tuple:
+    def process_message(self, body: bytes, headers: dict = None) -> tuple:
         dto = TransactionBatchDTO.from_bytes_fast(body)
         
         logger.info(f"Mensaje recibido: batch_type={dto.batch_type}, tamaño={len(dto.data)} bytes")
