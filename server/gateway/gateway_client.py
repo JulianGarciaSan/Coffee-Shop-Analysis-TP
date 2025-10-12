@@ -245,10 +245,6 @@ class ClientHandler(threading.Thread):
             self._send_error_to_client(f"Error processing reports: {e}")
 
     def _collect_reports_from_pipeline(self):
-<<<<<<< HEAD
-=======
-        """Recopila todos los reportes del pipeline."""
->>>>>>> 9f771296ca1aaef6455fe0624a31ac4392aeb818
         eof_count = 0
         
         def report_callback(ch, method, properties, body):
