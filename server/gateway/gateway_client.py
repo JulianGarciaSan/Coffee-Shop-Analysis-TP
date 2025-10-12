@@ -38,13 +38,13 @@ class ClientHandler(threading.Thread):
         self.report_data = {
             'q1': [],
             'q3': [],
-            #'q4': [],
+            'q4': [],
             #'q2_most_profit': [],
             #'q2_best_selling': []
         }
         self.eof_count = 0
         #self.max_expected_reports = 5
-        self.max_expected_reports = 2
+        self.max_expected_reports = len(self.report_data)
         
         self.reports_config = [
             ('q1', self._convert_q1_to_csv, "Q1", "transacciones"),
