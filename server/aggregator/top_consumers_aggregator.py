@@ -6,50 +6,77 @@ from collections import defaultdict
 from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
 from dtos.dto import TransactionBatchDTO, BatchType
 from common.graceful_shutdown import GracefulShutdown
+from dtos.dto import TransactionBatchDTO, BatchType, CoordinationMessageDTO
+from  client_routing.client_routing import ClientRouter
+import threading
+from coordinator.coordinator import PeerCoordinator
+
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
 class TopCustomersAggregatorNode:
     def __init__(self):
+        self._init_shutdown()
+        self._init_config()
+        self._init_data_structures()
+        self._init_coordination_if_needed()
+        self._init_middlewares()
+
+    def _init_shutdown(self):
         self.shutdown = GracefulShutdown()
         self.shutdown.register_callback(self._on_shutdown_signal)
-        
+
+    def _init_config(self):
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.mode = os.getenv('AGGREGATOR_MODE', 'intermediate')
-        
         logger.info(f"Inicializando TopCustomersAggregatorNode con modo: {self.mode}")
-        
-        # Estructura: {store_id: {user_id: purchases_qty}}
-        self.store_user_purchases: Dict[str, Dict[str, int]] = defaultdict(
-            lambda: defaultdict(int)
-        )
-        
+
+    def _init_data_structures(self):
+        self.store_user_purchases: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
         self.input_middleware = None
         self.output_middleware = None
-        
-        if self.mode == 'intermediate':
-            self.node_id = int(os.getenv('TOPK_NODE_ID', '1'))
-            self.total_nodes = int(os.getenv('TOTAL_TOPK_NODES', '2'))
-            logger.info(f"[INTERMEDIATE] TopK node {self.node_id}/{self.total_nodes}")
-            
-        elif self.mode == 'final':
+        self.eof_count_by_client: Dict[str, int] = defaultdict(int)
+        if self.mode == 'final':
             self.total_intermediate = int(os.getenv('TOTAL_TOPK_NODES', '2'))
-            self.eof_count = 0
+            self.final_eof_count_by_client = defaultdict(int)
             logger.info(f"[FINAL] Esperando {self.total_intermediate} nodos intermediate")
+            total_join_nodes = int(os.getenv('TOTAL_JOIN_NODES', '2'))
+            self.client_router = ClientRouter(total_join_nodes=total_join_nodes)
+
+    def _init_coordination_if_needed(self):
+        if self.mode != 'intermediate':
+            return
+        topk_node_id = os.getenv('TOPK_NODE_ID')
+        if topk_node_id is not None:
+            self.node_id = topk_node_id
         else:
-            logger.error(f"Modo desconocido: {self.mode}")
-            raise ValueError(f"Modo desconocido: {self.mode}")
+            self.node_id = os.getenv('NODE_ID', '1')
+        self.total_nodes = int(os.getenv('TOTAL_TOPK_NODES', '2'))
         
+        total_stores = 10
+        stores_per_node = total_stores // self.total_nodes
+        extra_stores = total_stores % self.total_nodes
+        try:
+            node_num = int(self.node_id)
+        except ValueError:
+            node_num = int(str(self.node_id).split('_')[-1])
+        
+        if node_num <= extra_stores:
+            self.expected_eof_per_client = stores_per_node + 1
+        else:
+            self.expected_eof_per_client = stores_per_node
+            
+        logger.info(f"[INTERMEDIATE] TopK node {self.node_id} espera {self.expected_eof_per_client} EOF por cliente")
+
+    def _init_middlewares(self):
         try:
             self._setup_input_middleware()
             self._setup_output_middleware()
-            
             if hasattr(self.input_middleware, 'shutdown'):
                 self.input_middleware.shutdown = self.shutdown
             if hasattr(self.output_middleware, 'shutdown'):
                 self.output_middleware.shutdown = self.shutdown
-                
         except Exception as e:
             logger.error(f"Error durante la configuración de middlewares: {e}")
             raise
@@ -63,17 +90,21 @@ class TopCustomersAggregatorNode:
         if self.mode == 'intermediate':
             input_exchange = os.getenv('INPUT_EXCHANGE', 'aggregated.exchange')
             queue_name = os.getenv('INPUT_QUEUE', 'aggregated_data')
-            
+
             total_stores = 10
             stores_per_node = total_stores // self.total_nodes
             extra_stores = total_stores % self.total_nodes
-            
-            start_store = (self.node_id - 1) * stores_per_node + min(self.node_id - 1, extra_stores)
-            end_store = start_store + stores_per_node + (1 if self.node_id <= extra_stores else 0)
-            
+
+            try:
+                node_num = int(self.node_id)
+            except ValueError:
+                node_num = int(str(self.node_id).split('_')[-1])
+
+            start_store = (node_num - 1) * stores_per_node + min(node_num - 1, extra_stores)
+            end_store = start_store + stores_per_node + (1 if node_num <= extra_stores else 0)
+
             routing_keys = [f"store.{i}" for i in range(start_store + 1, end_store + 1)]
-            routing_keys.append('aggregated.eof')
-            
+
             self.input_middleware = MessageMiddlewareQueue(
                 host=self.rabbitmq_host,
                 queue_name=queue_name,  
@@ -160,75 +191,89 @@ class TopCustomersAggregatorNode:
     
     def handle_eof(self, dto: TransactionBatchDTO, routing_key: str = None) -> bool:
         try:
+            from dtos.dto import BatchType
+            client_id = getattr(dto, 'client_id', 'default_client')
+            
             if self.mode == 'intermediate':
-                logger.info(f"EOF recibido - calculando y enviando Top 3 local")
+                self.eof_count_by_client[client_id] += 1
+                logger.info(f"EOF recibido para cliente {client_id} en routing_key {routing_key} (total: {self.eof_count_by_client[client_id]}/{self.expected_eof_per_client})")
                 
-                results_csv = self.generate_top3_csv()
-                result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
-                self.output_middleware.send(
-                    result_dto.to_bytes_fast(),
-                    routing_key='topk.local.data'
-                )
-                
-                eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
-                self.output_middleware.send(
-                    eof_dto.to_bytes_fast(),
-                    routing_key='topk.local.data'
-                )
-                
-                logger.info(f"[INTERMEDIATE] Top 3 local enviado al final")
-                return True
-                
-            elif self.mode == 'final':
-                self.eof_count += 1
-                logger.info(f"EOF recibido: {self.eof_count}/{self.total_intermediate}")
-                
-                if self.eof_count >= self.total_intermediate:
-                    logger.info(f"[FINAL] Todos los intermediate terminaron - calculando Top 3 global")
-                    
+                # Verificar si hemos recibido EOF de todas las stores asignadas
+                if self.eof_count_by_client[client_id] >= self.expected_eof_per_client:
+                    logger.info(f"EOF completo recibido para cliente {client_id}, enviando resultados downstream")
                     results_csv = self.generate_top3_csv()
                     result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
                     self.output_middleware.send(
                         result_dto.to_bytes_fast(),
-                        routing_key='top_customers.data'
+                        routing_key='topk.local.data',
+                        headers={'client_id': client_id}
                     )
-                    
-                    eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
+                    eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
                     self.output_middleware.send(
                         eof_dto.to_bytes_fast(),
-                        routing_key='top_customers.data'
+                        routing_key='topk.local.data',
+                        headers={'client_id': client_id}
                     )
-                    
-                    logger.info("[FINAL] Top 3 global enviado al JOIN")
+                    logger.info(f"Top 3 y EOF enviados para client_id={client_id}")
+                    return False
+                else:
+                    logger.info(f"Esperando más EOF para cliente {client_id} ({self.eof_count_by_client[client_id]}/{self.expected_eof_per_client})")
+                    return False
+                
+            elif self.mode == 'final':
+                self.final_eof_count_by_client[client_id] += 1
+                logger.info(f"EOF recibido: {self.final_eof_count_by_client[client_id]}/{self.total_intermediate} para client_id={client_id}")
+                if self.final_eof_count_by_client[client_id] >= self.total_intermediate:
+                    logger.info(f"[FINAL] Todos los intermediate terminaron - calculando Top 3 global para client_id={client_id}")
+                    results_csv = self.generate_top3_csv()
+                    result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
+                    routing_key = self.client_router.get_routing_key(client_id, 'top_customers.data')
+                    self.output_middleware.send(
+                        result_dto.to_bytes_fast(),
+                        routing_key=routing_key,
+                        headers={'client_id': client_id}
+                    )
+                    eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
+                    self.output_middleware.send(
+                        eof_dto.to_bytes_fast(),
+                        routing_key=routing_key,
+                        headers={'client_id': client_id}
+                    )
+                    logger.info(f"[FINAL] Top 3 global enviado al JOIN para client_id={client_id} → {routing_key}")
                     logger.info(f"Total tiendas procesadas: {len(self.store_user_purchases)}")
-                    return True
-                    
+                    # NO cerrar - continuar escuchando para otros clientes
+                    return False
                 return False
-            
             return False
-            
         except Exception as e:
             logger.error(f"Error manejando EOF: {e}")
             return False
     
-    def process_message(self, message: bytes, routing_key: str = None) -> bool:
+    def process_message(self, message: bytes, routing_key: str = None, headers: dict = None) -> bool:
         try:
             if self.shutdown.is_shutting_down():
                 logger.warning("Shutdown en progreso, ignorando mensaje")
                 return True
-        
+
             dto = TransactionBatchDTO.from_bytes_fast(message)
-            
+
+            client_id = 'default_client'
+            if headers and 'client_id' in headers:
+                client_id = headers['client_id']
+                if isinstance(client_id, bytes):
+                    client_id = client_id.decode('utf-8')
+            dto.client_id = client_id
+
             if dto.batch_type == BatchType.EOF:
                 return self.handle_eof(dto, routing_key)
-            
+
             if dto.batch_type == BatchType.RAW_CSV:
                 for line in dto.data.split('\n'):
                     if line.strip():
                         self.process_csv_line(line.strip())
-            
+
             return False
-            
+
         except Exception as e:
             logger.error(f"Error procesando mensaje: {e}")
             return False
@@ -239,12 +284,14 @@ class TopCustomersAggregatorNode:
                 logger.warning("Shutdown solicitado, deteniendo")
                 ch.stop_consuming()
                 return
-            
+
             routing_key = getattr(method, 'routing_key', None)
-            should_stop = self.process_message(body, routing_key)
-            if should_stop:
-                logger.info("EOF completo - deteniendo consuming")
-                ch.stop_consuming()
+            headers = None
+            if hasattr(properties, 'headers'):
+                headers = properties.headers
+            
+            self.process_message(body, routing_key, headers)
+            
         except Exception as e:
             logger.error(f"Error en callback: {e}")
     

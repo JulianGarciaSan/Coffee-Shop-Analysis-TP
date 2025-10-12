@@ -42,7 +42,7 @@ class ReportGenerator:
             
         self.expected_queries = {'q1'
                                  ,'q3'
-                                #  ,'q4'
+                                 ,'q4'
                                 #  ,'q2_most_profit'
                                 #  ,'q2_best_selling'
                                  }
