@@ -27,6 +27,7 @@ def initialize_config():
         config_params["reports_exchange"] = os.getenv('REPORTS_EXCHANGE', config.get("DEFAULT", "REPORTS_EXCHANGE", fallback=None))
         config_params["join_exchange"] = os.getenv('JOIN_EXCHANGE', config["DEFAULT"]["JOIN_EXCHANGE"])
         config_params["output_year_node_exchange"] = os.getenv('OUTPUT_EXCHANGE', config["DEFAULT"]["OUTPUT_EXCHANGE"])
+        config_params["total_join_nodes"] = os.getenv('TOTAL_JOIN_NODES', config["DEFAULT"]["TOTAL_JOIN_NODES"])
     except KeyError as e:
         raise KeyError("Key was not found. Error: {} .Aborting server".format(e))
     except ValueError as e:
@@ -45,6 +46,7 @@ def main():
         join_exchange = config["join_exchange"]
         reports_exchange = config["reports_exchange"]
         output_year_node_exchange = config["output_year_node_exchange"]
+        total_join_nodes = config["total_join_nodes"]
     
         gateway = Gateway(
             port, 
@@ -53,7 +55,8 @@ def main():
             output_year_node_exchange,  
             join_exchange,              
             reports_exchange,
-            shutdown_handler 
+            shutdown_handler,
+            total_join_nodes
         )
                     
         logger.info("Iniciando Gateway...")

@@ -5,6 +5,8 @@ from typing import Dict, Any, Tuple
 from rabbitmq.middleware import MessageMiddlewareExchange
 from dtos.dto import TransactionBatchDTO, BatchType
 from .base_configurators import GroupByConfigurator
+from .tpv_aggregation import TPVAggregation
+from client_routing.client_routing import ClientRouter
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,10 @@ class TPVConfigurator(GroupByConfigurator):
         logger.info(f"TPVConfigurator inicializado:")
         logger.info(f"  Semestre: {self.semester}")
         logger.info(f"  Input Exchange: {self.input_exchange}")
+        
+        total_join_nodes = int(os.getenv('TOTAL_JOIN_NODES', '3'))
+        self.client_router = ClientRouter(total_join_nodes=total_join_nodes)
+
     
     def create_input_middleware(self):
         middleware = MessageMiddlewareExchange(
@@ -34,15 +40,17 @@ class TPVConfigurator(GroupByConfigurator):
         logger.info(f"  Input: Exchange {self.input_exchange}, semestre {self.semester}")
         return middleware
     
-    def create_output_middlewares(self) -> Dict[str, Any]:
+    def create_output_middlewares(self) -> Dict[str, Any]:    
+        all_routing_keys = self.client_router.get_all_routing_keys('tpv.data')
+        
         output_middleware = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
             exchange_name=self.output_exchange,
-            route_keys=['tpv.data']
+            route_keys=all_routing_keys
         )
         
         logger.info(f"  Output exchange: {self.output_exchange}")
-        logger.info(f"  Routing keys: tpv.data")
+        logger.info(f"  Routing keys: {all_routing_keys}")
         
         return {"output": output_middleware}
     
@@ -56,9 +64,7 @@ class TPVConfigurator(GroupByConfigurator):
                 client_id = client_id.decode('utf-8')
         
         dto.client_id = client_id
-        
-        logger.info(f"Mensaje recibido de cliente '{client_id}': batch_type={dto.batch_type}, tamaño={len(dto.data)} bytes")
-        
+                
         is_eof = (dto.batch_type == BatchType.EOF)
         should_stop = False
         
@@ -84,17 +90,20 @@ class TPVConfigurator(GroupByConfigurator):
         # Obtener resultados de la strategy para este cliente
         results_csv = strategy.generate_results_csv_for_client(client_id)
         
+        routing_key = self.client_router.get_routing_key(client_id, 'tpv.data')
+        logger.info(f"Cliente '{client_id}' → Routing key: {routing_key}")
+        
         result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
         middlewares["output"].send(
             result_dto.to_bytes_fast(),
-            routing_key='tpv.data',
+            routing_key=routing_key,
             headers={'client_id': client_id}
         )
         
         eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
         middlewares["output"].send(
             eof_dto.to_bytes_fast(),
-            routing_key='tpv.eof',
+            routing_key=routing_key,
             headers={'client_id': client_id}
         )
         

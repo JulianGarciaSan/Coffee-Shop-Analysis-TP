@@ -68,7 +68,13 @@ class MessageMiddlewareExchange(MessageMiddleware):
     def _connect(self):
         try:
             credentials = pika.PlainCredentials('admin', 'admin')
-            parameters = pika.ConnectionParameters(host=self.host, credentials=credentials)
+            parameters = pika.ConnectionParameters(
+                host=self.host, 
+                credentials=credentials,
+                heartbeat=600, 
+                blocked_connection_timeout=300,  
+                frame_max=131072 
+            )
             self.connection = pika.BlockingConnection(parameters)
             self.channel = self.connection.channel()
             self.channel.exchange_declare(exchange=self.exchange_name, exchange_type='topic', durable=True)
@@ -203,7 +209,13 @@ class MessageMiddlewareQueue(MessageMiddleware):
     def _connect(self):
         try:
             credentials = pika.PlainCredentials('admin', 'admin')
-            parameters = pika.ConnectionParameters(host=self.host, credentials=credentials)
+            parameters = pika.ConnectionParameters(
+                host=self.host, 
+                credentials=credentials,
+                heartbeat=600,
+                blocked_connection_timeout=300,
+                frame_max=131072
+            )
             self.connection = pika.BlockingConnection(parameters)
             self.channel = self.connection.channel()
             

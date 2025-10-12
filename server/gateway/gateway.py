@@ -17,13 +17,12 @@ logger = get_logger(__name__)
 
 class Gateway:
 
-    def __init__(self, port, listener_backlog, rabbitmq_host, output_year_node_exchange, output_join_node, input_reports=None, shutdown_handler=None):
+    def __init__(self, port, listener_backlog, rabbitmq_host, output_year_node_exchange, output_join_node, input_reports=None, shutdown_handler=None,total_join_nodes=1):
         self.shutdown = shutdown_handler
-        
         #self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         #self._server_socket.bind(('', port))
         #self._server_socket.listen(listener_backlog)
-        self._acceptor = GatewayAcceptor(port, listener_backlog, shutdown_handler, rabbitmq_host,input_reports,self)
+        self._acceptor = GatewayAcceptor(port, listener_backlog, shutdown_handler, rabbitmq_host,input_reports,self, total_join_nodes)
 
         self._is_running = False
         self.rabbitmq_host = rabbitmq_host
@@ -53,7 +52,6 @@ class Gateway:
                 self._join_middleware.shutdown = self.shutdown
 
     def get_output_middleware(self):
-        # Create a NEW middleware instance per client to avoid sharing channels across threads
         mw = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
             exchange_name=self.output_year_node_exchange,
@@ -64,7 +62,6 @@ class Gateway:
         return mw
 
     def get_join_middleware(self):
-        # Create a NEW middleware instance per client to avoid sharing channels across threads
         mw = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
             exchange_name=self.output_join_node,

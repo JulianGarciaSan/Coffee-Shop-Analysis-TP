@@ -5,12 +5,13 @@ from logger import get_logger
 import logging
 from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
 from dtos.dto import BatchType, MenuItemBatchDTO, ReportBatchDTO, StoreBatchDTO, TransactionBatchDTO, TransactionItemBatchDTO, UserBatchDTO
+from client_routing.client_routing import ClientRouter
 
 logger = get_logger(__name__)
 
 class ClientHandler(threading.Thread):
     def __init__(self, client_socket, client_id, gateway, shutdown_handler=None, rabbitmq_host=None,
-                 input_reports=None):
+                 input_reports=None, total_join_nodes=1):
         super().__init__(daemon=False)
         self.client_socket = client_socket
         self.client_id = client_id
@@ -52,6 +53,9 @@ class ClientHandler(threading.Thread):
             ('q2_most_profit', self._convert_q2_most_profit_to_csv, "Q2_MOST_PROFIT", "items"),
             ('q2_best_selling', self._convert_q2_best_selling_to_csv, "Q2_BEST_SELLING", "items")
         ]
+        
+        self.client_router = ClientRouter(total_join_nodes=total_join_nodes)
+        self.assigned_join_node = self.client_router.get_node_for_client(self.client_id)
         
         
         
@@ -122,6 +126,9 @@ class ClientHandler(threading.Thread):
         else:
             logger.warning(f"Unknown file_type from client {self.client_id}: {message.file_type}")
             
+    def _get_routing_key_for_join(self, base_key: str) -> str:
+        return self.client_router.get_routing_key(self.client_id, base_key)
+            
     def _handle_finish(self, file_type: str):        
         if self.shutdown and self.shutdown.is_shutting_down():
             logger.info("Shutdown activo, no enviando EOF")
@@ -135,12 +142,14 @@ class ClientHandler(threading.Thread):
                 
             elif file_type == "S":
                 eof_dto = StoreBatchDTO("EOF:1", batch_type=BatchType.EOF)
-                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key='stores.data',headers={'client_id': self.client_id})
+                routing_key = self._get_routing_key_for_join('stores.data')
+                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key=routing_key, headers={'client_id': self.client_id})
                 logger.info("EOF:1 enviado para tipo S (stores)")
 
             elif file_type == "U":
                 eof_dto = UserBatchDTO("EOF:1", batch_type=BatchType.EOF)
-                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key='users.eof',headers={'client_id': self.client_id})
+                routing_key = self._get_routing_key_for_join('users.data')
+                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key=routing_key,headers={'client_id': self.client_id})
                 logger.info("EOF:1 enviado para tipo U (users)")
                 
             elif file_type == "I":
@@ -150,7 +159,8 @@ class ClientHandler(threading.Thread):
 
             elif file_type == "M":
                 eof_dto = MenuItemBatchDTO("EOF:1", batch_type=BatchType.EOF)
-                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key='menu_items.data',headers={'client_id': self.client_id})
+                routing_key = self._get_routing_key_for_join('menu_items.data')
+                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key=routing_key, headers={'client_id': self.client_id})
                 logger.info("EOF:1 enviado para tipo M (menu_items)")
 
         except Exception as e:
@@ -158,7 +168,6 @@ class ClientHandler(threading.Thread):
 
     def process_type_d_message(self, message: ProtocolMessage):
         try:
-            logger.info(f"Enviando mensaje para client id {self.client_id}")
             dto = TransactionBatchDTO(message.data, BatchType.RAW_CSV)
             self._output_middleware.send(dto.to_bytes_fast(), routing_key='transactions', headers={'client_id': self.client_id})
         except Exception as e:
@@ -177,8 +186,9 @@ class ClientHandler(threading.Thread):
             dto = StoreBatchDTO.from_bytes_fast(bytes_data)
             serialized_data = dto.to_bytes_fast()
 
-
-            self._join_middleware.send(serialized_data, routing_key='stores.data',headers={'client_id': self.client_id})
+            routing_key = self._get_routing_key_for_join('stores.data')
+            logger.info(f"Cliente '{self.client_id}' → Routing key: {routing_key}")
+            self._join_middleware.send(serialized_data, routing_key=routing_key, headers={'client_id': self.client_id})
 
 
             line_count = len([line for line in dto.data.split('\n') if line.strip()])
@@ -192,8 +202,8 @@ class ClientHandler(threading.Thread):
             dto = UserBatchDTO.from_bytes_fast(bytes_data)
             serialized_data = dto.to_bytes_fast()
 
-
-            self._join_middleware.send(serialized_data, routing_key='users.data',headers={'client_id': self.client_id})
+            routing_key = self._get_routing_key_for_join('users.data')
+            self._join_middleware.send(serialized_data, routing_key=routing_key, headers={'client_id': self.client_id})
 
 
             line_count = len([line for line in dto.data.split('\n') if line.strip()])
@@ -207,8 +217,8 @@ class ClientHandler(threading.Thread):
             dto = MenuItemBatchDTO.from_bytes_fast(bytes_data)
             serialized_data = dto.to_bytes_fast()
 
-
-            self._join_middleware.send(serialized_data, routing_key='menu_items.data',headers={'client_id': self.client_id})
+            routing_key = self._get_routing_key_for_join('menu_items.data')
+            self._join_middleware.send(serialized_data, routing_key=routing_key, headers={'client_id': self.client_id})
 
 
             line_count = len([line for line in dto.data.split('\n') if line.strip()])
@@ -235,7 +245,6 @@ class ClientHandler(threading.Thread):
             self._send_error_to_client(f"Error processing reports: {e}")
 
     def _collect_reports_from_pipeline(self):
-        """Recopila todos los reportes del pipeline."""
         eof_count = 0
         
         def report_callback(ch, method, properties, body):

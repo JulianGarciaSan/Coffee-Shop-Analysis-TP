@@ -6,7 +6,7 @@ from gateway_client import ClientHandler
 logger = get_logger(__name__)
 
 class GatewayAcceptor(threading.Thread):
-    def __init__(self, port, listener_backlog, shutdown_handler=None,rabbitmq_host=None,input_reports=None,gateway=None):
+    def __init__(self, port, listener_backlog, shutdown_handler=None,rabbitmq_host=None,input_reports=None,gateway=None,total_join_nodes=1):
         super().__init__(daemon=False)
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(('', port))
@@ -18,6 +18,7 @@ class GatewayAcceptor(threading.Thread):
         self.input_reports = input_reports
         self.rabbitmq_host = rabbitmq_host
         self._client_id_counter = 0
+        self.total_join_nodes = int(total_join_nodes)
         
     def __accept_new_connection(self):
 
@@ -38,7 +39,7 @@ class GatewayAcceptor(threading.Thread):
                 try:
                     client_sock = self.__accept_new_connection()
                     client_id = self._client_id_counter
-                    client = ClientHandler(client_sock,client_id=client_id,gateway=self.gateway,shutdown_handler=self.shutdown,rabbitmq_host=self.rabbitmq_host,input_reports=self.input_reports)
+                    client = ClientHandler(client_sock,client_id=client_id,gateway=self.gateway,shutdown_handler=self.shutdown,rabbitmq_host=self.rabbitmq_host,input_reports=self.input_reports,total_join_nodes=self.total_join_nodes)
                     self._client_id_counter += 1
                     self._clients.append(client)
                     client.start()

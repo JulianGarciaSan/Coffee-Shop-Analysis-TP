@@ -8,6 +8,7 @@ COPY ./rabbitmq/ ./rabbitmq/
 COPY common/ /app/common/
 COPY common/entities /app/entities
 COPY ./server/dtos/ ./dtos/
+COPY ./server/client_routing/ ./client_routing/
 
 RUN pip install --no-cache-dir -r requirements.txt
 
