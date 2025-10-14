@@ -377,4 +377,24 @@ class YearNodeConfigurator(NodeConfigurator):
                 logger.error(f"Error cerrando coordination_queue: {e}")
         
         if self.coordination_thread and self.coordination_thread.is_alive():
-            self.coordination_thre
+            self.coordination_thread.join(timeout=5.0)
+        
+        if hasattr(self, 'coordinator') and self.coordinator:
+            try:
+                self.coordinator.close()
+            except Exception as e:
+                logger.error(f"Error cerrando coordinator: {e}")
+        
+        if hasattr(self, 'groupby_exchange') and self.groupby_exchange:
+            try:
+                self.groupby_exchange.close()
+            except Exception as e:
+                logger.error(f"Error cerrando groupby_exchange: {e}")
+        
+        if hasattr(self, 'groupby_top_customer_exchange') and self.groupby_top_customer_exchange:
+            try:
+                self.groupby_top_customer_exchange.close()
+            except Exception as e:
+                logger.error(f"Error cerrando groupby_top_customer_exchange: {e}")
+        
+        logger.info("YearNodeConfigurator cerrado correctamente")
