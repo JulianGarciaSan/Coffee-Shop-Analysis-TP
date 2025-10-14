@@ -40,13 +40,12 @@ class ReportGenerator:
         if hasattr(self.publisher, 'shutdown'):
             self.publisher.shutdown = self.shutdown
             
-        self.expected_queries = {'q1'
-                                 ,'q3'
-                                 ,'q4'
-                                  ,'q2_most_profit'
-                                  ,'q2_best_selling'
-                                 }
-        self.total_expected = len(self.expected_queries)
+        self.expected_queries = {'q1': 1,     
+                                 'q3': 1,      
+                                 'q4': 2,      
+                                 'q2_most_profit': 1,   
+                                 'q2_best_selling': 1   
+                                }
         
         self.csv_files = {}  
         self.eof_received = set() 
@@ -76,25 +75,44 @@ class ReportGenerator:
             if client_id not in self.client_data:
                 self.client_data[client_id] = {
                     'csv_files': {},
-                    'eof_received': set()
+                    'eof_count_by_query': {}  # Cambiar a contador por query
                 }
                 logger.info(f"Nuevo cliente detectado: {client_id}")
             
             if dto.batch_type == BatchType.EOF:
-                logger.info(f"EOF recibido para cliente {client_id}, query {query_name}")
-                self._close_csv_file(client_id, query_name)
-                self.client_data[client_id]['eof_received'].add(query_name)
+                # Incrementar contador de EOF para esta query
+                eof_counts = self.client_data[client_id]['eof_count_by_query']
+                eof_counts[query_name] = eof_counts.get(query_name, 0) + 1
                 
-                logger.info(f"Cliente {client_id} - EOF recibidos: {self.client_data[client_id]['eof_received']}")
-                logger.info(f"Cliente {client_id} - Total esperados: {self.total_expected}")
-
-                if len(self.client_data[client_id]['eof_received']) >= self.total_expected:
-                    if self.client_data[client_id]['eof_received'] == self.expected_queries:
-                        logger.info(f"Cliente {client_id}: Todos los reportes completados")
-                        self._publish_reports_for_client(client_id)
-                        del self.client_data[client_id]
-                    else:
-                        logger.warning(f"Cliente {client_id}: EOF count correcto pero queries incorrectas: {self.client_data[client_id]['eof_received']}")
+                current_count = eof_counts[query_name]
+                expected_count = self.expected_queries.get(query_name, 1)
+                
+                logger.info(f"EOF recibido para cliente {client_id}, query {query_name}: {current_count}/{expected_count}")
+                
+                # Solo cerrar archivo cuando recibimos TODOS los EOFs esperados para esta query
+                if current_count >= expected_count:
+                    logger.info(f"Todos los EOFs recibidos para cliente {client_id}, query {query_name} - cerrando archivo")
+                    self._close_csv_file(client_id, query_name)
+                
+                # Verificar si todas las queries están completas
+                all_complete = True
+                for q_name, expected in self.expected_queries.items():
+                    received = eof_counts.get(q_name, 0)
+                    if received < expected:
+                        all_complete = False
+                        break
+                
+                if all_complete:
+                    logger.info(f"Cliente {client_id}: Todos los reportes completados")
+                    self._publish_reports_for_client(client_id)
+                    del self.client_data[client_id]
+                else:
+                    # Log del progreso
+                    progress = []
+                    for q_name, expected in self.expected_queries.items():
+                        received = eof_counts.get(q_name, 0)
+                        progress.append(f"{q_name}:{received}/{expected}")
+                    logger.info(f"Cliente {client_id} progreso: {', '.join(progress)}")
                 
                 return False
             
@@ -199,11 +217,14 @@ class ReportGenerator:
                 if not line:
                     continue
                 
-                # Filtrar headers (tu lógica original)
-                if any(header in line.lower() for header in [
-                    'transaction_id', 'year_half', 'store_name,birthdate',
-                    'year_month_created_at', 'sellings_qty', 'profit_sum'
-                ]):
+                # Filtrar headers - ESPECÍFICO para cada línea completa
+                if line.lower() in [
+                    'transaction_id,final_amount',  # Q1 header
+                    'year_half_created_at,store_name,tpv',  # Q3 header  
+                    'store_name,birthdate',  # Q4 header - SOLO header completo
+                    'year_month_created_at,item_name,sellings_qty',  # Q2 best selling header
+                    'year_month_created_at,item_name,profit_sum'  # Q2 most profit header
+                ]:
                     continue
                 
                 file_handle.write(line + '\n')
@@ -221,10 +242,55 @@ class ReportGenerator:
                 csv_files = self.client_data[client_id]['csv_files']
                 if query_name in csv_files:
                     csv_files[query_name].close()
+                    if query_name == 'q4':
+                        self._sort_q4_file(client_id)  # HABILITAR ordenamiento Q4
                     logger.info(f"Cliente {client_id}: Archivo CSV cerrado para {query_name}")
                     del csv_files[query_name]
         except Exception as e:
             logger.error(f"Cliente {client_id}: Error cerrando CSV para {query_name}: {e}")
+            
+    def _sort_q4_file(self, client_id: int):
+        try:
+            reports_dir = f'./reports/client_{client_id}'
+            files = [f for f in os.listdir(reports_dir) 
+                    if f.startswith('q4_') and f.endswith('.csv')]
+            
+            if not files:
+                return
+            
+            file_path = os.path.join(reports_dir, files[0])
+            
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            
+            if len(lines) <= 1: 
+                return
+            
+            header = lines[0]
+            data_lines = lines[1:]
+            
+            records = []
+            for line in data_lines:
+                parts = line.strip().split(',')
+                if len(parts) >= 2:  # Q4 solo tiene 2 columnas: store_name, birthdate
+                    records.append({
+                        'store_name': parts[0],
+                        'birthdate': parts[1],
+                        'original': line
+                    })
+            
+            # Ordenar por store_name, luego birthdate (sin purchases_qty)
+            records.sort(key=lambda x: (x['store_name'], x['birthdate']))
+            
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(header)
+                for record in records:
+                    f.write(record['original'])
+            
+            logger.info(f"Cliente {client_id}: Archivo Q4 ordenado ({len(records)} registros)")
+            
+        except Exception as e:
+            logger.error(f"Cliente {client_id}: Error ordenando Q4: {e}")
 
     def _publish_reports_for_client(self, client_id: int):
         """
@@ -239,7 +305,7 @@ class ReportGenerator:
                 logger.warning(f"Cliente {client_id}: No se encontró directorio de reportes")
                 return
 
-            for query_name in self.expected_queries:
+            for query_name in self.expected_queries.keys():
                 # Buscar archivos CSV para esta query
                 files = [f for f in os.listdir(reports_dir) 
                         if f.startswith(query_name) and f.endswith('.csv')]

@@ -238,7 +238,6 @@ class BestSellingAggregatorNode:
             routing_key=selling_routing_key,
             headers=headers
         )
-        
         selling_eof = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
         self.output_middleware.send(
             selling_eof.to_bytes_fast(),
@@ -250,13 +249,11 @@ class BestSellingAggregatorNode:
         profit_csv = self.generate_top1_csv(most_profit, "profit_sum")
         profit_dto = TransactionItemBatchDTO(profit_csv, BatchType.RAW_CSV)
         
-        logger.info(f"Enviando most profit: {len(profit_csv)} bytes → {profit_routing_key}")
         self.output_middleware.send(
             profit_dto.to_bytes_fast(),
             routing_key=profit_routing_key,
             headers=headers
         )
-        
         profit_eof = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
         self.output_middleware.send(
             profit_eof.to_bytes_fast(),
@@ -336,7 +333,7 @@ class BestSellingAggregatorNode:
 
 if __name__ == "__main__":
     try:
-        aggregator = BestSellingAggregatorFinal()
+        aggregator = BestSellingAggregatorNode()
         aggregator.start()
         sys.exit(0)
     except Exception as e:

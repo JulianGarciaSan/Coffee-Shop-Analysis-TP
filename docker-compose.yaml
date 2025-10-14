@@ -65,30 +65,30 @@ services:
       - ./report_client_2:/app/report_client_2
       - ./data/transactions_items_test:/data/transactions_items_test
   
-  # client_3:
-  #   build:
-  #     context: .
-  #     dockerfile: ./client/Dockerfile
-  #   restart: on-failure
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - CLIENT_ID=client_3
-  #   depends_on:
-  #     gateway:
-  #       condition: service_started
-  #   volumes:
-  #     - ./client/config.ini:/config.ini
-  #     - ./data/transaction_items:/data/transaction_items
-  #     - ./data/users:/data/users
-  #     - ./data/stores:/data/stores
-  #     - ./data/menu_items:/data/menu_items
-  #     - ./data/payment_methods:/data/payment_methods
-  #     - ./data/vouchers:/data/vouchers
-  #     - ./data/transactions:/data/transactions
-  #     - ./data/transactions_test:/data/transactions_test
-  #     - ./report_client_3:/app/report_client_3
-  #     - ./data/transactions_items_test:/data/transactions_items_test
+  client_3:
+    build:
+      context: .
+      dockerfile: ./client/Dockerfile
+    restart: on-failure
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - CLIENT_ID=client_3
+    depends_on:
+      gateway:
+        condition: service_started
+    volumes:
+      - ./client/config.ini:/config.ini
+      - ./data/transaction_items:/data/transaction_items
+      - ./data/users:/data/users
+      - ./data/stores:/data/stores
+      - ./data/menu_items:/data/menu_items
+      - ./data/payment_methods:/data/payment_methods
+      - ./data/vouchers:/data/vouchers
+      - ./data/transactions:/data/transactions
+      - ./data/transactions_test:/data/transactions_test
+      - ./report_client_3:/app/report_client_3
+      - ./data/transactions_items_test:/data/transactions_items_test
 
   gateway:
     build:
@@ -475,6 +475,7 @@ services:
       - OUTPUT_EXCHANGE=report.exchange
       - JOIN_NODE_ID=0
       - TOTAL_JOIN_NODES=2
+      - TOTAL_TOPK_AGGREGATORS=2
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -494,6 +495,7 @@ services:
       - OUTPUT_EXCHANGE=report.exchange
       - JOIN_NODE_ID=1
       - TOTAL_JOIN_NODES=2
+      - TOTAL_TOPK_AGGREGATORS=2
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -831,13 +833,14 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
-      - AGGREGATOR_MODE=intermediate
+      #- AGGREGATOR_MODE=intermediate
       - TOPK_NODE_ID=1
       - INPUT_QUEUE=aggregated_data_1
-      - OUTPUT_EXCHANGE=topk.exchange
+      - OUTPUT_EXCHANGE=join.exchange
       - TOTAL_TOPK_NODES=2
       - AGGREGATOR_TYPE=top_consumers_intermediate
       - ALL_NODE_IDS=1,2
+      - TOTAL_JOIN_NODES=2 
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -854,36 +857,37 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
-      - AGGREGATOR_MODE=intermediate
+      #- AGGREGATOR_MODE=intermediate
       - TOPK_NODE_ID=2
       - INPUT_QUEUE=aggregated_data_2
-      - OUTPUT_EXCHANGE=topk.exchange
+      - OUTPUT_EXCHANGE=join.exchange
       - TOTAL_TOPK_NODES=2
       - AGGREGATOR_TYPE=top_consumers_intermediate
       - ALL_NODE_IDS=1,2
+      - TOTAL_JOIN_NODES=2 
     volumes:
       - ./server/config.ini:/app/config.ini
 
-  top_consumers_aggregator_final:
-    build:
-      context: .
-      dockerfile: ./server/aggregator/Dockerfile
-    container_name: top_consumers_aggregator_final
-    restart: on-failure
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    environment:
-      - PYTHONUNBUFFERED=1
-      - RABBITMQ_HOST=rabbitmq
-      - AGGREGATOR_MODE=final
-      - TOTAL_TOPK_NODES=2
-      - INPUT_EXCHANGE=topk.exchange
-      - OUTPUT_EXCHANGE=join.exchange
-      - AGGREGATOR_TYPE=top_consumers_final
-      - TOTAL_JOIN_NODES=2
-    volumes:
-      - ./server/config.ini:/app/config.ini
+  # top_consumers_aggregator_final:
+  #   build:
+  #     context: .
+  #     dockerfile: ./server/aggregator/Dockerfile
+  #   container_name: top_consumers_aggregator_final
+  #   restart: on-failure
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #     - RABBITMQ_HOST=rabbitmq
+  #     - AGGREGATOR_MODE=final
+  #     - TOTAL_TOPK_NODES=2
+  #     - INPUT_EXCHANGE=topk.exchange
+  #     - OUTPUT_EXCHANGE=join.exchange
+  #     - AGGREGATOR_TYPE=top_consumers_final
+  #     - TOTAL_JOIN_NODES=2
+  #   volumes:
+  #     - ./server/config.ini:/app/config.ini
 
   groupby_top_customers_1:
     build:

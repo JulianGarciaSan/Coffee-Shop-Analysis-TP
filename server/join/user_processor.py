@@ -9,8 +9,10 @@ class UserProcessor(DataProcessor):
         registered_at = self.dto_helper.get_column_value(line, 'registered_at')
         
         if user_id and birthdate and user_id != 'user_id':
-            self.data[user_id] = {
-                'user_id': user_id,
+            clean_user_id = user_id.split('.')[0] if '.' in user_id else user_id
+            
+            self.data[clean_user_id] = {
+                'user_id': clean_user_id,
                 'gender': gender,
                 'birth_date': birthdate,
                 'registered_at': registered_at,

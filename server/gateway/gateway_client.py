@@ -1,4 +1,5 @@
 from dataclasses import asdict
+import os
 import threading
 from common.new_protocolo import ProtocolMessage, ProtocolNew
 from logger import get_logger
@@ -25,7 +26,9 @@ class ClientHandler(threading.Thread):
         
         self._output_middleware = gateway.get_output_middleware()
         self._join_middleware = gateway.get_join_middleware()
-        
+
+        self.total_join_nodes = int(os.getenv('TOTAL_JOIN_NODES', 1))
+
         self.reports_queue_name = f"reports_queue_client_{self.client_id}"
         self.routing_key_pattern = f"client.{self.client_id}.#"
         
@@ -63,9 +66,9 @@ class ClientHandler(threading.Thread):
         try:
             self.report_middleware = MessageMiddlewareQueue(
                 host=self.rabbitmq_host,
-                queue_name=f'reports_queue_client_{self.client_id}',  # Queue única
-                exchange_name=self.input_reports,  # Exchange compartido
-                routing_keys=[f'client.{self.client_id}.#']  # Pattern que matchea todo para este cliente
+                queue_name=f'reports_queue_client_{self.client_id}',  
+                exchange_name=self.input_reports,  
+                routing_keys=[f'client.{self.client_id}.#'] 
             )
 
             if self.shutdown and hasattr(self.report_middleware, 'shutdown'):
@@ -109,8 +112,12 @@ class ClientHandler(threading.Thread):
             logger.error(f"Error procesando conexión del cliente {self.client_id}: {e}")
             self._send_error_to_client(f"Error processing connection: {e}")
         finally:
-            self._cleanup()       
-            
+            self._cleanup()      
+             
+    def _get_shard_for_user(self, user_id: str) -> int:
+        normalized_user_id = user_id.rstrip('.0') if user_id.endswith('.0') else user_id
+        return int(normalized_user_id) % self.total_join_nodes
+    
     def _handle_batch_message(self, message):
         handlers = {
             "D": self.process_type_d_message,
@@ -127,7 +134,10 @@ class ClientHandler(threading.Thread):
             logger.warning(f"Unknown file_type from client {self.client_id}: {message.file_type}")
             
     def _get_routing_key_for_join(self, base_key: str) -> str:
-        return self.client_router.get_routing_key(self.client_id, base_key)
+        if base_key in ['stores.data']:
+            return None  
+        else:
+            return self.client_router.get_routing_key(self.client_id, base_key)
             
     def _handle_finish(self, file_type: str):        
         if self.shutdown and self.shutdown.is_shutting_down():
@@ -141,16 +151,27 @@ class ClientHandler(threading.Thread):
                 logger.info("EOF:1 enviado")
                 
             elif file_type == "S":
-                eof_dto = StoreBatchDTO("EOF:1", batch_type=BatchType.EOF)
-                routing_key = self._get_routing_key_for_join('stores.data')
-                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key=routing_key, headers={'client_id': self.client_id})
-                logger.info("EOF:1 enviado para tipo S (stores)")
+                routing_keys = self.client_router.get_all_routing_keys('stores.data')
+                for routing_key in routing_keys:
+                    eof_dto = StoreBatchDTO("EOF:1", batch_type=BatchType.EOF)
+                    self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key=routing_key, headers={'client_id': self.client_id})
+                logger.info(f"EOF stores enviado a {len(routing_keys)} join nodes")
 
             elif file_type == "U":
-                eof_dto = UserBatchDTO("EOF:1", batch_type=BatchType.EOF)
-                routing_key = self._get_routing_key_for_join('users.data')
-                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key=routing_key,headers={'client_id': self.client_id})
-                logger.info("EOF:1 enviado para tipo U (users)")
+                try:
+                    for node_id in range(self.total_join_nodes):
+                        eof_dto = UserBatchDTO("EOF:1", batch_type=BatchType.EOF)
+                        routing_key = f"join_node_{node_id}.users.data"
+                        
+                        self._join_middleware.send(
+                            eof_dto.to_bytes_fast(),
+                            routing_key=routing_key,
+                            headers={'client_id': self.client_id}
+                        )
+                    
+                    logger.info(f"EOF de users enviado a {self.total_join_nodes} nodos")
+                except Exception as e:
+                    logger.warning(f"Error enviando EOF para users: {e}")
                 
             elif file_type == "I":
                 eof_dto = TransactionItemBatchDTO("EOF:1", batch_type=BatchType.EOF)
@@ -186,28 +207,86 @@ class ClientHandler(threading.Thread):
             dto = StoreBatchDTO.from_bytes_fast(bytes_data)
             serialized_data = dto.to_bytes_fast()
 
-            routing_key = self._get_routing_key_for_join('stores.data')
-            logger.info(f"Cliente '{self.client_id}' → Routing key: {routing_key}")
-            self._join_middleware.send(serialized_data, routing_key=routing_key, headers={'client_id': self.client_id})
-
+            routing_keys = self.client_router.get_all_routing_keys('stores.data')
+            for routing_key in routing_keys:
+                self._join_middleware.send(serialized_data, routing_key=routing_key, headers={'client_id': self.client_id})
+            
+            logger.info(f"Cliente '{self.client_id}' → Stores enviadas a {len(routing_keys)} join nodes")
 
             line_count = len([line for line in dto.data.split('\n') if line.strip()])
             
         except Exception as e:
-            logger.error(f"Error procesando mensaje de tipo 'U': {e}")
+            logger.error(f"Error procesando mensaje de tipo 'S': {e}")
             
     def process_type_u_message(self, message: ProtocolMessage):
         try:
             bytes_data = message.data.encode('utf-8')
             dto = UserBatchDTO.from_bytes_fast(bytes_data)
-            serialized_data = dto.to_bytes_fast()
-
-            routing_key = self._get_routing_key_for_join('users.data')
-            self._join_middleware.send(serialized_data, routing_key=routing_key, headers={'client_id': self.client_id})
-
-
-            line_count = len([line for line in dto.data.split('\n') if line.strip()])
-
+            
+            lines = dto.data.split('\n')
+            
+            header_line = None
+            data_lines = []
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                if line.startswith('user_id'):
+                    header_line = line
+                else:
+                    data_lines.append(line)
+            
+            total_users = len(data_lines)
+            logger.info(f"📨 [USERS] Cliente {self.client_id}: Procesando {total_users} users")
+            
+            CHUNK_SIZE = 5000
+            
+            for chunk_start in range(0, len(data_lines), CHUNK_SIZE):
+                chunk_lines = data_lines[chunk_start:chunk_start + CHUNK_SIZE]
+                
+                batches_by_node = {i: [] for i in range(self.total_join_nodes)}
+                
+                for line in chunk_lines:
+                    parts = line.split(',')
+                    if len(parts) < 1:
+                        continue
+                    
+                    user_id = parts[0]
+                    shard_id = self._get_shard_for_user(user_id)
+                    batches_by_node[shard_id].append(line)
+                
+                for node_id, node_lines in batches_by_node.items():
+                    if not node_lines:
+                        continue
+                    
+                    lines_to_send = node_lines.copy()
+                    
+                    if header_line:
+                        lines_to_send.insert(0, header_line)
+                    
+                    batch_data = '\n'.join(lines_to_send)
+                    node_dto = UserBatchDTO(batch_data, BatchType.RAW_CSV)
+                    
+                    routing_key = f"join_node_{node_id}.users.data"
+                    
+                    self._join_middleware.send(
+                        node_dto.to_bytes_fast(),
+                        routing_key=routing_key,
+                        headers={'client_id': self.client_id}
+                    )
+                    
+                    logger.debug(f"Chunk {chunk_start//CHUNK_SIZE + 1}: Users → join_node_{node_id}: {len(lines_to_send)-1} líneas")
+                
+                if hasattr(self._join_middleware, 'connection') and self._join_middleware.connection:
+                    try:
+                        self._join_middleware.connection.process_data_events(time_limit=0)
+                    except Exception:
+                        pass
+            
+            logger.info(f"✓ [USERS] Cliente {self.client_id}: {total_users} users enviados en {(len(data_lines) // CHUNK_SIZE) + 1} chunks")
+            
         except Exception as e:
             logger.error(f"Error procesando mensaje de tipo 'U': {e}")
             

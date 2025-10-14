@@ -71,8 +71,8 @@ class MessageMiddlewareExchange(MessageMiddleware):
             parameters = pika.ConnectionParameters(
                 host=self.host, 
                 credentials=credentials,
-                heartbeat=600, 
-                blocked_connection_timeout=300,  
+                heartbeat=1200, 
+                blocked_connection_timeout=1800,  
                 frame_max=131072 
             )
             self.connection = pika.BlockingConnection(parameters)
@@ -212,8 +212,8 @@ class MessageMiddlewareQueue(MessageMiddleware):
             parameters = pika.ConnectionParameters(
                 host=self.host, 
                 credentials=credentials,
-                heartbeat=600,
-                blocked_connection_timeout=300,
+                heartbeat=1200,
+                blocked_connection_timeout=1800,
                 frame_max=131072
             )
             self.connection = pika.BlockingConnection(parameters)
