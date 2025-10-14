@@ -150,9 +150,7 @@ class JoinNode:
             'top_customers.data': self._handle_top_customers_message,
             'top_customers.eof': self._handle_top_customers_message,
             'q2_best_selling.data': self._handle_best_selling_message,
-            'q2_best_selling.eof': self._handle_best_selling_message,
             'q2_most_profit.data': self._handle_most_profit_message,
-            'q2_most_profit.eof': self._handle_most_profit_message
         }
         
         for routing_key, handler in routes.items():
@@ -201,9 +199,13 @@ class JoinNode:
     def _extract_client_id(self, headers: dict) -> str:
         client_id = 'default_client'
         if headers and 'client_id' in headers:
-            client_id = headers['client_id']
+            original_value = headers['client_id']
+            original_type = type(original_value).__name__
+            client_id = original_value
             if isinstance(client_id, bytes):
                 client_id = client_id.decode('utf-8')
+            final_client_id = str(client_id)
+            return final_client_id
         return client_id
     
     def _handle_stores_message(self, message: bytes, headers: dict = None) -> bool:
@@ -249,9 +251,10 @@ class JoinNode:
         dto = MenuItemBatchDTO.from_bytes_fast(message)
         
         if dto.batch_type == BatchType.EOF:
+            state_id = id(self.client_states[client_id])
             self.client_states[client_id].menu_items_loaded = True
             menu_items_count = len(self.menu_item_processors[client_id].get_data())
-            logger.info(f"EOF recibido de menu_items para cliente '{client_id}': {menu_items_count} items cargados")
+            logger.info(f"EOF recibido de menu_items para cliente '{client_id}' (State ID: {state_id}): {menu_items_count} items cargados")
             self._check_and_execute_joins(client_id)
             return False
         
@@ -299,13 +302,22 @@ class JoinNode:
         dto = TransactionItemBatchDTO.from_bytes_fast(message)
         
         if dto.batch_type == BatchType.EOF:
+            # Verificar si el estado existe antes de accederlo
+            if client_id not in self.client_states:
+                logger.warning(f"[DEBUG] Estado no existe para cliente '{client_id}', creando nuevo estado")
+                self.client_states[client_id] = ClientProcessingState()
+            
+            state_id = id(self.client_states[client_id])
+            
             self.client_states[client_id].best_selling_loaded = True
-            logger.info(f"EOF recibido de best_selling para cliente '{client_id}'")
+            logger.info(f"EOF recibido de best_selling para cliente '{client_id}' (State ID: {state_id})")
             self._check_and_execute_joins(client_id)
             return False
         
         if dto.batch_type == BatchType.RAW_CSV:
             self.best_selling_processors[client_id].process_batch(dto.data, self._parse_best_selling_line)
+            current_count = len(self.best_selling_processors[client_id].get_data())
+            logger.info(f"Total datos best_selling para cliente '{client_id}': {current_count} registros")
         return False
     
     def _handle_most_profit_message(self, message: bytes, headers: dict = None) -> bool:
@@ -322,6 +334,8 @@ class JoinNode:
         
         if dto.batch_type == BatchType.RAW_CSV:
             self.most_profit_processors[client_id].process_batch(dto.data, self._parse_most_profit_line)
+            current_count = len(self.most_profit_processors[client_id].get_data())
+            logger.info(f"Total datos most_profit para cliente '{client_id}': {current_count} registros")
         return False
     
     def _parse_tpv_line(self, line: str) -> Dict:
@@ -376,7 +390,6 @@ class JoinNode:
         return None
     
     def _check_and_execute_joins(self, client_id: str):
-        """Verifica y ejecuta joins para un cliente específico"""
         state = self.client_states[client_id]
         
         # Q3: TPV + Stores
@@ -411,6 +424,8 @@ class JoinNode:
             )
             self._send_best_selling_results(client_id, joined_data)
             state.best_selling_sent = True
+        else:
+            logger.info(f"Q2 Best Selling NO listo - menu_items: {state.menu_items_loaded}, best_selling: {state.best_selling_loaded}, ya_enviado: {state.best_selling_sent}")
         
         # Q2 Most Profit
         if state.is_most_profit_ready():
@@ -422,6 +437,8 @@ class JoinNode:
             )
             self._send_most_profit_results(client_id, joined_data)
             state.most_profit_sent = True
+        else:
+            logger.info(f"Q2 Most Profit NO listo - menu_items: {state.menu_items_loaded}, most_profit: {state.most_profit_loaded}, ya_enviado: {state.most_profit_sent}")
     
     def _send_q3_results(self, client_id: str, joined_data: List[Dict]):
         try:
@@ -453,7 +470,7 @@ class JoinNode:
                 self.output_middleware.send(
                     result_dto.to_bytes_fast(), 
                     routing_key='q3.data',
-                    headers={'client_id': client_id}
+                    headers={'client_id': int(client_id)}
                 )
                 
                 logger.info(f"Batch Q3 enviado para cliente '{client_id}': {len(batch)} registros ({i+1}-{i+len(batch)}/{len(sorted_data)})")
@@ -461,8 +478,8 @@ class JoinNode:
             eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
             self.output_middleware.send(
                 eof_dto.to_bytes_fast(), 
-                routing_key='q3.eof',
-                headers={'client_id': client_id}
+                routing_key='q3.data',
+                headers={'client_id': int(client_id)}
             )
             
             logger.info(f"Resultados Q3 completados para cliente '{client_id}': {len(joined_data)} registros en total")
@@ -478,7 +495,6 @@ class JoinNode:
             
             sorted_data = sorted(joined_data, key=lambda x: int(x['store_id']))
             
-            # Enviar en batches para evitar mensajes muy grandes
             BATCH_SIZE = 1000
             header = "store_name,birthdate"
             
@@ -495,17 +511,16 @@ class JoinNode:
                 self.output_middleware.send(
                     result_dto.to_bytes_fast(), 
                     routing_key='q4.data',
-                    headers={'client_id': client_id}
+                    headers={'client_id': int(client_id)}
                 )
                 
                 logger.info(f"Batch Q4 enviado para cliente '{client_id}': {len(batch)} registros ({i+1}-{i+len(batch)}/{len(sorted_data)})")
             
-            # Enviar EOF después de todos los batches
             eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
             self.output_middleware.send(
                 eof_dto.to_bytes_fast(), 
-                routing_key='q4.eof',
-                headers={'client_id': client_id}
+                routing_key='q4.data',
+                headers={'client_id': int(client_id)}
             )
             
             logger.info(f"Resultados Q4 completados para cliente '{client_id}': {len(joined_data)} registros en total")
@@ -521,7 +536,6 @@ class JoinNode:
             
             sorted_data = sorted(joined_data, key=lambda x: x['year_month_created_at'])
             
-            # Enviar en batches para evitar mensajes muy grandes
             BATCH_SIZE = 1000
             header = "year_month_created_at,item_name,sellings_qty"
             
@@ -538,17 +552,16 @@ class JoinNode:
                 self.output_middleware.send(
                     result_dto.to_bytes_fast(), 
                     routing_key='q2_best_selling.data',
-                    headers={'client_id': client_id}
+                    headers={'client_id': int(client_id)}
                 )
                 
                 logger.info(f"Batch Q2 best_selling enviado para cliente '{client_id}': {len(batch)} registros ({i+1}-{i+len(batch)}/{len(sorted_data)})")
             
-            # Enviar EOF después de todos los batches
             eof_dto = TransactionItemBatchDTO(f"EOF:{client_id}", BatchType.EOF)
             self.output_middleware.send(
                 eof_dto.to_bytes_fast(), 
-                routing_key='q2_best_selling.eof',
-                headers={'client_id': client_id}
+                routing_key='q2_best_selling.data',
+                headers={'client_id': int(client_id)}
             )
             
             logger.info(f"Resultados Q2 best_selling completados para cliente '{client_id}': {len(joined_data)} registros en total")
@@ -564,7 +577,6 @@ class JoinNode:
             
             sorted_data = sorted(joined_data, key=lambda x: x['year_month_created_at'])
             
-            # Enviar en batches para evitar mensajes muy grandes
             BATCH_SIZE = 1000
             header = "year_month_created_at,item_name,profit_sum"
             
@@ -581,17 +593,16 @@ class JoinNode:
                 self.output_middleware.send(
                     result_dto.to_bytes_fast(), 
                     routing_key='q2_most_profit.data',
-                    headers={'client_id': client_id}
+                    headers={'client_id': int(client_id)}
                 )
                 
                 logger.info(f"Batch Q2 most_profit enviado para cliente '{client_id}': {len(batch)} registros ({i+1}-{i+len(batch)}/{len(sorted_data)})")
             
-            # Enviar EOF después de todos los batches
             eof_dto = TransactionItemBatchDTO(f"EOF:{client_id}", BatchType.EOF)
             self.output_middleware.send(
                 eof_dto.to_bytes_fast(), 
-                routing_key='q2_most_profit.eof',
-                headers={'client_id': client_id}
+                routing_key='q2_most_profit.data',
+                headers={'client_id': int(client_id)}
             )
             
             logger.info(f"Resultados Q2 most_profit completados para cliente '{client_id}': {len(joined_data)} registros en total")
@@ -624,6 +635,8 @@ class JoinNode:
             
             routing_key = method.routing_key
             headers = properties.headers if properties and hasattr(properties, 'headers') else None
+            client_id = self._extract_client_id(headers)
+                        
             if '.' in routing_key:
                 parts = routing_key.split('.', 1) 
                 base_routing_key = parts[1] if len(parts) > 1 else routing_key

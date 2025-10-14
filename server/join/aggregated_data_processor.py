@@ -24,7 +24,6 @@ class AggregatedDataProcessor:
                 logger.warning(f"Error procesando línea: {line}, error: {e}")
                 continue
         
-        logger.info(f"Procesados: {processed_count}. Total: {len(self.data)}")
         return processed_count
     
     def _should_skip_line(self, line: str) -> bool:

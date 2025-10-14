@@ -137,7 +137,6 @@ class FilterNode:
                 return True
                         
             processed_data = self.node_configurator.process_filtered_data(filtered_csv)
-            logger.info(f"Enviando datos downstream - client_id: {client_id}, batch_type: {batch_type}")
             self.node_configurator.send_data(processed_data, self.middlewares, batch_type, client_id=client_id)
             
             return False
@@ -183,12 +182,10 @@ class FilterNode:
                 ch.stop_consuming()
                 return
             
-            # Extraer client_id de los headers
             client_id = None
             if properties and properties.headers:
                 client_id = properties.headers.get('client_id')
             
-            logger.info(f"Mensaje recibido - client_id: {client_id}, routing_key: {method.routing_key if hasattr(method, 'routing_key') else None}")
             
             routing_key = method.routing_key if hasattr(method, 'routing_key') else None
             should_stop = self.process_message(body, routing_key, client_id)

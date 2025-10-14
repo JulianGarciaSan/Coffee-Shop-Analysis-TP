@@ -28,7 +28,6 @@ class DataProcessor(ABC):
                 logger.warning(f"Error procesando línea: {line}, error: {e}")
                 continue
         
-        logger.info(f"{self.__class__.__name__} procesados: {processed_count}. Total: {len(self.data)}")
         return processed_count
     
     def _should_skip_line(self, line: str) -> bool:

@@ -39,8 +39,8 @@ class ClientHandler(threading.Thread):
             'q1': [],
             'q3': [],
             'q4': [],
-            #'q2_most_profit': [],
-            #'q2_best_selling': []
+            'q2_most_profit': [],
+            'q2_best_selling': []
         }
         self.eof_count = 0
         #self.max_expected_reports = 5
@@ -138,7 +138,7 @@ class ClientHandler(threading.Thread):
             if file_type == "D":
                 eof_dto = TransactionBatchDTO("EOF:1", batch_type=BatchType.EOF)
                 self._output_middleware.send(eof_dto.to_bytes_fast(), routing_key='transactions', headers={'client_id': self.client_id})
-                logger.info("D:EOF:1 enviado")
+                logger.info("EOF:1 enviado")
                 
             elif file_type == "S":
                 eof_dto = StoreBatchDTO("EOF:1", batch_type=BatchType.EOF)

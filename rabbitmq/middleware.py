@@ -96,7 +96,7 @@ class MessageMiddlewareExchange(MessageMiddleware):
                 routing_key=key,
                 body=message,
                 properties=pika.BasicProperties(
-                    delivery_mode=1,
+                    delivery_mode=2,
                     headers=headers or {}
                 )
             )

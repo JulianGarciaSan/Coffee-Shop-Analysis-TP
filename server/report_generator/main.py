@@ -25,7 +25,7 @@ class ReportGenerator:
             host=self.rabbitmq_host,
             exchange_name=self.report_exchange,
 
-            route_keys=['q1.data', 'q3.data', 'q3.eof', 'q4.data', 'q4.eof','q2_most_profit.data','q2_best_selling.data']
+            route_keys=['q1.data', 'q3.data', 'q4.data', 'q2_most_profit.data', 'q2_best_selling.data']
         )
         
         if hasattr(self.input_middleware, 'shutdown'):
@@ -34,7 +34,7 @@ class ReportGenerator:
         self.publisher = MessageMiddlewareExchange(
                 host=self.rabbitmq_host,
                 exchange_name=self.reports_exchange,
-                route_keys=['q1.data', 'q1.eof', 'q3.data', 'q3.eof', 'q4.data', 'q4.eof','q2_most_profit.data','q2_best_selling.data']
+                route_keys=['q1.data', 'q3.data', 'q4.data','q2_most_profit.data','q2_best_selling.data']
         )
         
         if hasattr(self.publisher, 'shutdown'):
@@ -43,8 +43,8 @@ class ReportGenerator:
         self.expected_queries = {'q1'
                                  ,'q3'
                                  ,'q4'
-                                #  ,'q2_most_profit'
-                                #  ,'q2_best_selling'
+                                  ,'q2_most_profit'
+                                  ,'q2_best_selling'
                                  }
         self.total_expected = len(self.expected_queries)
         
@@ -116,7 +116,9 @@ class ReportGenerator:
         try:
             client_id = None
             if properties and properties.headers:
-                client_id = properties.headers.get('client_id')
+                raw_client_id = properties.headers.get('client_id')
+                if raw_client_id is not None:
+                    client_id = int(raw_client_id)
             routing_key = method.routing_key
             should_stop = self.process_message(body, routing_key, client_id)
 
