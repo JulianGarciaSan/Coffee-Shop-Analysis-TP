@@ -64,8 +64,8 @@ class FilterNode:
             self.output_q3,
             self.output_q4,
             self.output_q2
-        )
-        
+        )       
+         
         for name, middleware in self.middlewares.items():
             if middleware and hasattr(middleware, 'shutdown'):
                 middleware.shutdown = self.shutdown

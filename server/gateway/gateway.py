@@ -19,9 +19,9 @@ class Gateway:
 
     def __init__(self, port, listener_backlog, rabbitmq_host, output_year_node_exchange, output_join_node, input_reports=None, shutdown_handler=None,total_join_nodes=1):
         self.shutdown = shutdown_handler
-        #self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        #self._server_socket.bind(('', port))
-        #self._server_socket.listen(listener_backlog)
+        if self.shutdown:
+            self.shutdown.register_callback(self._on_shutdown_signal)
+        
         self._acceptor = GatewayAcceptor(port, listener_backlog, shutdown_handler, rabbitmq_host,input_reports,self, total_join_nodes)
 
         self._is_running = False
@@ -31,6 +31,14 @@ class Gateway:
         self.output_filter_year_nodes_middleware = None
         self._join_middleware = None
         self.setup_common_middleware()
+
+    def _on_shutdown_signal(self):
+        """Callback ejecutado cuando llega SIGTERM/SIGINT"""
+        logger.info("Señal de shutdown recibida en Gateway")
+        self._is_running = False
+        
+        if self._acceptor:
+            self._acceptor.stop()
 
     def setup_common_middleware(self):
         self.output_filter_year_nodes_middleware = MessageMiddlewareExchange(
@@ -89,17 +97,22 @@ class Gateway:
         
         try:
             if self._acceptor:
+                logger.info("Cerrando acceptor...")
                 self._acceptor.cleanup()
-                self._acceptor.join()
+                self._acceptor.join(timeout=5.0)
+                if self._acceptor.is_alive():
+                    logger.warning("Acceptor no terminó en el tiempo esperado")
             
+            time.sleep(0.5)            
             if self.output_filter_year_nodes_middleware:
+                logger.info("Cerrando middleware de output...")
                 self.output_filter_year_nodes_middleware.close()
+                
             if self._join_middleware:
+                logger.info("Cerrando middleware de join...")
                 self._join_middleware.close()
                 
         except Exception as e:
             logger.error(f"Error durante cleanup: {e}")
         
         logger.info("Gateway cerrado completamente")
-            
-

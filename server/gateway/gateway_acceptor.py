@@ -11,6 +11,7 @@ class GatewayAcceptor(threading.Thread):
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(('', port))
         self._server_socket.listen(listener_backlog)
+        self._server_socket.settimeout(1.0) 
         self._is_running = False
         self.shutdown = shutdown_handler
         self._clients = []
@@ -27,6 +28,10 @@ class GatewayAcceptor(threading.Thread):
         logger.info(f'Accepted new connection from {addr[0]}')
         return c
     
+    def stop(self):
+        """Detiene el acceptor de forma ordenada"""
+        logger.info("Deteniendo GatewayAcceptor...")
+        self._is_running = False
     
     def start(self):
         self._is_running = True
@@ -54,7 +59,7 @@ class GatewayAcceptor(threading.Thread):
         except KeyboardInterrupt:
             logger.info("Servidor detenido manualmente")
         finally:
-            self._cleanup() 
+            self.cleanup() 
             
             
     def _reap_dead(self):
@@ -68,8 +73,6 @@ class GatewayAcceptor(threading.Thread):
             except Exception as e:
                 logger.error(f"Error limpiando cliente {client.client_id}: {e}")
             
-            
-    
     def cleanup(self):
         logger.info("Cleanup del GatewayAcceptor...")
         self._is_running = False
@@ -79,23 +82,28 @@ class GatewayAcceptor(threading.Thread):
             for client in self._clients:
                 try:
                     client.stop()
+                except Exception as e:
+                    logger.error(f"Error deteniendo cliente {client.client_id}: {e}")
+            
+            for client in self._clients:
+                try:
                     client.join(timeout=3.0)
                     if client.is_alive():
-                            logger.warning(f"Cliente {client.client_id} no terminó")
+                        logger.warning(f"Cliente {client.client_id} no terminó a tiempo")
                 except Exception as e:
-                    logger.error(f"Error: {e}")
-                
-                self._clients.clear()
+                    logger.error(f"Error esperando cliente {client.client_id}: {e}")
+            
+            self._clients.clear()
             
             if self._server_socket:
                 try:
                     self._server_socket.close()
-                    logger.info("Socket cerrado")
+                    logger.info("Socket del servidor cerrado")
                 except Exception as e:
                     logger.error(f"Error cerrando socket: {e}")
                 
         except Exception as e:
             logger.error(f"Error en cleanup: {e}")
         
-        logger.info("GatewayAcceptor cerrado")
+        logger.info("GatewayAcceptor cerrado completamente")
         
