@@ -33,4 +33,8 @@ class AggregatedDataProcessor:
         return self.data
     
     def clear(self):
-        self.data.clear()
+        if self.data is not None:
+            self.data.clear()
+        else:
+            logger.warning("AggregatedDataProcessor.data era None durante clear()")
+            self.data = []

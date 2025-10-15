@@ -35,6 +35,10 @@ class DataProcessor(ABC):
     
     def get_data(self) -> Dict:
         return self.data
-    
+        
     def clear(self):
-        self.data.clear()
+        if self.data is not None:
+            self.data.clear()
+        else:
+            logger.warning("DataProcessor.data era None durante clear()")
+            self.data = {}

@@ -63,6 +63,8 @@ class TopCustomersAggregatorNode:
             routing_keys=routing_keys
         )
         
+        self.input_middleware.shutdown = self.shutdown
+        
         logger.info(f"  Input: {input_exchange}, routing keys: {routing_keys}")
     
     def _setup_output_middleware(self):
@@ -75,6 +77,8 @@ class TopCustomersAggregatorNode:
             exchange_name=output_exchange,
             route_keys=route_keys
         )
+        
+        self.output_middleware.shutdown = self.shutdown
         
         logger.info(f"  Output: {output_exchange}, routing keys: {route_keys}")
     

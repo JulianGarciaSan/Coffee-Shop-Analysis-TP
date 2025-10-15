@@ -66,6 +66,8 @@ class BestSellingAggregatorNode:
             routing_keys=['top_selling.data', 'top_profit.data']
         )
         
+        self.input_middleware.shutdown = self.shutdown
+        
         logger.info(f"  Input Exchange: {input_exchange}")
         logger.info(f"  Input Queue: {input_queue}")
         
@@ -80,6 +82,8 @@ class BestSellingAggregatorNode:
             exchange_name=output_exchange,
             route_keys=route_keys
         )
+        
+        self.output_middleware.shutdown = self.shutdown
         
         logger.info(f"  Output Exchange: {output_exchange}")
         

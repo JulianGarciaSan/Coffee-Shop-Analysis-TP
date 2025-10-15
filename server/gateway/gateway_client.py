@@ -239,7 +239,7 @@ class ClientHandler(threading.Thread):
                     data_lines.append(line)
             
             total_users = len(data_lines)
-            logger.info(f"📨 [USERS] Cliente {self.client_id}: Procesando {total_users} users")
+            logger.info(f"[USERS] Cliente {self.client_id}: Procesando {total_users} users")
             
             CHUNK_SIZE = 5000
             
@@ -285,7 +285,7 @@ class ClientHandler(threading.Thread):
                     except Exception:
                         pass
             
-            logger.info(f"✓ [USERS] Cliente {self.client_id}: {total_users} users enviados en {(len(data_lines) // CHUNK_SIZE) + 1} chunks")
+            logger.info(f"[USERS] Cliente {self.client_id}: {total_users} users enviados en {(len(data_lines) // CHUNK_SIZE) + 1} chunks")
             
         except Exception as e:
             logger.error(f"Error procesando mensaje de tipo 'U': {e}")
