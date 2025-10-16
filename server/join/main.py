@@ -1,3 +1,4 @@
+import gc
 import logging
 import os
 import sys
@@ -1054,6 +1055,12 @@ class JoinNode:
                 state.received_peer_users.clear()
                 del self.client_states[client_id]
                 logger.debug(f"Client state eliminado")
+                    
+            if client_id in self.client_locks:
+                del self.client_locks[client_id]
+                logger.debug(f"Client lock eliminado")
+            
+            collected = gc.collect()
             
             logger.info(f"Limpieza completada para cliente '{client_id}'")
             
