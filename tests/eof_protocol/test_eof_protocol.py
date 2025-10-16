@@ -6,23 +6,25 @@ import datetime
 from collections import defaultdict
 from typing import Dict, List, Set
 from dataclasses import dataclass
-import pika
 
 
 @dataclass
 class EOFEvent:
-    """Evento del protocolo EOF"""
     timestamp: str
     client_id: str
-    event_type: str 
+    event_type: str
     node_id: str
     details: str = ""
+    stage: str = "" 
 
 
-class EOFProtocolLogAnalyzer: 
+class EOFProtocolNtoMAnalyzer:
     def __init__(self):
         self.events: List[EOFEvent] = []
         self.clients_tested: Set[str] = set()
+        
+        self.upstream_nodes = ['hour_1', 'hour_2', 'hour_3']  # N=3
+        self.downstream_nodes = ['groupby_semester_1', 'groupby_semester_2']  # M=2
         
         self.patterns = {
             'eof_received': re.compile(r'EOF recibido para cliente (\w+)'),
@@ -33,11 +35,18 @@ class EOFProtocolLogAnalyzer:
             'all_acks': re.compile(r'Todos los ACKs recibidos para cliente (\w+)'),
             'eof_propagated': re.compile(r'EOF enviado a Q3 exchange para cliente (\w+)'),
             'leadership': re.compile(r'Tomando liderazgo para cliente (\w+)'),
+            
+            'downstream_eof_received': re.compile(r"EOF recibido de cliente ['\"]?(\w+)['\"]?"),
         }
     
     def run_system_and_collect_logs(self, num_clients: int = 2) -> str:
+        print(f"Arquitectura N->M:")
+        print(f"  Filter nodes (N={len(self.upstream_nodes)}): {', '.join(self.upstream_nodes)}")
+        print(f"  GroupBy nodes (M={len(self.downstream_nodes)}): {', '.join(self.downstream_nodes)}\n")
+
         subprocess.run(
-            ['docker-compose', 'rm', '-fsv', 'filter_hour_1', 'filter_hour_2', 'filter_hour_3'],
+            ['docker-compose', 'rm', '-fsv', 
+             'filter_hour_1', 'filter_hour_2', 'filter_hour_3'],
             capture_output=True
         )
         time.sleep(2)
@@ -50,14 +59,24 @@ class EOFProtocolLogAnalyzer:
         )
         
         if result.returncode != 0:
-            print(f"Error levantando contenedores: {result.stderr}")
+            print(f"Error: {result.stderr}")
             sys.exit(1)
         
+        result = subprocess.run(
+            ['docker-compose', 'up', '-d', 
+             'groupby_semester_1', 'groupby_semester_2'],
+            capture_output=True,
+            text=True
+        )
+        
+        print("Esperando a que todos los contenedores esten listos...")
         time.sleep(15)
+        print("Sistema completo N->M listo\n")
         
         start_time = datetime.datetime.now()
         
         try:
+            import pika
             
             credentials = pika.PlainCredentials('admin', 'admin')
             parameters = pika.ConnectionParameters(
@@ -108,7 +127,7 @@ class EOFProtocolLogAnalyzer:
                     )
                 )
                 
-                print(f"Cliente {client_id}: {num_txs} transacciones enviadas")
+                print(f"  Cliente {client_id}: {num_txs} transacciones enviadas")
                 time.sleep(0.5)
             
             time.sleep(3)
@@ -124,13 +143,13 @@ class EOFProtocolLogAnalyzer:
                         delivery_mode=2
                     )
                 )
-                print(f"Cliente {client_id}: EOF enviado")
+                print(f"  Cliente {client_id}: EOF enviado")
                 time.sleep(0.3)
             
             connection.close()
             
             print("\nEsperando que el protocolo se ejecute...")
-            time.sleep(13)
+            time.sleep(15)
             
         except ImportError:
             print("Error: pika no instalado. Ejecuta: pip install pika")
@@ -145,191 +164,264 @@ class EOFProtocolLogAnalyzer:
         
         result = subprocess.run(
             ['docker-compose', 'logs', '--since', since_str, 
-             'filter_hour_1', 'filter_hour_2', 'filter_hour_3'],
+             'filter_hour_1', 'filter_hour_2', 'filter_hour_3',
+             'groupby_semester_1', 'groupby_semester_2'],
             capture_output=True,
             text=True
         )
         
         logs = result.stdout
-        
-        print(f"Logs desde: {since_str}")
-        print(f"Total: {len(logs.split(chr(10)))} líneas\n")
-        
+           
         return logs
     
     def parse_logs(self, logs: str):
+        
         lines = logs.split('\n')
         
         for line in lines:
-            node_match = re.match(r'(filter_hour_\d+)\s+\|', line)
-            if not node_match:
+            stage = None
+            node_id = None
+            
+            upstream_match = re.match(r'(filter_hour_\d+)\s+\|', line)
+            if upstream_match:
+                stage = 'upstream'
+                node_id = upstream_match.group(1).replace('filter_', '')
+            
+            downstream_match = re.match(r'(groupby_semester_\d+)\s+\|', line)
+            if downstream_match:
+                stage = 'downstream'
+                node_id = downstream_match.group(1)
+            
+            if not stage or not node_id:
                 continue
             
-            node_id = node_match.group(1).replace('filter_', '')
-            match = self.patterns['eof_received'].search(line)
-            if match:
-                client_id = match.group(1)
-                self.clients_tested.add(client_id)
-                self.events.append(EOFEvent(
-                    timestamp='',
-                    client_id=client_id,
-                    event_type='eof_received',
-                    node_id=node_id
-                ))
+            if stage == 'upstream':
+                match = self.patterns['eof_received'].search(line)
+                if match:
+                    client_id = match.group(1)
+                    self.clients_tested.add(client_id)
+                    self.events.append(EOFEvent(
+                        timestamp='',
+                        client_id=client_id,
+                        event_type='eof_received',
+                        node_id=node_id,
+                        stage='upstream'
+                    ))
                 
-            match = self.patterns['leadership'].search(line)
-            if match:
-                client_id = match.group(1)
-                self.events.append(EOFEvent(
-                    timestamp='',
-                    client_id=client_id,
-                    event_type='leadership',
-                    node_id=node_id,
-                    details='Se convirtió en líder'
-                ))
+                match = self.patterns['leadership'].search(line)
+                if match:
+                    client_id = match.group(1)
+                    self.events.append(EOFEvent(
+                        timestamp='',
+                        client_id=client_id,
+                        event_type='leadership',
+                        node_id=node_id,
+                        details='Líder upstream',
+                        stage='upstream'
+                    ))
+                
+                match = self.patterns['eof_fanout'].search(line)
+                if match:
+                    client_id = match.group(1)
+                    self.events.append(EOFEvent(
+                        timestamp='',
+                        client_id=client_id,
+                        event_type='eof_fanout_sent',
+                        node_id=node_id,
+                        stage='upstream'
+                    ))
+                
+                match = self.patterns['eof_fanout_received'].search(line)
+                if match:
+                    client_id = match.group(1)
+                    leader_node = match.group(2)
+                    self.events.append(EOFEvent(
+                        timestamp='',
+                        client_id=client_id,
+                        event_type='eof_fanout_received',
+                        node_id=node_id,
+                        details=f'De líder {leader_node}',
+                        stage='upstream'
+                    ))
+                
+                match = self.patterns['ack_sent'].search(line)
+                if match:
+                    client_id = match.group(1)
+                    self.events.append(EOFEvent(
+                        timestamp='',
+                        client_id=client_id,
+                        event_type='ack_sent',
+                        node_id=node_id,
+                        stage='upstream'
+                    ))
+                
+                match = self.patterns['ack_received'].search(line)
+                if match:
+                    from_node = match.group(1)
+                    client_id = match.group(2)
+                    pending = match.group(3)
+                    self.events.append(EOFEvent(
+                        timestamp='',
+                        client_id=client_id,
+                        event_type='ack_received',
+                        node_id=node_id,
+                        details=f'De {from_node}, pendientes: {pending}',
+                        stage='upstream'
+                    ))
+                
+                match = self.patterns['all_acks'].search(line)
+                if match:
+                    client_id = match.group(1)
+                    self.events.append(EOFEvent(
+                        timestamp='',
+                        client_id=client_id,
+                        event_type='all_acks_received',
+                        node_id=node_id,
+                        stage='upstream'
+                    ))
+                
+                match = self.patterns['eof_propagated'].search(line)
+                if match:
+                    client_id = match.group(1)
+                    self.events.append(EOFEvent(
+                        timestamp='',
+                        client_id=client_id,
+                        event_type='eof_propagated_to_downstream',
+                        node_id=node_id,
+                        details=f'Enviado a M={len(self.downstream_nodes)} nodos',
+                        stage='upstream'
+                    ))
             
-            match = self.patterns['eof_fanout'].search(line)
-            if match:
-                client_id = match.group(1)
-                self.events.append(EOFEvent(
-                    timestamp='',
-                    client_id=client_id,
-                    event_type='eof_fanout_sent',
-                    node_id=node_id
-                ))
-            
-            match = self.patterns['eof_fanout_received'].search(line)
-            if match:
-                client_id = match.group(1)
-                leader_node = match.group(2)
-                self.events.append(EOFEvent(
-                    timestamp='',
-                    client_id=client_id,
-                    event_type='eof_fanout_received',
-                    node_id=node_id,
-                    details=f'De líder {leader_node}'
-                ))
-            
-            match = self.patterns['ack_sent'].search(line)
-            if match:
-                client_id = match.group(1)
-                self.events.append(EOFEvent(
-                    timestamp='',
-                    client_id=client_id,
-                    event_type='ack_sent',
-                    node_id=node_id
-                ))
-            
-            match = self.patterns['ack_received'].search(line)
-            if match:
-                from_node = match.group(1)
-                client_id = match.group(2)
-                pending = match.group(3)
-                self.events.append(EOFEvent(
-                    timestamp='',
-                    client_id=client_id,
-                    event_type='ack_received',
-                    node_id=node_id,
-                    details=f'De {from_node}, pendientes: {pending}'
-                ))
-            
-            match = self.patterns['all_acks'].search(line)
-            if match:
-                client_id = match.group(1)
-                self.events.append(EOFEvent(
-                    timestamp='',
-                    client_id=client_id,
-                    event_type='all_acks_received',
-                    node_id=node_id
-                ))
-            
-            match = self.patterns['eof_propagated'].search(line)
-            if match:
-                client_id = match.group(1)
-                self.events.append(EOFEvent(
-                    timestamp='',
-                    client_id=client_id,
-                    event_type='eof_propagated',
-                    node_id=node_id
-                ))
-    
+            elif stage == 'downstream':
+                match = self.patterns['downstream_eof_received'].search(line)
+                if match:
+                    client_id = match.group(1)
+                    self.events.append(EOFEvent(
+                        timestamp='',
+                        client_id=client_id,
+                        event_type='eof_received_downstream',
+                        node_id=node_id,
+                        details='EOF llegó desde upstream',
+                        stage='downstream'
+                    ))
+
     def verify_protocol(self) -> bool:
         all_pass = True
         
         for client_id in sorted(self.clients_tested):
-            print(f"\nCliente {client_id}:")
+            print(f"CLIENTE {client_id}")
             
+
             client_events = [e for e in self.events if e.client_id == client_id]
+            upstream_events = [e for e in client_events if e.stage == 'upstream']
+            downstream_events = [e for e in client_events if e.stage == 'downstream']
             
-            leaders = [e for e in client_events if e.event_type == 'leadership']
+            
+            print(f"Filter nodes (N={len(self.upstream_nodes)} nodos):")
+            
+            leaders = [e for e in upstream_events if e.event_type == 'leadership']
             if leaders:
-                print(f"Líder elegido: {leaders[0].node_id}")
+                print(f"  Lider elegido: {leaders[0].node_id}")
             else:
-                print(f"NO se eligió líder")
+                print(f"  No se eligio lider")
                 all_pass = False
             
-            fanout_sent = [e for e in client_events if e.event_type == 'eof_fanout_sent']
+            fanout_sent = [e for e in upstream_events if e.event_type == 'eof_fanout_sent']
             if fanout_sent:
-                print(f"EOF_FANOUT enviado por {fanout_sent[0].node_id}")
+                print(f"  EOF_FANOUT enviado por nodo: {fanout_sent[0].node_id}")
             else:
-                print(f"EOF_FANOUT NO enviado")
+                print(f"  EOF_FANOUT NO enviado")
                 all_pass = False
             
-            fanout_received = [e for e in client_events if e.event_type == 'eof_fanout_received']
-            if len(fanout_received) >= 1:
-                print(f"EOF_FANOUT recibido por {len(fanout_received)} nodos")
-                for e in fanout_received:
-                    print(f"     • {e.node_id}: {e.details}")
+            fanout_received = [e for e in upstream_events if e.event_type == 'eof_fanout_received']
+            expected_fanout = len(self.upstream_nodes) - 1
+            nodes_that_received_fanout = set(e.node_id for e in fanout_received)
+            if len(fanout_received) >= expected_fanout:
+                print(f"  EOF_FANOUT recibido por {len(fanout_received)}/{expected_fanout} nodos:")
+                for node in sorted(nodes_that_received_fanout):
+                    print(f"     - {node}")
             else:
-                print(f"EOF_FANOUT recibido por pocos nodos")
+                print(f"  EOF_FANOUT recibido por {len(fanout_received)}/{expected_fanout} nodos:")
+                if nodes_that_received_fanout:
+                    for node in sorted(nodes_that_received_fanout):
+                        print(f"     - {node}")
             
-            acks_sent = [e for e in client_events if e.event_type == 'ack_sent']
-            if len(acks_sent) >= 1:
-                print(f"{len(acks_sent)} ACKs enviados")
-                for e in acks_sent:
-                    print(f"     • {e.node_id}")
+            acks_sent = [e for e in upstream_events if e.event_type == 'ack_sent']
+            nodes_that_sent_ack = set(e.node_id for e in acks_sent)
+            if len(acks_sent) >= expected_fanout:
+                print(f"  ACK enviado por {len(acks_sent)}/{expected_fanout} nodos:")
+                for node in sorted(nodes_that_sent_ack):
+                    print(f"     - {node}")
             else:
-                print(f"NO se enviaron ACKs")
+                print(f"  ACK enviado por {len(acks_sent)}/{expected_fanout} nodos:")
+                if nodes_that_sent_ack:
+                    for node in sorted(nodes_that_sent_ack):
+                        print(f"     - {node}")
                 all_pass = False
             
-            acks_received = [e for e in client_events if e.event_type == 'ack_received']
-            if acks_received:
-                print(f"Líder recibió {len(acks_received)} ACKs")
-                for e in acks_received:
-                    print(f"     • {e.details}")
+            acks_received = [e for e in upstream_events if e.event_type == 'ack_received']
+            if len(acks_received) >= expected_fanout:
+                print(f"  Lider recibio {len(acks_received)}/{expected_fanout} ACKs")
             else:
-                print(f"Líder NO recibió ACKs")
+                print(f"  Lider solo recibio {len(acks_received)}/{expected_fanout} ACKs")
                 all_pass = False
             
-            all_acks = [e for e in client_events if e.event_type == 'all_acks_received']
+            all_acks = [e for e in upstream_events if e.event_type == 'all_acks_received']
             if all_acks:
-                print(f"Todos los ACKs recibidos (nodo {all_acks[0].node_id})")
+                print(f"  Todos los ACKs recibidos por nodo lider: {all_acks[0].node_id}")
             else:
-                print(f"NO se recibieron todos los ACKs")
+                print(f"  NO se recibieron todos los ACKs")
                 all_pass = False
             
-            eof_prop = [e for e in client_events if e.event_type == 'eof_propagated']
+            eof_prop = [e for e in upstream_events if e.event_type == 'eof_propagated_to_downstream']
             if eof_prop:
-                print(f"EOF propagado downstream por {eof_prop[0].node_id}")
+                print(f"  EOF propagado a groupby nodes por: {eof_prop[0].node_id}")
             else:
-                print(f"EOF NO propagado")
+                print(f"  EOF NO propagado a groupby nodes")
                 all_pass = False
             
-            all_acks_idx = next((i for i, e in enumerate(client_events) if e.event_type == 'all_acks_received'), None)
-            eof_prop_idx = next((i for i, e in enumerate(client_events) if e.event_type == 'eof_propagated'), None)
+            all_acks_idx = next((i for i, e in enumerate(upstream_events) if e.event_type == 'all_acks_received'), None)
+            eof_prop_idx = next((i for i, e in enumerate(upstream_events) if e.event_type == 'eof_propagated_to_downstream'), None)
             
             if all_acks_idx is not None and eof_prop_idx is not None:
                 if all_acks_idx < eof_prop_idx:
-                    print(f"Orden correcto: Todos ACKs → EOF propagado")
+                    print(f"  Orden correcto: Todos ACKs -> EOF propagado")
                 else:
-                    print(f"Orden incorrecto: EOF propagado antes de recibir todos los ACKs")
+                    print(f"  Orden incorrecto")
                     all_pass = False
+            
+            print(f"GroupBy nodes (M={len(self.downstream_nodes)} nodos):")
+            
+            eof_downstream = [e for e in downstream_events if e.event_type == 'eof_received_downstream']
+            nodes_received = set(e.node_id for e in eof_downstream)
+            
+            if len(nodes_received) == len(self.downstream_nodes):
+                print(f"  EOF recibido por TODOS los M={len(self.downstream_nodes)} groupby nodes:")
+                for node in sorted(nodes_received):
+                    print(f"     - {node}")
+            elif len(nodes_received) > 0:
+                print(f"  EOF recibido por {len(nodes_received)}/{len(self.downstream_nodes)} groupby nodes:")
+                for node in sorted(nodes_received):
+                    print(f"     - {node}")
+                all_pass = False
+            else:
+                print(f"  Ningun groupby node recibio EOF")
+                all_pass = False
+            
+            if eof_prop and len(nodes_received) == len(self.downstream_nodes):
+                print(f"\n  PROPAGACION N->M EXITOSA:")
+                print(f"    Filter nodes -> GroupBy nodes completada")
+            else:
+                print(f"\n  PROPAGACION N->M INCOMPLETA")
+                print(f"    Filter nodes -> GroupBy nodes falló")
         
         print("\n" + "="*70)
         if all_pass:
-            print("protocolo de EOF correcto")
+            print("PROTOCOLO N->M FUNCIONANDO CORRECTAMENTE")
+            print("Filter nodes sincronizados con GroupBy nodes")
         else:
-            print("PROTOCOLO CON ERRORES")
+            print("PROTOCOLO N->M CON ERRORES")
+            print("Fallo en sincronizacion Filter -> GroupBy")
         print("="*70 + "\n")
         
         return all_pass
@@ -339,11 +431,10 @@ class EOFProtocolLogAnalyzer:
             logs = self.run_system_and_collect_logs(num_clients=2)
             
             if logs is None or len(logs.strip()) == 0:
-                print("Error: No se pudieron recolectar logs")
+                print("rror: No se pudieron recolectar logs")
                 return False
             
             self.parse_logs(logs)
-            
             success = self.verify_protocol()
             
             return success
@@ -356,7 +447,7 @@ class EOFProtocolLogAnalyzer:
 
 
 def main():
-    analyzer = EOFProtocolLogAnalyzer()
+    analyzer = EOFProtocolNtoMAnalyzer()
     
     try:
         success = analyzer.run_test()
