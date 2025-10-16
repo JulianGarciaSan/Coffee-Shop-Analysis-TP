@@ -90,45 +90,50 @@ class TransactionBatchDTO(BaseDTO):
 
     def get_csv_headers(self) -> List[str]:
         return [
-            "transaction_id", "store_id", "payment_method_id", "voucher_id",
-            "user_id", "original_amount", "discount_applied", "final_amount", "created_at"
+            "transaction_id", "store_id","user_id", "final_amount", "created_at"
         ]
     
     def dict_to_csv_line(self, record: Dict) -> str:
-        return (f"{record['transaction_id']},{record['store_id']},{record['payment_method_id']},"
-                f"{record['voucher_id']},{record['user_id']},{record['original_amount']},"
-                f"{record['discount_applied']},{record['final_amount']},{record['created_at']}")
+        return (f"{record['transaction_id']},{record['store_id']},{record['user_id']},"
+                f"{record['final_amount']},{record['created_at']}")
     
     def csv_line_to_dict(self, csv_line: str) -> Dict:
         values = csv_line.split(',')
         return {
             "transaction_id": values[0],
             "store_id": values[1],
-            "payment_method_id": values[2],
-            "voucher_id": values[3],
-            "user_id": values[4],
-            "original_amount": values[5],
-            "discount_applied": values[6],
-            "final_amount": values[7],
-            "created_at": values[8],
+            "user_id": values[2],
+            "final_amount": values[3],
+            "created_at": values[4],
         }
     def get_column_index(self, column_name: str) -> int:
         column_map = {
             'transaction_id': 0,
             'store_id': 1,
-            'payment_method_id': 2,
-            'voucher_id': 3,
-            'user_id': 4,
-            'original_amount': 5,
-            'discount_applied': 6,
-            'final_amount': 7,
-            'created_at': 8
+            'user_id': 2,
+            'final_amount': 3,
+            'created_at': 4
         }
         
         if column_name not in column_map:
             raise ValueError(f"Columna '{column_name}' no existe en transacciones")
         
         return column_map[column_name]
+    
+    def filter_columns(self):
+        """Filtra y deja solo las columnas necesarias"""
+        lines = self.data.split('\n')
+        filtered_lines = []
+        
+        for line in lines:
+            if line.strip():
+                parts = line.split(',')
+                if len(parts) >= 9:
+                    filtered_line = f"{parts[0]},{parts[1]},{parts[4]},{parts[7]},{parts[8]}"
+                    filtered_lines.append(filtered_line)
+        
+        self.data = '\n'.join(filtered_lines)
+        return self
     
 
 
@@ -140,30 +145,40 @@ class UserBatchDTO(BaseDTO):
         return ["user_id", "gender", "birthdate", "registered_at"]
     
     def dict_to_csv_line(self, record: Dict) -> str:
-        return (f"{record['user_id']},{record['gender']},{record['birthdate']},"
-                f"{record['registered_at']}")
+        return (f"{record['user_id']},{record['birthdate']}")
     
     def csv_line_to_dict(self, csv_line: str) -> Dict:
         values = csv_line.split(',')
         return {
             "user_id": values[0],
-            "gender": values[1],
             "birthdate": values[2],
-            "registered_at": values[3]
         }
     
     def get_column_index(self, column_name: str) -> int:
         column_map = {
             'user_id': 0,
-            'gender': 1,
-            'birthdate': 2,
-            'registered_at': 3
+            'birthdate': 1,
         }
         
         if column_name not in column_map:
             raise ValueError(f"Columna '{column_name}' no existe en users")
         
         return column_map[column_name]
+    
+    def filter_columns(self):
+        """Filtra y deja solo las columnas necesarias"""
+        lines = self.data.split('\n')
+        filtered_lines = []
+        
+        for line in lines:
+            if line.strip():
+                parts = line.split(',')
+                if len(parts) >= 3:
+                    filtered_line = f"{parts[0]},{parts[2]}"
+                    filtered_lines.append(filtered_line)
+        
+        self.data = '\n'.join(filtered_lines)
+        return self
 
 
 class StoreBatchDTO(BaseDTO):
@@ -175,39 +190,40 @@ class StoreBatchDTO(BaseDTO):
         return ["store_id", "store_name", "street", "postal_code", "city","state","latitude","longitude"]
     
     def dict_to_csv_line(self, record: Dict) -> str:
-        return (f"{record['store_id']},{record['store_name']},{record['street']},"
-                f"{record['postal_code']},{record['city']},{record['state']},"
-                f"{record['latitude']},{record['longitude']}")
+        return (f"{record['store_id']},{record['store_name']}")
     
     def csv_line_to_dict(self, csv_line: str) -> Dict:
         values = csv_line.split(',')
         return {
             "store_id": values[0],
             "store_name": values[1],
-            "street": values[2],
-            "postal_code": values[3],
-            "city": values[4],
-            "state": values[5],
-            "latitude": values[6],
-            "longitude": values[7]
         }
         
     def get_column_index(self, column_name: str) -> int:
         column_map = {
             'store_id': 0,
             'store_name': 1,
-            'street': 2,
-            'postal_code': 3,
-            'city': 4,
-            'state': 5,
-            'latitude': 6,
-            'longitude': 7
         }
         
         if column_name not in column_map:
             raise ValueError(f"Columna '{column_name}' no existe en stores")
         
         return column_map[column_name]
+    
+    def filter_columns(self):
+        """Filtra y deja solo las columnas necesarias"""
+        lines = self.data.split('\n')
+        filtered_lines = []
+        
+        for line in lines:
+            if line.strip():
+                parts = line.split(',')
+                if len(parts) >= 2:
+                    filtered_line = f"{parts[0]},{parts[1]}"
+                    filtered_lines.append(filtered_line)
+        
+        self.data = '\n'.join(filtered_lines)
+        return self
 
 
 class MenuItemBatchDTO(BaseDTO):
@@ -215,30 +231,21 @@ class MenuItemBatchDTO(BaseDTO):
         super().__init__(menu_items, batch_type, FileType.MENU_ITEMS)
     
     def get_csv_headers(self) -> List[str]:
-        return ["item_id", "item_name", "category", "is_seasonal", "available_from","available_to"]
+        return ["item_id", "item_name"]
     
     def dict_to_csv_line(self, record: Dict) -> str:
-        return (f"{record['item_id']},{record['item_name']},{record['category']},"
-                f"{record['is_seasonal']},{record['available_from']},{record['available_to']}")
+        return (f"{record['item_id']},{record['item_name']}")
     def csv_line_to_dict(self, csv_line: str) -> Dict:
         values = csv_line.split(',')
         return {
             "item_id": values[0],
             "item_name": values[1],
-            "category": values[2],
-            "is_seasonal": values[3],
-            "available_from": values[4],
-            "available_to": values[5]
         }
         
     def get_column_index(self, column_name: str) -> int:
         column_map = {
             'item_id': 0,
             'item_name': 1,
-            'category': 2,
-            'is_seasonal': 3,
-            'available_from': 4,
-            'available_to': 5
         }
         
         if column_name not in column_map:
@@ -246,43 +253,68 @@ class MenuItemBatchDTO(BaseDTO):
         
         return column_map[column_name]
 
+    def filter_columns(self):
+        """Filtra y deja solo las columnas necesarias"""
+        lines = self.data.split('\n')
+        filtered_lines = []
+        
+        for line in lines:
+            if line.strip():
+                parts = line.split(',')
+                if len(parts) >= 2:
+                    filtered_line = f"{parts[0]},{parts[1]}"
+                    filtered_lines.append(filtered_line)
+        
+        self.data = '\n'.join(filtered_lines)
+        return self
 
 class TransactionItemBatchDTO(BaseDTO):
     def __init__(self, transaction_items, batch_type=BatchType.DATA):
         super().__init__(transaction_items, batch_type, FileType.TRANSACTION_ITEMS)
     
     def get_csv_headers(self) -> List[str]:
-        return ["transaction_id", "item_id", "quantity", "unit_price", "subtotal","created_at"]
-    
+        return ["item_id", "quantity", "subtotal", "created_at"]
+
     def dict_to_csv_line(self, record: Dict) -> str:
-        return (f"{record['transaction_id']},{record['item_id']},{record['quantity']},"
-                f"{record['unit_price']},{record['subtotal']},{record['created_at']}")
+        return (f"{record['item_id']},{record['quantity']},"
+                f"{record['subtotal']},{record['created_at']}")
     
     def csv_line_to_dict(self, csv_line: str) -> Dict:
         values = csv_line.split(',')
         return {
-            "transaction_id": values[0],
-            "item_id": values[1],
-            "quantity": values[2],
-            "unit_price": values[3],
-            "subtotal": values[4],
-            "created_at": values[5]
+            "item_id": values[0],
+            "quantity": values[1],
+            "subtotal": values[2],
+            "created_at": values[3]
         }
     
     def get_column_index(self, column_name: str) -> int:
         column_map = {
-            'transaction_id': 0,
-            'item_id': 1,
-            'quantity': 2,
-            'unit_price': 3,
-            'subtotal': 4,
-            'created_at': 5
+            'item_id': 0,
+            'quantity': 1,
+            'subtotal': 2,
+            'created_at': 3
         }
         
         if column_name not in column_map:
             raise ValueError(f"Columna '{column_name}' no existe en transaction_items")
         
         return column_map[column_name]
+    
+    def filter_columns(self):
+        """Filtra y deja solo las columnas necesarias"""
+        lines = self.data.split('\n')
+        filtered_lines = []
+        
+        for line in lines:
+            if line.strip():
+                parts = line.split(',')
+                if len(parts) >= 6:
+                    filtered_line = f"{parts[1]},{parts[2]},{parts[4]},{parts[5]}"
+                    filtered_lines.append(filtered_line)
+        
+        self.data = '\n'.join(filtered_lines)
+        return self
 
 
 class ReportBatchDTO(BaseDTO):

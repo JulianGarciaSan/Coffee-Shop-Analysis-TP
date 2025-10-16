@@ -225,8 +225,8 @@ class HourNodeConfigurator(NodeConfigurator):
     def _get_month_from_csv_line(line):
         """Extract month from CSV line"""
         fields = line.split(',')
-        if len(fields) >= 9:
-            date_str = fields[8]
+        if len(fields) >= 5:
+            date_str = fields[4]
             return int(date_str[5:7])
         return None
     
