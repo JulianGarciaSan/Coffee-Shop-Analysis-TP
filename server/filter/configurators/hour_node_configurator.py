@@ -128,35 +128,29 @@ class HourNodeConfigurator(NodeConfigurator):
         
         client_id_str = str(client_id) if client_id is not None else "default"
         
-        # Manejar EOF
         if decoded_data.startswith("EOF:"):
             logger.info(f"EOF recibido para cliente {client_id_str}")
             
-            # Tomar liderazgo
             self.coordinator.take_leadership(
                 client_id_str, 
                 'transactions',
                 self._on_all_acks_received
             )
             
-            # Retornar should_stop=False para que main.py NO lo trate como EOF
             dto = TransactionBatchDTO(decoded_data, BatchType.EOF)
             return (False, 'transactions', dto, False)
         
-        # Verificar si debo procesar este mensaje (coordinación)
         if not self.coordinator.should_process_message(client_id_str):
             logger.info(f"Cliente {client_id_str} ya finalizó, ignorando mensaje")
             dto = TransactionBatchDTO(decoded_data, BatchType.RAW_CSV)
             return (True, 'transactions', dto, False)
         
-        # Procesar mensaje normalmente
         dto = TransactionBatchDTO(decoded_data, BatchType.RAW_CSV)
         return (False, 'transactions', dto, False)
 
     def send_data(self, data: str, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None):
         headers = self.create_headers(client_id)
         
-        # Verificar si debo enviar ACK después de enviar datos
         if client_id:
             client_id_str = str(client_id)
             if self.coordinator.should_send_ack_after_processing(client_id_str):
@@ -242,7 +236,6 @@ class HourNodeConfigurator(NodeConfigurator):
     def close(self):
         logger.info("Cerrando HourNodeConfigurator...")
         
-        # Detener thread de coordinación
         self.coordination_running = False
         if self.coordination_queue:
             try:
@@ -254,7 +247,6 @@ class HourNodeConfigurator(NodeConfigurator):
         if self.coordination_thread and self.coordination_thread.is_alive():
             self.coordination_thread.join(timeout=5)
         
-        # Cerrar coordinador
         if self.coordinator:
             self.coordinator.close()
         

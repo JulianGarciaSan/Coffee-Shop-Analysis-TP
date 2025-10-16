@@ -182,16 +182,13 @@ class ReportGenerator:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"{reports_dir}/{query_name}_{timestamp}.csv"
             
-            # Crear el file handle
             file_handle = open(filename, 'w', encoding='utf-8')
             
-            # Asegurar que csv_files existe para este cliente
             if 'csv_files' not in self.client_data[client_id]:
                 self.client_data[client_id]['csv_files'] = {}
             
             self.client_data[client_id]['csv_files'][query_name] = file_handle
             
-            # Escribir header
             header_line = sample_data.strip().split('\n')[0]
             file_handle.write(header_line + '\n')
             file_handle.flush()
@@ -205,7 +202,6 @@ class ReportGenerator:
     def _write_to_csv(self, csv_data: str, query_name: str, client_id: int):
         """Escribe datos al archivo CSV correspondiente del cliente."""
         try:
-            # Inicializar archivo si no existe para este cliente
             if query_name not in self.client_data[client_id]['csv_files']:
                 self._initialize_csv_file(client_id, query_name, csv_data)
             
@@ -217,7 +213,6 @@ class ReportGenerator:
                 if not line:
                     continue
                 
-                # Filtrar headers - ESPECÍFICO para cada línea completa
                 if line.lower() in [
                     'transaction_id,final_amount',  # Q1 header
                     'year_half_created_at,store_name,tpv',  # Q3 header  
@@ -504,7 +499,6 @@ class ReportGenerator:
                         lines = f.readlines()
                         total_lines = len(lines)
                         
-                        # Enviar en batches
                         for i in range(0, total_lines, batch_size):
                             batch_lines = lines[i:i+batch_size]
                             batch_data = ''.join(batch_lines)

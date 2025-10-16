@@ -72,7 +72,6 @@ class ClientProcessingState:
     best_selling_sent: bool = False
     most_profit_sent: bool = False
     
-    # Para peer-to-peer communication
     pending_top_customers: List[Dict] = field(default_factory=list)
     requested_users: set = field(default_factory=set)
     received_peer_users: Dict[str, Dict] = field(default_factory=dict)
@@ -211,7 +210,6 @@ class JoinNode:
             'q2_best_selling.data': self._handle_best_selling_message,
             'q2_most_profit.data': self._handle_most_profit_message,
             
-            # Peer communication
             'user_request': self._handle_peer_user_request,
             'user_response': self._handle_peer_user_response,
             'cleanup_signal': self._handle_peer_cleanup_signal,
@@ -550,7 +548,6 @@ class JoinNode:
             
             logger.info(f"Recibida señal de cleanup para cliente '{client_id}'")
             
-            # Limpiar inmediatamente
             self._cleanup_client_data(client_id)
             
             return False
@@ -1090,12 +1087,10 @@ class JoinNode:
                 del self.most_profit_processors[client_id]
                 logger.debug(f"Most profit processor eliminado")
             
-            # Limpiar datos de joins
             if client_id in self.q3_joined_data_by_client:
                 del self.q3_joined_data_by_client[client_id]
                 logger.debug(f"Q3 joined data eliminado")
             
-            # Limpiar estado del cliente
             if client_id in self.client_states:
                 state = self.client_states[client_id]
                 state.pending_top_customers.clear()

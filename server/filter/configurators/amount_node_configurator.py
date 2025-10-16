@@ -113,42 +113,35 @@ class AmountNodeConfigurator(NodeConfigurator):
     
     def process_filtered_data(self, filtered_csv: str) -> str:
         return self._extract_q1_columns(filtered_csv)
-
+    
     def process_message(self, body: bytes, routing_key: str = None, client_id: Optional[int] = None) -> tuple:
         decoded_data = body.decode('utf-8').strip()
         
-        # Extraer client_id
         client_id_str = str(client_id) if client_id is not None else "default"
         
-        # Manejar EOF
         if decoded_data.startswith("EOF:"):
             logger.info(f"EOF recibido para cliente {client_id_str}")
             
-            # Tomar liderazgo
             self.coordinator.take_leadership(
                 client_id_str, 
                 'transactions',
                 self._on_all_acks_received
             )
             
-            # Retornar should_stop=False para que main.py NO lo trate como EOF
             dto = TransactionBatchDTO(decoded_data, BatchType.EOF)
             return (False, 'transactions', dto, False)
         
-        # Verificar si debo procesar este mensaje (coordinación)
         if not self.coordinator.should_process_message(client_id_str):
             logger.info(f"Cliente {client_id_str} ya finalizó, ignorando mensaje")
             dto = TransactionBatchDTO(decoded_data, BatchType.RAW_CSV)
             return (True, 'transactions', dto, False)
         
-        # Procesar mensaje normalmente
         dto = TransactionBatchDTO(decoded_data, BatchType.RAW_CSV)
         return (False, 'transactions', dto, False)
     
     def send_data(self, data: str, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None):
         headers = self.create_headers(client_id)
         
-        # Verificar si debo enviar ACK después de enviar datos
         if client_id:
             client_id_str = str(client_id)
             if self.coordinator.should_send_ack_after_processing(client_id_str):
@@ -192,9 +185,9 @@ class AmountNodeConfigurator(NodeConfigurator):
                 continue
             
             parts = line.split(',')
-            if len(parts) >= 4:
+            if len(parts) >= 8:
                 transaction_id = parts[0]
-                final_amount = parts[3]
+                final_amount = parts[7]
                 result_lines.append(f"{transaction_id},{final_amount}")
         
         logger.debug(f"Extraídas {len(result_lines)-1} líneas con columnas Q1")
@@ -212,7 +205,6 @@ class AmountNodeConfigurator(NodeConfigurator):
     def close(self):
         logger.info("Cerrando AmountNodeConfigurator...")
         
-        # Detener thread de coordinación
         self.coordination_running = False
         if self.coordination_queue:
             try:
@@ -224,7 +216,6 @@ class AmountNodeConfigurator(NodeConfigurator):
         if self.coordination_thread and self.coordination_thread.is_alive():
             self.coordination_thread.join(timeout=5)
         
-        # Cerrar coordinador
         if self.coordinator:
             self.coordinator.close()
         

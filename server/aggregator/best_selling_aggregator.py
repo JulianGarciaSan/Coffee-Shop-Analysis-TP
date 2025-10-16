@@ -29,13 +29,11 @@ class BestSellingAggregatorNode:
         self.total_years = int(os.getenv('TOTAL_YEARS', '2'))
         self.total_groupby_nodes_per_year = int(os.getenv('TOTAL_GROUPBY_NODES', '4'))
         
-        # Esperamos top 1 de cada nodo GroupBy de cada año
         self.expected_sources = self.total_years * self.total_groupby_nodes_per_year
         
         total_join_nodes = int(os.getenv('TOTAL_JOIN_NODES', '1'))
         self.client_router = ClientRouter(total_join_nodes, node_prefix="join_node")
         
-        # Almacenamiento: por cliente, por mes, lista de candidatos a top 1
         self.month_selling_candidates_by_client: Dict[str, Dict[str, list]] = defaultdict(
             lambda: defaultdict(list)
         )
@@ -43,7 +41,6 @@ class BestSellingAggregatorNode:
             lambda: defaultdict(list)
         )
         
-        # Contadores de EOF por cliente
         self.eof_selling_count_by_client: Dict[str, int] = defaultdict(int)
         self.eof_profit_count_by_client: Dict[str, int] = defaultdict(int)
         
@@ -138,18 +135,15 @@ class BestSellingAggregatorNode:
         best_selling = {}
         most_profit = {}
         
-        # Top selling global
         selling_candidates = self.month_selling_candidates_by_client.get(client_id, {})
         for year_month, candidates in selling_candidates.items():
             if not candidates:
                 continue
             
-            # NUEVO: Mostrar TODOS los candidatos
             logger.info(f"===== CANDIDATOS SELLING para {year_month}, cliente {client_id} =====")
             for i, cand in enumerate(candidates):
                 logger.info(f"  Candidato {i}: item_id='{cand['item_id']}', sellings_qty={cand['sellings_qty']}")
             
-            # Encontrar el máximo
             top = max(candidates, 
                     key=lambda x: (x['sellings_qty'], -int(x['item_id']) if x['item_id'].isdigit() else 0))
             
@@ -158,13 +152,11 @@ class BestSellingAggregatorNode:
             logger.info(f"  >>> GANADOR: item_id='{top['item_id']}', sellings_qty={top['sellings_qty']}")
             logger.info(f"=" * 70)
         
-        # Top profit global
         profit_candidates = self.month_profit_candidates_by_client.get(client_id, {})
         for year_month, candidates in profit_candidates.items():
             if not candidates:
                 continue
             
-            # NUEVO: Mostrar TODOS los candidatos
             logger.info(f"===== CANDIDATOS PROFIT para {year_month}, cliente {client_id} =====")
             for i, cand in enumerate(candidates):
                 logger.info(f"  Candidato {i}: item_id='{cand['item_id']}', profit_sum={cand['profit_sum']}")
@@ -206,7 +198,6 @@ class BestSellingAggregatorNode:
             selling_count = self.eof_selling_count_by_client[client_id]
             profit_count = self.eof_profit_count_by_client[client_id]
             
-            # Esperar EOFs de TODOS los nodos GroupBy de TODOS los años
             if selling_count == self.expected_sources and profit_count == self.expected_sources:
                 logger.info(f"Todos los EOFs recibidos para cliente {client_id}, calculando top 1 global")
                 self._send_final_results(client_id)
@@ -232,7 +223,6 @@ class BestSellingAggregatorNode:
         selling_routing_key = self.client_router.get_routing_key(client_id, 'q2_best_selling.data')
         profit_routing_key = self.client_router.get_routing_key(client_id, 'q2_most_profit.data')
         
-        # Enviar best selling
         selling_csv = self.generate_top1_csv(best_selling, "sellings_qty")
         selling_dto = TransactionItemBatchDTO(selling_csv, BatchType.RAW_CSV)
         
