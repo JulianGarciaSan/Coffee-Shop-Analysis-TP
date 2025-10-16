@@ -1,3 +1,4 @@
+from collections import defaultdict
 import logging
 import os
 import threading
@@ -20,32 +21,42 @@ class YearNodeConfigurator(NodeConfigurator):
         all_node_ids_str = os.getenv('ALL_NODE_IDS', self.node_id)
         all_node_ids = [nid.strip() for nid in all_node_ids_str.split(',')]
         
-        # Crear coordinador (helper)
+        coordination_exchange = f'coordination_year_{self.file_mode}_exchange'
+        
         self.coordinator = PeerCoordinator(
             node_id=self.node_id,
             rabbitmq_host=rabbitmq_host,
             total_nodes=self.total_nodes,
             all_node_ids=all_node_ids,
-            exchange_name='coordination_year_exchange' 
+            exchange_name=coordination_exchange
         )
 
         
-        # Middleware de coordinación
         self.coordination_queue = MessageMiddlewareQueue(
             host=rabbitmq_host,
             queue_name=f'coordination_{self.node_id}',
-            exchange_name='coordination_year_exchange', 
+            exchange_name=coordination_exchange, 
             routing_keys=['coord.#']
         )
         
-        # Thread de coordinación
         self.coordination_thread: Optional[threading.Thread] = None
         self.coordination_running = False
         
-        # Referencias que se setean después
         self.output_middlewares: Optional[Dict[str, Any]] = None
+        if self.file_mode == 'transaction_items':
+            total_groupby_nodes = int(os.getenv('TOTAL_GROUPBY_NODES', '4'))
+            
+            groupby_routes = []
+            for year in ['2024', '2025']:
+                for node_id in range(total_groupby_nodes):
+                    groupby_routes.append(f"groupby_{year}_node_{node_id}")
+            
+            self.groupby_exchange = MessageMiddlewareExchange(
+                host=rabbitmq_host,
+                exchange_name='groupby_input.exchange',
+                route_keys=groupby_routes
+            )
         
-        # Iniciar thread de coordinación
         self._start_coordination_thread()
         
         logger.info(f"YearNodeConfigurator inicializado con coordinación multi-cliente")
@@ -117,19 +128,16 @@ class YearNodeConfigurator(NodeConfigurator):
         
         client_id_str = str(client_id) if client_id is not None else "default"
         
-        # Manejar EOF
         if decoded_data.startswith("EOF:"):
             logger.info(f"EOF recibido para cliente {client_id_str}")
             
-            # Tomar liderazgo
             batch_type = 'transactions' if self.file_mode == 'transactions' else 'transaction_items'
             self.coordinator.take_leadership(
                 client_id_str, 
                 batch_type,
-                self._on_all_acks_received  # Pasamos el callback
+                self._on_all_acks_received 
             )
             
-            # Retornar should_stop=False para que main.py NO lo trate como EOF
             if self.file_mode == 'transactions':
                 dto = TransactionBatchDTO(decoded_data, BatchType.EOF)
             else:
@@ -137,10 +145,8 @@ class YearNodeConfigurator(NodeConfigurator):
             
             return (False, batch_type, dto, False)
         
-        # Verificar si debo procesar este mensaje (coordinación)
         if not self.coordinator.should_process_message(client_id_str):
             logger.info(f"Cliente {client_id_str} ya finalizó, ignorando mensaje")
-            # Retornar should_stop=True para que main.py no procese
             if self.file_mode == 'transactions':
                 dto = TransactionBatchDTO(decoded_data, BatchType.RAW_CSV)
                 return (True, 'transactions', dto, False)
@@ -148,9 +154,7 @@ class YearNodeConfigurator(NodeConfigurator):
                 dto = TransactionItemBatchDTO(decoded_data, BatchType.RAW_CSV)
                 return (True, 'transaction_items', dto, False)
         
-        # Procesar mensaje normalmente
         if self.file_mode == 'transactions':
-            logger.debug(f"YearNode: Mensaje recibido para 'transactions', tamaño {len(decoded_data)} bytes")
             dto = TransactionBatchDTO(decoded_data, BatchType.RAW_CSV)
             return (False, 'transactions', dto, False)
         else:
@@ -172,7 +176,7 @@ class YearNodeConfigurator(NodeConfigurator):
             middlewares['q2'] = MessageMiddlewareExchange(
                 host=self.rabbitmq_host,
                 exchange_name=output_q2,
-                route_keys=['2024', '2025']
+                route_keys=[]
             )
             logger.info(f"  Output Q2 Exchange: {output_q2}")
         
@@ -183,7 +187,6 @@ class YearNodeConfigurator(NodeConfigurator):
             )
             logger.info(f"  Output Q4 Queue: {output_q4}")
         
-        # Guardar referencia para usar en callbacks
         self.output_middlewares = middlewares
         
         return middlewares
@@ -194,7 +197,6 @@ class YearNodeConfigurator(NodeConfigurator):
     def send_data(self, data: str, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None):
         headers = self.create_headers(client_id)
         
-        # Verificar si debo enviar ACK después de enviar datos
         if client_id:
             client_id_str = str(client_id)
             if self.coordinator.should_send_ack_after_processing(client_id_str):
@@ -213,7 +215,7 @@ class YearNodeConfigurator(NodeConfigurator):
         elif batch_type == "transaction_items":
             logger.info(f"Procesando líneas de TransactionItems para Q2")
             if 'q2' in middlewares:
-                self._send_transaction_items_by_year(data, middlewares['q2'], client_id)
+                self._send_transaction_items_by_year(data, client_id)
 
     def _on_all_acks_received(self, client_id: str, batch_type: str):
         logger.info(f"Todos los ACKs recibidos para cliente {client_id}, propagando EOF downstream")
@@ -245,10 +247,7 @@ class YearNodeConfigurator(NodeConfigurator):
         
         elif batch_type == "transaction_items":
             if 'q2' in middlewares:
-                eof_dto = TransactionItemBatchDTO("EOF:1", batch_type=BatchType.EOF)
-                middlewares['q2'].send(eof_dto.to_bytes_fast(), routing_key='2024', headers=headers)
-                middlewares['q2'].send(eof_dto.to_bytes_fast(), routing_key='2025', headers=headers)
-                logger.info(f"EOF enviado a Q2 para cliente {client_id}")
+                self.send_eof_to_groupby(client_id=str(client_id) if client_id is not None else "default")
     
     def handle_eof(self, counter: int, total_filters: int, eof_type: str, 
             middlewares: Dict[str, Any], input_middleware: Any, client_id: Optional[int] = None) -> bool:
@@ -259,46 +258,116 @@ class YearNodeConfigurator(NodeConfigurator):
         logger.warning("handle_eof llamado pero ya no se usa (coordinador maneja EOF)")
         return False
     
-    def _send_transaction_items_by_year(self, data: str, q2_middleware, client_id: Optional[int] = None):
-        headers = self.create_headers(client_id)
+    # def _send_transaction_items_by_year(self, data: str, q2_middleware, client_id: Optional[int] = None):
+    #     headers = self.create_headers(client_id)
+    #     lines = data.strip().split('\n')
+    #     header = lines[0] if lines else ""
+        
+    #     logger.info(f"Procesando {len(lines)} líneas de TransactionItems para Q2")
+        
+    #     data_by_year = {'2024': [header], '2025': [header]}
+    #     dto_helper = TransactionItemBatchDTO("", BatchType.RAW_CSV)
+        
+    #     for line in lines[1:]:
+    #         if not line.strip():
+    #             continue
+                
+    #         try:
+    #             created_at = dto_helper.get_column_value(line, 'created_at')
+    #             if created_at and len(created_at) >= 4:
+    #                 year = created_at[:4]
+    #                 if year in data_by_year:
+    #                     data_by_year[year].append(line)
+    #             else:
+    #                 logger.warning(f"Created_at inválido: '{created_at}' en línea: {line[:50]}...")
+    #         except Exception as e:
+    #             logger.warning(f"Error procesando línea TransactionItem para Q2: {e}")
+    #             continue
+        
+    #     for year, year_lines in data_by_year.items():
+    #         if len(year_lines) > 1:
+    #             year_csv = '\n'.join(year_lines)
+    #             year_dto = TransactionItemBatchDTO(year_csv, batch_type=BatchType.RAW_CSV)
+    #             q2_middleware.send(year_dto.to_bytes_fast(), routing_key=year, headers=headers)
+    #             logger.info(f"TransactionItemBatchDTO enviado a Q2 con routing key {year}: {len(year_lines)-1} líneas")
+    #         else:
+    #             logger.info(f"No hay datos para año {year} - solo header")
+                
+    def _send_transaction_items_by_year(self, data: str, client_id: str):
         lines = data.strip().split('\n')
-        header = lines[0] if lines else ""
+        header = lines[0] if lines else "created_at,transaction_id,item_id,quantity,subtotal"
         
-        logger.info(f"Procesando {len(lines)} líneas de TransactionItems para Q2")
-        
-        data_by_year = {'2024': [header], '2025': [header]}
         dto_helper = TransactionItemBatchDTO("", BatchType.RAW_CSV)
+        total_groupby_nodes = int(os.getenv('TOTAL_GROUPBY_NODES', '4'))
+        
+        batches = {}
+        
+        node_distribution = defaultdict(int)
         
         for line in lines[1:]:
-            if not line.strip():
-                continue
-                
-            try:
-                created_at = dto_helper.get_column_value(line, 'created_at')
-                if created_at and len(created_at) >= 4:
-                    year = created_at[:4]
-                    if year in data_by_year:
-                        data_by_year[year].append(line)
-                else:
-                    logger.warning(f"Created_at inválido: '{created_at}' en línea: {line[:50]}...")
-            except Exception as e:
-                logger.warning(f"Error procesando línea TransactionItem para Q2: {e}")
+            if not line.strip() or line.startswith('created_at'):
                 continue
         
-        for year, year_lines in data_by_year.items():
-            if len(year_lines) > 1:
-                year_csv = '\n'.join(year_lines)
-                year_dto = TransactionItemBatchDTO(year_csv, batch_type=BatchType.RAW_CSV)
-                q2_middleware.send(year_dto.to_bytes_fast(), routing_key=year, headers=headers)
-                logger.info(f"TransactionItemBatchDTO enviado a Q2 con routing key {year}: {len(year_lines)-1} líneas")
-            else:
-                logger.info(f"No hay datos para año {year} - solo header")
+            try:
+                created_at = dto_helper.get_column_value(line, 'created_at')
+                item_id = dto_helper.get_column_value(line, 'item_id')
+                
+                if not created_at or not item_id:
+                    continue
+                
+                year = created_at[:4]
+                try:
+                    node_index = int(item_id) % total_groupby_nodes
+                except (ValueError, TypeError):
+                    node_index = hash(str(item_id)) % total_groupby_nodes
+                
+                node_distribution[node_index] += 1
+                
+                key = (year, node_index)
+                if key not in batches:
+                    batches[key] = [header]
+                
+                batches[key].append(line)
+                
+            except Exception as e:
+                logger.warning(f"Error procesando línea: {e}")
+        
+        for (year, node_index), batch_lines in batches.items():
+            if len(batch_lines) > 1:
+                csv_data = '\n'.join(batch_lines)
+                dto = TransactionItemBatchDTO(csv_data, BatchType.RAW_CSV)
+                routing_key = f"groupby_{year}_node_{node_index}"
+                
+                self.groupby_exchange.send(
+                    dto.to_bytes_fast(),
+                    routing_key=routing_key,
+                    headers={'client_id': client_id}
+                )
+                
+                logger.info(f"Batch enviado a {routing_key}: {len(batch_lines)-1} líneas, cliente {client_id}")
+
+    def send_eof_to_groupby(self, client_id: str):
+        total_groupby_nodes = int(os.getenv('TOTAL_GROUPBY_NODES', '4'))
+        
+        for year in ['2024', '2025']:
+            for node_index in range(total_groupby_nodes):
+                routing_key = f"groupby_{year}_node_{node_index}"
+                
+                eof_dto = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
+                
+                self.groupby_exchange.send(
+                    eof_dto.to_bytes_fast(),
+                    routing_key=routing_key,
+                    headers={'client_id': client_id}
+                )
+        
+        logger.info(f"EOF enviado a TODOS los nodos GroupBy para cliente {client_id}")
+        
     
     def close(self):
         """Cleanup del configurator"""
         logger.info("Cerrando YearNodeConfigurator...")
         
-        # Detener thread de coordinación
         self.coordination_running = False
         if self.coordination_queue:
             try:
@@ -308,4 +377,24 @@ class YearNodeConfigurator(NodeConfigurator):
                 logger.error(f"Error cerrando coordination_queue: {e}")
         
         if self.coordination_thread and self.coordination_thread.is_alive():
-            self.coordination_thre
+            self.coordination_thread.join(timeout=5.0)
+        
+        if hasattr(self, 'coordinator') and self.coordinator:
+            try:
+                self.coordinator.close()
+            except Exception as e:
+                logger.error(f"Error cerrando coordinator: {e}")
+        
+        if hasattr(self, 'groupby_exchange') and self.groupby_exchange:
+            try:
+                self.groupby_exchange.close()
+            except Exception as e:
+                logger.error(f"Error cerrando groupby_exchange: {e}")
+        
+        if hasattr(self, 'groupby_top_customer_exchange') and self.groupby_top_customer_exchange:
+            try:
+                self.groupby_top_customer_exchange.close()
+            except Exception as e:
+                logger.error(f"Error cerrando groupby_top_customer_exchange: {e}")
+        
+        logger.info("YearNodeConfigurator cerrado correctamente")

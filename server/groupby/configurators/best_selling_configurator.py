@@ -1,8 +1,10 @@
+# best_selling_configurator.py
 import logging
 import os
+import threading
 from typing import Dict, Any
 from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
-from dtos.dto import TransactionItemBatchDTO, BatchType
+from dtos.dto import TransactionItemBatchDTO, BatchType, CoordinationMessageDTO
 from .base_configurators import GroupByConfigurator
 
 logger = logging.getLogger(__name__)
@@ -12,112 +14,205 @@ class BestSellingConfigurator(GroupByConfigurator):
     def __init__(self, rabbitmq_host: str, output_exchange: str):
         super().__init__(rabbitmq_host, output_exchange)
         self.year = os.getenv('AGGREGATOR_YEAR', '2024')
-        self.input_exchange = os.getenv('INPUT_EXCHANGE', 'year_filtered_q2')
-        self.input_queue_name = f"best_selling_{self.year}_queue"
-        self.total_groupby_nodes = int(os.getenv('TOTAL_GROUPBY_NODES', '4'))
+        self.input_exchange = os.getenv('INPUT_EXCHANGE', 'groupby_input.exchange')
         
-        # Override dto_helper para usar TransactionItemBatchDTO
+        self.node_id = int(os.getenv('GROUPBY_NODE_ID', '0'))
+        self.total_groupby_nodes = int(os.getenv('TOTAL_GROUPBY_NODES', '4'))
+        all_node_ids_str = os.getenv('ALL_NODE_IDS', '')
+        all_node_ids = [nid.strip() for nid in all_node_ids_str.split(',')] if all_node_ids_str else [f'groupby_{self.year}_node_{self.node_id}']
+        
+        self.node_name = f'groupby_{self.year}_node_{self.node_id}'
+        self.input_queue_name = f"best_selling_{self.year}_node_{self.node_id}"
+        
+        
         self.dto_helper = TransactionItemBatchDTO("", BatchType.RAW_CSV)
         
         logger.info(f"BestSellingConfigurator inicializado:")
+        logger.info(f"  Node: {self.node_name}")
         logger.info(f"  Year: {self.year}")
-        logger.info(f"  Input Exchange: {self.input_exchange}")
-        logger.info(f"  Input Queue: {self.input_queue_name}")
         logger.info(f"  Total nodos: {self.total_groupby_nodes}")
+        logger.info(f"  Input Queue: {self.input_queue_name}")
+        
     
     def create_input_middleware(self):
+        routing_key = f"groupby_{self.year}_node_{self.node_id}"
+        
         middleware = MessageMiddlewareQueue(
             host=self.rabbitmq_host,
             queue_name=self.input_queue_name,
             exchange_name=self.input_exchange,
-            routing_keys=[self.year]
+            routing_keys=[routing_key]
         )
         
-        logger.info(f"  Input: Queue {self.input_queue_name} bindeada a exchange {self.input_exchange} con routing key {self.year}")
+        logger.info(f"  Escuchando routing_key: {routing_key}")
         return middleware
     
     def create_output_middlewares(self) -> Dict[str, Any]:
         output_middleware = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
-            exchange_name=self.output_exchange,
-            route_keys=['2024', '2025']
+            exchange_name=self.output_exchange, 
+            route_keys=['top_selling.data', 'top_profit.data']
         )
         
         logger.info(f"  Output exchange: {self.output_exchange}")
-        logger.info(f"  Routing keys: 2024, 2025")
+        logger.info(f"  Enviando directo a Aggregator Final")
         
         return {"output": output_middleware}
     
     def process_message(self, body: bytes, headers: dict = None) -> tuple:
         dto = TransactionItemBatchDTO.from_bytes_fast(body)
         
-        logger.info(f"Mensaje recibido: batch_type={dto.batch_type}, tamaño={len(dto.data)} bytes")
+        client_id = 'default_client'
+        if headers and 'client_id' in headers:
+            client_id = headers['client_id']
+            if isinstance(client_id, bytes):
+                client_id = client_id.decode('utf-8')
+        
+        dto.client_id = str(client_id)
         
         is_eof = (dto.batch_type == BatchType.EOF)
-        should_stop = False
         
-        return (should_stop, dto, is_eof)
+        return (False, dto, is_eof) 
     
     def handle_eof(self, dto: TransactionItemBatchDTO, middlewares: dict, strategy) -> bool:
+        client_id = getattr(dto, 'client_id', 'default_client')
+        logger.info(f"EOF recibido para cliente '{client_id}'")
+        
         try:
-            eof_data = dto.data.strip()
-            counter = int(eof_data.split(':')[1]) if ':' in eof_data else 1
+            self._calculate_and_send_top1(middlewares["output"], strategy, client_id)
             
-            logger.info(f"EOF recibido con counter={counter}, total={self.total_groupby_nodes}")
+            self._send_eof_to_aggregator(middlewares["output"], client_id)
             
-            self._send_data_by_month(middlewares["output"], strategy)
+            month_item_aggregations = getattr(strategy, 'month_item_aggregations_by_client', {})
+            if client_id in month_item_aggregations:
+                del month_item_aggregations[client_id]
+                logger.info(f"Memoria limpiada para cliente {client_id}")
             
-            if counter < self.total_groupby_nodes:
-                new_counter = counter + 1
-                eof_dto = TransactionItemBatchDTO(f"EOF:{new_counter}", BatchType.EOF)
-                
-                if 'input_queue' in middlewares:
-                    middlewares["input_queue"].send(eof_dto.to_bytes_fast())
-                    logger.info(f"EOF:{new_counter} reenviado a input queue")
-                    logger.info("Datos enviados - esperando otros nodos")
-            else:
-                # Último nodo, enviar EOF final al agregator
-                logger.info(f"Último nodo GroupBy del año {self.year} - iniciando EOF para aggregators")
-                eof_dto = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
-                
-                middlewares["output"].send(eof_dto.to_bytes_fast(), routing_key=self.year)
-                logger.info(f"EOF:1 enviado al topic '{self.year}' para aggregators intermediate")
-                print(f"{'='*60}\n")
-            
-            return True
+            return False
             
         except Exception as e:
-            logger.error(f"Error manejando EOF: {e}")
+            logger.error(f"Error manejando EOF para client_id={client_id}: {e}")
             return False
-    
-    def _send_data_by_month(self, output_middleware, strategy):
-        """Envía los datos acumulados por la strategy, agrupados por mes"""
-        month_item_aggregations = strategy.month_item_aggregations
         
-        if not month_item_aggregations:
-            logger.warning("No hay datos locales para enviar")
+    def _send_eof_to_aggregator(self, output_middleware, client_id):
+        """Envía EOF al Aggregator Final"""
+        headers = {'client_id': client_id, 'groupby_node': self.node_name}
+        
+        eof_dto = TransactionItemBatchDTO(f"EOF:{self.node_name}", BatchType.EOF)
+        
+        output_middleware.send(
+            eof_dto.to_bytes_fast(),
+            routing_key='top_selling.data',
+            headers=headers
+        )
+        
+        output_middleware.send(
+            eof_dto.to_bytes_fast(),
+            routing_key='top_profit.data',
+            headers=headers
+        )
+        
+        logger.info(f"EOF enviado al Aggregator Final para cliente {client_id}")
+    
+    def _calculate_and_send_top1(self, output_middleware, strategy, client_id):
+        """
+        Calcula el top 1 LOCAL (de los items que procesó este nodo)
+        y envía al Aggregator Final
+        """
+        month_item_aggregations_by_client = getattr(strategy, 'month_item_aggregations_by_client', {})
+        client_data = month_item_aggregations_by_client.get(client_id, {})
+        
+        if not client_data:
+            logger.warning(f"No hay datos para enviar para client_id={client_id}")
             return
         
-        total_months = len(month_item_aggregations)
-        logger.info(f"Enviando datos de {total_months} meses")
+        headers = {'client_id': client_id}
         
-        for year_month in sorted(month_item_aggregations.keys()):
-            month_csv_lines = ["created_at,item_id,sellings_qty,profit_sum"]
-            item_aggs = month_item_aggregations[year_month]
+        logger.info(f"Calculando top 1 local para {len(client_data)} meses, cliente {client_id}")
+        
+        for year_month in sorted(client_data.keys()):
+            items = client_data[year_month]
             
-            for item_agg in item_aggs.values():
-                if item_agg is not None:
-                    month_csv_lines.append(item_agg.to_csv_line(year_month))
+            valid_items = [item for item in items.values() if item is not None]
             
-            month_csv = '\n'.join(month_csv_lines)
+            if not valid_items:
+                continue
             
-            result_dto = TransactionItemBatchDTO(month_csv, BatchType.RAW_CSV)
-            output_middleware.send(result_dto.to_bytes_fast(), self.year)
+            top_selling_item = max(valid_items, 
+                                key=lambda x: (x.sellings_qty, -int(x.item_id) if x.item_id.isdigit() else 0))
             
-            logger.info(f"Month {year_month}: {len(month_csv_lines)-1} items → año '{self.year}'")
+            selling_csv = f"created_at,item_id,sellings_qty\n"
+            selling_csv += f"{year_month},{top_selling_item.item_id},{top_selling_item.sellings_qty}"
+            
+            selling_dto = TransactionItemBatchDTO(selling_csv, BatchType.RAW_CSV)
+            output_middleware.send(
+                selling_dto.to_bytes_fast(),
+                routing_key='top_selling.data',
+                headers=headers
+            )
+            
+            logger.info(f"✓ Top selling local {year_month}: item {top_selling_item.item_id} ({top_selling_item.sellings_qty} ventas)")
+            
+            top_profit_item = max(valid_items,
+                                key=lambda x: (x.profit_sum, -int(x.item_id) if x.item_id.isdigit() else 0))
+            
+            profit_csv = f"created_at,item_id,profit_sum\n"
+            profit_csv += f"{year_month},{top_profit_item.item_id},{top_profit_item.profit_sum:.2f}"
+            
+            profit_dto = TransactionItemBatchDTO(profit_csv, BatchType.RAW_CSV)
+            output_middleware.send(
+                profit_dto.to_bytes_fast(),
+                routing_key='top_profit.data',
+                headers=headers
+            )
+            
+            logger.info(f"Top profit local {year_month}: item {top_profit_item.item_id} (${top_profit_item.profit_sum:.2f})")
+        
+        logger.info(f"Top 1 local enviado para cliente {client_id}")
+        
+        if client_id in month_item_aggregations_by_client:
+            del month_item_aggregations_by_client[client_id]
+            logger.info(f"Memoria limpiada para cliente {client_id}")
+    
+    def _on_all_acks_received(self, client_id: str, middlewares: dict):
+        logger.info(f"Todos los ACKs recibidos para cliente {client_id}, propagando EOF")
+        
+        headers = {'client_id': client_id}
+        
+        eof_dto = TransactionItemBatchDTO(f"EOF:{client_id}", BatchType.EOF)
+        
+        middlewares["output"].send(
+            eof_dto.to_bytes_fast(),
+            routing_key='top_selling.data',
+            headers=headers
+        )
+        
+        middlewares["output"].send(
+            eof_dto.to_bytes_fast(),
+            routing_key='top_profit.data',
+            headers=headers
+        )
+        
+        logger.info(f"EOF propagado a Aggregator Final para cliente {client_id}")
     
     def get_strategy_config(self) -> dict:
         return {
             'input_queue_name': self.input_queue_name,
             'year': self.year
         }
+    
+    def close(self):
+        logger.info("Cerrando BestSellingConfigurator...")
+        
+        self.coordination_running = False
+        if self.coordination_queue:
+            try:
+                self.coordination_queue.stop_consuming()
+                self.coordination_queue.close()
+            except Exception as e:
+                logger.error(f"Error cerrando coordination_queue: {e}")
+        
+        if self.coordinator:
+            self.coordinator.close()
+        
+        logger.info("BestSellingConfigurator cerrado")

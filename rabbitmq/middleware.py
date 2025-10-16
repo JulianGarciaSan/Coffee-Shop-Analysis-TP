@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import pika
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,8 @@ class MessageMiddlewareExchange(MessageMiddleware):
         self.channel = None
         self.consumer_queue = None  
         self.shutdown = None    
-        
+        self._closing = False
+
         self._connect()
 
     def _connect(self):
@@ -71,8 +73,8 @@ class MessageMiddlewareExchange(MessageMiddleware):
             parameters = pika.ConnectionParameters(
                 host=self.host, 
                 credentials=credentials,
-                heartbeat=600, 
-                blocked_connection_timeout=300,  
+                heartbeat=1200, 
+                blocked_connection_timeout=1800,  
                 frame_max=131072 
             )
             self.connection = pika.BlockingConnection(parameters)
@@ -96,7 +98,7 @@ class MessageMiddlewareExchange(MessageMiddleware):
                 routing_key=key,
                 body=message,
                 properties=pika.BasicProperties(
-                    delivery_mode=1,
+                    delivery_mode=2,
                     headers=headers or {}
                 )
             )
@@ -137,6 +139,10 @@ class MessageMiddlewareExchange(MessageMiddleware):
                 if method_frame is None:
                     continue
                 
+                if not self.channel or not self.channel.is_open:
+                    logger.info("Canal cerrado durante consumo, saliendo del loop")
+                    break
+                
                 try:
                     on_message_callback(self.channel, method_frame, properties, body)
                     self.channel.basic_ack(method_frame.delivery_tag)
@@ -167,13 +173,19 @@ class MessageMiddlewareExchange(MessageMiddleware):
         return wrapper
 
     def stop_consuming(self):
-        try:
-            if self.channel:
+        """Detener el consumo de mensajes de forma segura"""
+        if self.channel:
+            try:
+                logger.info("Deteniendo consumo de mensajes...")
                 self.channel.stop_consuming()
+                self._consuming = False
                 logger.info("Consumo de mensajes detenido")
-        except Exception as e:
-            logger.error(f"Error deteniendo el consumo: {e}")
-            raise MessageMiddlewareMessageError(f"Error deteniendo el consumo: {e}")
+                
+                time.sleep(0.2) 
+                
+            except Exception as e:
+                logger.error(f"Error deteniendo el consumo: {e}")
+                self._consuming = False
 
     def delete(self):
         try:
@@ -185,13 +197,33 @@ class MessageMiddlewareExchange(MessageMiddleware):
             raise MessageMiddlewareDeleteError(f"Error eliminando el exchange: {e}")
 
     def close(self):
+        """Cierre idempotente y seguro"""
+        if self._closing:
+            logger.debug("Ya en proceso de cierre, ignorando")
+            return
+        
+        self._closing = True
+        
         try:
-            if self.connection:
-                self.connection.close()
-                logger.info("Conexión con RabbitMQ cerrada")
+            if self.channel and self.channel.is_open:
+                try:
+                    self.channel.close()
+                    logger.debug("Canal cerrado")
+                    time.sleep(0.3)
+                except Exception as e:
+                    logger.debug(f"Error cerrando canal: {e}")
+            
+            if self.connection and self.connection.is_open:
+                try:
+                    self.connection.close()
+                    logger.info("Conexión con RabbitMQ cerrada")
+                except Exception as e:
+                    logger.debug(f"Error cerrando conexión: {e}")
+                    
         except Exception as e:
-            logger.error(f"Error cerrando conexión: {e}")
-            raise MessageMiddlewareCloseError(f"Error cerrando conexión: {e}")
+            logger.warning(f"Excepción durante cierre: {e}")
+        finally:
+            self._closing = False
 
 class MessageMiddlewareQueue(MessageMiddleware):
     def __init__(self, host: str, queue_name: str, exchange_name: str = None, 
@@ -203,7 +235,7 @@ class MessageMiddlewareQueue(MessageMiddleware):
         self.connection = None
         self.channel = None
         self.shutdown = None
-
+        self._closing = False  
         self._connect()
 
     def _connect(self):
@@ -212,8 +244,8 @@ class MessageMiddlewareQueue(MessageMiddleware):
             parameters = pika.ConnectionParameters(
                 host=self.host, 
                 credentials=credentials,
-                heartbeat=600,
-                blocked_connection_timeout=300,
+                heartbeat=1200,
+                blocked_connection_timeout=1800,
                 frame_max=131072
             )
             self.connection = pika.BlockingConnection(parameters)
@@ -281,6 +313,10 @@ class MessageMiddlewareQueue(MessageMiddleware):
                 if method_frame is None:
                     continue
                 
+                if not self.channel or not self.channel.is_open:
+                    logger.info("Canal cerrado durante consumo, saliendo del loop")
+                    break
+                
                 try:
                     on_message_callback(self.channel, method_frame, properties, body)
                     self.channel.basic_ack(method_frame.delivery_tag)
@@ -319,13 +355,19 @@ class MessageMiddlewareQueue(MessageMiddleware):
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)  
 
     def stop_consuming(self):
-        try:
-            if self.channel:
+        """Detener el consumo de mensajes de forma segura"""
+        if self.channel:
+            try:
+                logger.info("Deteniendo consumo de mensajes...")
                 self.channel.stop_consuming()
+                self._consuming = False
                 logger.info("Consumo de mensajes detenido")
-        except Exception as e:
-            logger.error(f"Error deteniendo el consumo: {e}")
-            raise MessageMiddlewareMessageError(f"Error deteniendo el consumo: {e}")
+                
+                time.sleep(0.2) 
+                
+            except Exception as e:
+                logger.error(f"Error deteniendo el consumo: {e}")
+                self._consuming = False
 
     def delete(self):
         try:
@@ -337,10 +379,30 @@ class MessageMiddlewareQueue(MessageMiddleware):
             raise MessageMiddlewareDeleteError(f"Error eliminando la cola: {e}")
 
     def close(self):
+        """Cierre idempotente y seguro"""
+        if self._closing:
+            logger.debug("Ya en proceso de cierre, ignorando")
+            return
+        
+        self._closing = True
+        
         try:
-            if self.connection:
-                self.connection.close()
-                logger.info("Conexión con RabbitMQ cerrada")
+            if self.channel and self.channel.is_open:
+                try:
+                    self.channel.close()
+                    logger.debug("Canal cerrado")
+                    time.sleep(0.3)
+                except Exception as e:
+                    logger.debug(f"Error cerrando canal: {e}")
+            
+            if self.connection and self.connection.is_open:
+                try:
+                    self.connection.close()
+                    logger.info("Conexión con RabbitMQ cerrada")
+                except Exception as e:
+                    logger.debug(f"Error cerrando conexión: {e}")
+                    
         except Exception as e:
-            logger.error(f"Error cerrando conexión: {e}")
-            raise MessageMiddlewareCloseError(f"Error cerrando conexión: {e}")
+            logger.warning(f"Excepción durante cierre: {e}")
+        finally:
+            self._closing = False

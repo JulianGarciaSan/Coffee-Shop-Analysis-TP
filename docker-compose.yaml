@@ -184,74 +184,83 @@ services:
     volumes:
       - ./server/config.ini:/app/config.ini
 
-  # filter_year_4:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/filter/Dockerfile
-  #   container_name: filter_year_4
-  #   restart: on-failure
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - FILTER_MODE=year
-  #     - OUTPUT_Q1=year_filtered
-  #     - TOTAL_YEAR_FILTERS=3
-  #     - FILTER_YEARS=2024,2025
-  #     - OUTPUT_Q4=year_filtered_q4
-  #     - OUTPUT_Q2=year_data.exchange
-  #     - INPUT_EXCHANGE=raw_data_exchange
-  #     - FILE_MODE=transaction_items
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
+  filter_year_4:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_year_4
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=year
+      - OUTPUT_Q1=year_filtered
+      - TOTAL_YEAR_FILTERS=3
+      - FILTER_YEARS=2024,2025
+      - OUTPUT_Q4=year_filtered_q4
+      - OUTPUT_Q2=groupby_input.exchange
+      - INPUT_EXCHANGE=raw_data_exchange
+      - FILE_MODE=transaction_items
+      - NODE_ID=year_node_4
+      - ALL_NODE_IDS=year_node_4,year_node_5,year_node_6
+      - TOTAL_GROUPBY_NODES=4
+    volumes:
+      - ./server/config.ini:/app/config.ini
 
-  # filter_year_5:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/filter/Dockerfile
-  #   container_name: filter_year_5
-  #   restart: on-failure
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - FILTER_MODE=year
-  #     - OUTPUT_Q1=year_filtered
-  #     - TOTAL_YEAR_FILTERS=3
-  #     - FILTER_YEARS=2024,2025
-  #     - OUTPUT_Q4=year_filtered_q4
-  #     - OUTPUT_Q2=year_data.exchange
-  #     - INPUT_EXCHANGE=raw_data_exchange
-  #     - FILE_MODE=transaction_items
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
+  filter_year_5:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_year_5
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=year
+      - OUTPUT_Q1=year_filtered
+      - TOTAL_YEAR_FILTERS=3
+      - FILTER_YEARS=2024,2025
+      - OUTPUT_Q4=year_filtered_q4
+      - OUTPUT_Q2=groupby_input.exchange
+      - INPUT_EXCHANGE=raw_data_exchange
+      - FILE_MODE=transaction_items
+      - NODE_ID=year_node_5
+      - ALL_NODE_IDS=year_node_4,year_node_5,year_node_6
+      - TOTAL_GROUPBY_NODES=4
+    volumes:
+      - ./server/config.ini:/app/config.ini
 
-  # filter_year_6:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/filter/Dockerfile
-  #   container_name: filter_year_6
-  #   restart: on-failure
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - FILTER_MODE=year
-  #     - OUTPUT_Q1=year_filtered
-  #     - TOTAL_YEAR_FILTERS=3
-  #     - FILTER_YEARS=2024,2025
-  #     - OUTPUT_Q4=year_filtered_q4
-  #     - OUTPUT_Q2=year_data.exchange
-  #     - INPUT_EXCHANGE=raw_data_exchange
-  #     - FILE_MODE=transaction_items
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
+  filter_year_6:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_year_6
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=year
+      - OUTPUT_Q1=year_filtered
+      - TOTAL_YEAR_FILTERS=3
+      - FILTER_YEARS=2024,2025
+      - OUTPUT_Q4=year_filtered_q4
+      - OUTPUT_Q2=groupby_input.exchange
+      - INPUT_EXCHANGE=raw_data_exchange
+      - FILE_MODE=transaction_items
+      - NODE_ID=year_node_6
+      - ALL_NODE_IDS=year_node_4,year_node_5,year_node_6
+      - TOTAL_GROUPBY_NODES=4
+    volumes:
+      - ./server/config.ini:/app/config.ini
 
   filter_hour_1:
     build:
@@ -466,6 +475,7 @@ services:
       - OUTPUT_EXCHANGE=report.exchange
       - JOIN_NODE_ID=0
       - TOTAL_JOIN_NODES=2
+      - TOTAL_TOPK_AGGREGATORS=2
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -485,48 +495,10 @@ services:
       - OUTPUT_EXCHANGE=report.exchange
       - JOIN_NODE_ID=1
       - TOTAL_JOIN_NODES=2
+      - TOTAL_TOPK_AGGREGATORS=2
     volumes:
       - ./server/config.ini:/app/config.ini
 
-  # groupby_best_selling_1:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/groupby/Dockerfile
-  #   container_name: groupby_best_selling_1
-  #   restart: on-failure
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - GROUPBY_MODE=best_selling
-  #     - INPUT_EXCHANGE=year_data.exchange
-  #     - AGGREGATOR_YEAR=2024
-  #     - OUTPUT_EXCHANGE=best_selling.exchange
-  #     - TOTAL_GROUPBY_NODES=1
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
-
-  # groupby_best_selling_2:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/groupby/Dockerfile
-  #   container_name: groupby_best_selling_2
-  #   restart: on-failure
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - GROUPBY_MODE=best_selling
-  #     - INPUT_EXCHANGE=year_data.exchange
-  #     - AGGREGATOR_YEAR=2025
-  #     - OUTPUT_EXCHANGE=best_selling.exchange
-  #     - TOTAL_GROUPBY_NODES=1
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
 
   # aggregator_year_2024_1:
   #   build:
@@ -538,14 +510,14 @@ services:
   #     rabbitmq:
   #       condition: service_healthy
   #   environment:
-  #     - PYTHONUNBUFFERED=1
   #     - RABBITMQ_HOST=rabbitmq
-  #     - AGGREGATOR_MODE=intermediate
-  #     - AGGREGATOR_YEAR=2024
-  #     - INPUT_EXCHANGE=best_selling.exchange
+  #     - GROUPBY_NODE_ID=3
+  #     - AGGREGATOR_YEAR=2025
+  #     - TOTAL_GROUPBY_NODES=4
+  #     - NODE_ID=groupby_2025_node_3
+  #     - ALL_NODE_IDS=groupby_2025_node_0,groupby_2025_node_1,groupby_2025_node_2,groupby_2025_node_3
+  #     - INPUT_EXCHANGE=groupby_input.exchange
   #     - OUTPUT_EXCHANGE=best_selling_to_final.exchange
-  #     - TOTAL_INTERMEDIATE_AGGREGATORS=3
-  #     - AGGREGATOR_TYPE=best_selling_intermediate
   #   volumes:
   #     - ./server/config.ini:/app/config.ini
 
@@ -559,14 +531,14 @@ services:
   #     rabbitmq:
   #       condition: service_healthy
   #   environment:
-  #     - PYTHONUNBUFFERED=1
   #     - RABBITMQ_HOST=rabbitmq
-  #     - AGGREGATOR_MODE=intermediate
-  #     - AGGREGATOR_YEAR=2024
-  #     - INPUT_EXCHANGE=best_selling.exchange
+  #     - GROUPBY_NODE_ID=2
+  #     - AGGREGATOR_YEAR=2025
+  #     - TOTAL_GROUPBY_NODES=4
+  #     - NODE_ID=groupby_2025_node_2
+  #     - ALL_NODE_IDS=groupby_2025_node_0,groupby_2025_node_1,groupby_2025_node_2,groupby_2025_node_3
+  #     - INPUT_EXCHANGE=groupby_input.exchange
   #     - OUTPUT_EXCHANGE=best_selling_to_final.exchange
-  #     - TOTAL_INTERMEDIATE_AGGREGATORS=3
-  #     - AGGREGATOR_TYPE=best_selling_intermediate
   #   volumes:
   #     - ./server/config.ini:/app/config.ini
 
@@ -580,14 +552,14 @@ services:
   #     rabbitmq:
   #       condition: service_healthy
   #   environment:
-  #     - PYTHONUNBUFFERED=1
   #     - RABBITMQ_HOST=rabbitmq
-  #     - AGGREGATOR_MODE=intermediate
-  #     - AGGREGATOR_YEAR=2024
-  #     - INPUT_EXCHANGE=best_selling.exchange
+  #     - GROUPBY_NODE_ID=3
+  #     - AGGREGATOR_YEAR=2025
+  #     - TOTAL_GROUPBY_NODES=4
+  #     - NODE_ID=groupby_2025_node_3
+  #     - ALL_NODE_IDS=groupby_2025_node_0,groupby_2025_node_1,groupby_2025_node_2,groupby_2025_node_3
+  #     - INPUT_EXCHANGE=groupby_input.exchange
   #     - OUTPUT_EXCHANGE=best_selling_to_final.exchange
-  #     - TOTAL_INTERMEDIATE_AGGREGATORS=3
-  #     - AGGREGATOR_TYPE=best_selling_intermediate
   #   volumes:
   #     - ./server/config.ini:/app/config.ini
 
@@ -609,6 +581,8 @@ services:
   #     - OUTPUT_EXCHANGE=best_selling_to_final.exchange
   #     - TOTAL_INTERMEDIATE_AGGREGATORS=3
   #     - AGGREGATOR_TYPE=best_selling_intermediate
+  #     - NODE_ID=aggregator_2025_1
+  #     - ALL_NODE_IDS=aggregator_2025_1,aggregator_2025_2,aggregator_2025_3
   #   volumes:
   #     - ./server/config.ini:/app/config.ini
 
@@ -630,6 +604,8 @@ services:
   #     - OUTPUT_EXCHANGE=best_selling_to_final.exchange
   #     - TOTAL_INTERMEDIATE_AGGREGATORS=3
   #     - AGGREGATOR_TYPE=best_selling_intermediate
+  #     - NODE_ID=aggregator_2025_2
+  #     - ALL_NODE_IDS=aggregator_2025_1,aggregator_2025_2,aggregator_2025_3
   #   volumes:
   #     - ./server/config.ini:/app/config.ini
 
@@ -651,29 +627,200 @@ services:
   #     - OUTPUT_EXCHANGE=best_selling_to_final.exchange
   #     - TOTAL_INTERMEDIATE_AGGREGATORS=3
   #     - AGGREGATOR_TYPE=best_selling_intermediate
+  #     - NODE_ID=aggregator_2025_3
+  #     - ALL_NODE_IDS=aggregator_2025_1,aggregator_2025_2,aggregator_2025_3
   #   volumes:
   #     - ./server/config.ini:/app/config.ini
+  groupby_best_selling_2024_0:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_best_selling_2024_0
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=best_selling
+      - GROUPBY_NODE_ID=0
+      - AGGREGATOR_YEAR=2024
+      - TOTAL_GROUPBY_NODES=4
+      - INPUT_EXCHANGE=groupby_input.exchange
+      - OUTPUT_EXCHANGE=best_selling_to_final.exchange
+    volumes:
+      - ./server/config.ini:/app/config.ini
 
-  # aggregator_best_selling_final:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/aggregator/Dockerfile
-  #   container_name: aggregator_best_selling_final
-  #   restart: on-failure
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - AGGREGATOR_MODE=final
-  #     - INPUT_EXCHANGE=best_selling_to_final.exchange
-  #     - INPUT_QUEUE=best_selling_final
-  #     - OUTPUT_EXCHANGE=join.exchange
-  #     - TOTAL_INTERMEDIATE=1
-  #     - AGGREGATOR_TYPE=best_selling_final
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
+  groupby_best_selling_2024_1:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_best_selling_2024_1
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=best_selling
+      - GROUPBY_NODE_ID=1
+      - AGGREGATOR_YEAR=2024
+      - TOTAL_GROUPBY_NODES=4
+      - INPUT_EXCHANGE=groupby_input.exchange
+      - OUTPUT_EXCHANGE=best_selling_to_final.exchange
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  groupby_best_selling_2024_2:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_best_selling_2024_2
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=best_selling
+      - GROUPBY_NODE_ID=2
+      - AGGREGATOR_YEAR=2024
+      - TOTAL_GROUPBY_NODES=4
+      - INPUT_EXCHANGE=groupby_input.exchange
+      - OUTPUT_EXCHANGE=best_selling_to_final.exchange
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  groupby_best_selling_2024_3:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_best_selling_2024_3
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=best_selling
+      - GROUPBY_NODE_ID=3
+      - AGGREGATOR_YEAR=2024
+      - TOTAL_GROUPBY_NODES=4
+      - INPUT_EXCHANGE=groupby_input.exchange
+      - OUTPUT_EXCHANGE=best_selling_to_final.exchange
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  groupby_best_selling_2025_0:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_best_selling_2025_0
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=best_selling
+      - GROUPBY_NODE_ID=0
+      - AGGREGATOR_YEAR=2025
+      - TOTAL_GROUPBY_NODES=4
+      - INPUT_EXCHANGE=groupby_input.exchange
+      - OUTPUT_EXCHANGE=best_selling_to_final.exchange
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  groupby_best_selling_2025_1:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_best_selling_2025_1
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=best_selling
+      - GROUPBY_NODE_ID=1
+      - AGGREGATOR_YEAR=2025
+      - TOTAL_GROUPBY_NODES=4
+      - INPUT_EXCHANGE=groupby_input.exchange
+      - OUTPUT_EXCHANGE=best_selling_to_final.exchange
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  groupby_best_selling_2025_2:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_best_selling_2025_2
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=best_selling
+      - GROUPBY_NODE_ID=2
+      - AGGREGATOR_YEAR=2025
+      - TOTAL_GROUPBY_NODES=4
+      - INPUT_EXCHANGE=groupby_input.exchange
+      - OUTPUT_EXCHANGE=best_selling_to_final.exchange
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  groupby_best_selling_2025_3:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_best_selling_2025_3
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=best_selling
+      - GROUPBY_NODE_ID=3
+      - AGGREGATOR_YEAR=2025
+      - TOTAL_GROUPBY_NODES=4
+      - INPUT_EXCHANGE=groupby_input.exchange
+      - OUTPUT_EXCHANGE=best_selling_to_final.exchange
+    volumes:
+      - ./server/config.ini:/app/config.ini
+
+  aggregator_best_selling_final:
+    build:
+      context: .
+      dockerfile: ./server/aggregator/Dockerfile
+    container_name: aggregator_best_selling_final
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - AGGREGATOR_MODE=final
+      - TOTAL_YEARS=2
+      - TOTAL_GROUPBY_NODES=4
+      - TOTAL_JOIN_NODES=2  
+      - INPUT_EXCHANGE=best_selling_to_final.exchange
+      - INPUT_QUEUE=best_selling_final
+      - OUTPUT_EXCHANGE=join.exchange
+      - AGGREGATOR_TYPE=best_selling_final
+    volumes:
+      - ./server/config.ini:/app/config.ini
   top_consumers_aggregator_1:
     build:
       context: .
@@ -686,13 +833,14 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
-      - AGGREGATOR_MODE=intermediate
+      #- AGGREGATOR_MODE=intermediate
       - TOPK_NODE_ID=1
       - INPUT_QUEUE=aggregated_data_1
-      - OUTPUT_EXCHANGE=topk.exchange
+      - OUTPUT_EXCHANGE=join.exchange
       - TOTAL_TOPK_NODES=2
       - AGGREGATOR_TYPE=top_consumers_intermediate
       - ALL_NODE_IDS=1,2
+      - TOTAL_JOIN_NODES=2 
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -709,36 +857,37 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
-      - AGGREGATOR_MODE=intermediate
+      #- AGGREGATOR_MODE=intermediate
       - TOPK_NODE_ID=2
       - INPUT_QUEUE=aggregated_data_2
-      - OUTPUT_EXCHANGE=topk.exchange
+      - OUTPUT_EXCHANGE=join.exchange
       - TOTAL_TOPK_NODES=2
       - AGGREGATOR_TYPE=top_consumers_intermediate
       - ALL_NODE_IDS=1,2
+      - TOTAL_JOIN_NODES=2 
     volumes:
       - ./server/config.ini:/app/config.ini
 
-  top_consumers_aggregator_final:
-    build:
-      context: .
-      dockerfile: ./server/aggregator/Dockerfile
-    container_name: top_consumers_aggregator_final
-    restart: on-failure
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    environment:
-      - PYTHONUNBUFFERED=1
-      - RABBITMQ_HOST=rabbitmq
-      - AGGREGATOR_MODE=final
-      - TOTAL_TOPK_NODES=2
-      - INPUT_EXCHANGE=topk.exchange
-      - OUTPUT_EXCHANGE=join.exchange
-      - AGGREGATOR_TYPE=top_consumers_final
-      - TOTAL_JOIN_NODES=2
-    volumes:
-      - ./server/config.ini:/app/config.ini
+  # top_consumers_aggregator_final:
+  #   build:
+  #     context: .
+  #     dockerfile: ./server/aggregator/Dockerfile
+  #   container_name: top_consumers_aggregator_final
+  #   restart: on-failure
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #     - RABBITMQ_HOST=rabbitmq
+  #     - AGGREGATOR_MODE=final
+  #     - TOTAL_TOPK_NODES=2
+  #     - INPUT_EXCHANGE=topk.exchange
+  #     - OUTPUT_EXCHANGE=join.exchange
+  #     - AGGREGATOR_TYPE=top_consumers_final
+  #     - TOTAL_JOIN_NODES=2
+  #   volumes:
+  #     - ./server/config.ini:/app/config.ini
 
   groupby_top_customers_1:
     build:

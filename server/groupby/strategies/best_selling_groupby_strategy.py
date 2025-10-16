@@ -14,24 +14,23 @@ class ItemAggregation:
         self.sellings_qty = 0
         self.profit_sum = 0.0
     
-    def add_transaction(self, quantity: int, subtotal: float): 
+    def add_transaction(self, quantity: int, subtotal: float):
+
         self.sellings_qty += quantity  
         self.profit_sum += subtotal
-    
-    def to_csv_line(self, year_month: str) -> str:
-        return f"{year_month},{self.item_id},{self.sellings_qty},{self.profit_sum:.2f}"
-
 
 class BestSellingGroupByStrategy(GroupByStrategy):
     def __init__(self, input_queue_name: str, year: str = '2024'):
         super().__init__()  
         self.input_queue_name = input_queue_name
         self.year = year
-        self.month_item_aggregations: Dict[str, Dict[str, ItemAggregation]] = defaultdict(
-            lambda: defaultdict(lambda: None)
+        self.month_item_aggregations_by_client: Dict[str, Dict[str, Dict[str, ItemAggregation]]] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(lambda: None))
         )
-        # Override dto_helper para usar TransactionItemBatchDTO
         self.dto_helper = TransactionItemBatchDTO("", BatchType.RAW_CSV)
+        
+        self.lines_processed_by_client = defaultdict(int)
+        self.lines_per_item_by_client = defaultdict(lambda: defaultdict(int))
 
         logger.info(f"BestSellingGroupByStrategy inicializada para año {year}")
     
@@ -45,14 +44,17 @@ class BestSellingGroupByStrategy(GroupByStrategy):
             if not all([item_id, created_at, quantity_str, subtotal_str]):
                 return
             
+            self.lines_processed_by_client[client_id] += 1
+            self.lines_per_item_by_client[client_id][item_id] += 1
+            
             year_month = created_at[:7]
             quantity = int(quantity_str) 
             subtotal = float(subtotal_str)
             
-            if self.month_item_aggregations[year_month][item_id] is None:
-                self.month_item_aggregations[year_month][item_id] = ItemAggregation(item_id)
+            if self.month_item_aggregations_by_client[client_id][year_month][item_id] is None:
+                self.month_item_aggregations_by_client[client_id][year_month][item_id] = ItemAggregation(item_id)
             
-            self.month_item_aggregations[year_month][item_id].add_transaction(quantity, subtotal)  
-            
+            self.month_item_aggregations_by_client[client_id][year_month][item_id].add_transaction(quantity, subtotal)  
+
         except (ValueError, IndexError) as e:
-            logger.warning(f"Error procesando línea: {e}")
+            logger.warning(f"Error procesando línea para client_id={client_id}: {e}")

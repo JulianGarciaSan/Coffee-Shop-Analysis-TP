@@ -36,11 +36,15 @@ class JoinEngine:
     @staticmethod
     def join_top_customers(top_customers_data: List[Dict], 
                           stores_data: Dict[str, Dict],
-                          users_data: Dict[str, Dict]) -> List[Dict]:
-        """Q4: Join de top customers con stores y users"""
+                          users_data: Dict[str, Dict],
+                          peer_users_data: Dict[str, Dict] = None) -> List[Dict]:
         joined_data = []
         missing_users = set()
         missing_stores = set()
+        
+        all_users = {**users_data}
+        if peer_users_data:
+            all_users.update(peer_users_data)
         
         for customer_record in top_customers_data:
             store_id = customer_record['store_id']
@@ -50,8 +54,8 @@ class JoinEngine:
             if store_id not in stores_data:
                 missing_stores.add(store_id)
             
-            birthdate = users_data.get(user_id, {}).get('birth_date', 'UNKNOWN')
-            if user_id not in users_data:
+            birthdate = all_users.get(user_id, {}).get('birth_date', 'UNKNOWN')
+            if user_id not in all_users:
                 missing_users.add(user_id)
             
             joined_record = {
@@ -66,7 +70,8 @@ class JoinEngine:
         if missing_users:
             logger.warning(f"Users no encontrados en Q4 (primeros 10): {list(missing_users)[:10]}")
         
-        logger.info(f"JOIN Q4 completado: {len(joined_data)} registros")
+        logger.info(f"JOIN Q4 completado: {len(joined_data)} registros "
+                   f"(users locales: {len(users_data)}, peer users: {len(peer_users_data or {})})")
         return joined_data
     
     @staticmethod
@@ -96,4 +101,3 @@ class JoinEngine:
         
         logger.info(f"JOIN completado: {len(joined_data)} registros")
         return joined_data
-
