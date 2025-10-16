@@ -80,6 +80,11 @@ class ClientProcessingState:
                 self.most_profit_loaded and 
                 not self.most_profit_sent)
 
+    def all_queries_completed(self) -> bool:
+        return (self.q3_results_sent and 
+                self.q4_results_sent and 
+                self.best_selling_sent and 
+                self.most_profit_sent)
 
 class JoinNode:    
     def __init__(self):
@@ -616,10 +621,10 @@ class JoinNode:
             state.top_customers_eof_count >= state.expected_top_customers_aggregators):
             
             if state.pending_top_customers:
-                logger.info(f"🔄 Users disponibles, procesando {len(state.pending_top_customers)} top_customers para cliente '{client_id}'")
+                logger.info(f"Users disponibles, procesando {len(state.pending_top_customers)} top_customers para cliente '{client_id}'")
                 self._process_pending_top_customers(client_id)
             else:
-                logger.info(f"🔄 No hay top_customers para cliente '{client_id}' en este nodo (sharding) - marcando como procesado")
+                logger.info(f"No hay top_customers para cliente '{client_id}' en este nodo (sharding) - marcando como procesado")
             
             state.top_customers_processed = True
         
@@ -644,7 +649,7 @@ class JoinNode:
         
         # Q4: Top Customers + Stores + Users (con peer users)
         if state.is_q4_ready():
-            logger.info(f"✅ Condiciones listas para JOIN Q4 de cliente '{client_id}'")
+            logger.info(f" Condiciones listas para JOIN Q4 de cliente '{client_id}'")
             logger.info(f"  Top customers procesados: {len(self.top_customers_processors[client_id].get_data())}")
             logger.info(f"  Users locales: {len(self.user_processors[client_id].get_data())}")
             logger.info(f"  Users de peers: {len(state.received_peer_users)}")
@@ -671,7 +676,7 @@ class JoinNode:
                 if state.peer_requests_pending > 0:
                     reasons.append(f"peer requests pending ({state.peer_requests_pending})")
                 
-                logger.debug(f"⏳ Q4 no listo para cliente '{client_id}': {', '.join(reasons)}")
+                logger.debug(f"Q4 no listo para cliente '{client_id}': {', '.join(reasons)}")
         
         # Q2 Best Selling 
         if state.is_best_selling_ready():
@@ -694,6 +699,10 @@ class JoinNode:
             )
             self._send_most_profit_results(client_id, joined_data)
             state.most_profit_sent = True
+            
+        if state.all_queries_completed():
+            logger.info(f"Todas las queries completadas para cliente '{client_id}', limpiando datos...")
+            self._cleanup_client_data(client_id)
     
     def _send_q3_results(self, client_id: str, joined_data: List[Dict]):
         try:
@@ -987,6 +996,68 @@ class JoinNode:
         except Exception as e:
             logger.error(f"Error durante cleanup: {e}", exc_info=True)
 
+    def _cleanup_client_data(self, client_id: str):
+        """
+        Limpia todos los datos acumulados de un cliente específico.
+        Se llama después de enviar todos los EOFs.
+        """
+        try:
+            logger.info(f"Iniciando limpieza de datos para cliente '{client_id}'")
+            
+            if client_id in self.store_processors:
+                self.store_processors[client_id].get_data().clear()
+                del self.store_processors[client_id]
+                logger.debug(f"Store processor eliminado")
+            
+            if client_id in self.user_processors:
+                self.user_processors[client_id].get_data().clear()
+                del self.user_processors[client_id]
+                logger.debug(f"User processor eliminado")
+            
+            if client_id in self.menu_item_processors:
+                self.menu_item_processors[client_id].get_data().clear()
+                del self.menu_item_processors[client_id]
+                logger.debug(f"Menu item processor eliminado")
+            
+            if client_id in self.tpv_processors:
+                self.tpv_processors[client_id].get_data().clear()
+                del self.tpv_processors[client_id]
+                logger.debug(f"TPV processor eliminado")
+            
+            if client_id in self.top_customers_processors:
+                self.top_customers_processors[client_id].get_data().clear()
+                del self.top_customers_processors[client_id]
+                logger.debug(f"Top customers processor eliminado")
+            
+            if client_id in self.best_selling_processors:
+                self.best_selling_processors[client_id].get_data().clear()
+                del self.best_selling_processors[client_id]
+                logger.debug(f"Best selling processor eliminado")
+            
+            if client_id in self.most_profit_processors:
+                self.most_profit_processors[client_id].get_data().clear()
+                del self.most_profit_processors[client_id]
+                logger.debug(f"Most profit processor eliminado")
+            
+            # Limpiar datos de joins
+            if client_id in self.q3_joined_data_by_client:
+                del self.q3_joined_data_by_client[client_id]
+                logger.debug(f"Q3 joined data eliminado")
+            
+            # Limpiar estado del cliente
+            if client_id in self.client_states:
+                state = self.client_states[client_id]
+                state.pending_top_customers.clear()
+                state.requested_users.clear()
+                state.received_peer_users.clear()
+                del self.client_states[client_id]
+                logger.debug(f"Client state eliminado")
+            
+            logger.info(f"Limpieza completada para cliente '{client_id}'")
+            
+        except Exception as e:
+            logger.error(f"Error limpiando datos del cliente '{client_id}': {e}", exc_info=True)
+    
 
 if __name__ == "__main__":
     try:
