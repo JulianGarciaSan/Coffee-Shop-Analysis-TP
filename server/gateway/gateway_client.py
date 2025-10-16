@@ -190,6 +190,7 @@ class ClientHandler(threading.Thread):
     def process_type_d_message(self, message: ProtocolMessage):
         try:
             dto = TransactionBatchDTO(message.data, BatchType.RAW_CSV)
+            dto.filter_columns()
             self._output_middleware.send(dto.to_bytes_fast(), routing_key='transactions', headers={'client_id': self.client_id})
         except Exception as e:
             logger.error(f"Error procesando mensaje de tipo 'D': {e}")
@@ -197,6 +198,7 @@ class ClientHandler(threading.Thread):
     def process_type_i_message(self, message: ProtocolMessage):
         try:
             dto = TransactionItemBatchDTO(message.data, BatchType.RAW_CSV)
+            dto.filter_columns()
             self._output_middleware.send(dto.to_bytes_fast(), routing_key='transaction_items', headers={'client_id': self.client_id})
         except Exception as e:
             logger.error(f"Error procesando mensaje de tipo 'I': {e}")
@@ -205,13 +207,14 @@ class ClientHandler(threading.Thread):
         try:
             bytes_data = message.data.encode('utf-8')
             dto = StoreBatchDTO.from_bytes_fast(bytes_data)
+            dto.filter_columns()
             serialized_data = dto.to_bytes_fast()
 
             routing_keys = self.client_router.get_all_routing_keys('stores.data')
             for routing_key in routing_keys:
                 self._join_middleware.send(serialized_data, routing_key=routing_key, headers={'client_id': self.client_id})
             
-            logger.info(f"Cliente '{self.client_id}' → Stores enviadas a {len(routing_keys)} join nodes")
+            # logger.info(f"Cliente '{self.client_id}' → Stores enviadas a {len(routing_keys)} join nodes")
 
             line_count = len([line for line in dto.data.split('\n') if line.strip()])
             
@@ -222,7 +225,7 @@ class ClientHandler(threading.Thread):
         try:
             bytes_data = message.data.encode('utf-8')
             dto = UserBatchDTO.from_bytes_fast(bytes_data)
-            
+            dto.filter_columns()
             lines = dto.data.split('\n')
             
             header_line = None
@@ -239,7 +242,7 @@ class ClientHandler(threading.Thread):
                     data_lines.append(line)
             
             total_users = len(data_lines)
-            logger.info(f"[USERS] Cliente {self.client_id}: Procesando {total_users} users")
+            # logger.info(f"[USERS] Cliente {self.client_id}: Procesando {total_users} users")
             
             CHUNK_SIZE = 5000
             
@@ -294,6 +297,7 @@ class ClientHandler(threading.Thread):
         try:
             bytes_data = message.data.encode('utf-8')
             dto = MenuItemBatchDTO.from_bytes_fast(bytes_data)
+            dto.filter_columns()
             serialized_data = dto.to_bytes_fast()
 
             routing_key = self._get_routing_key_for_join('menu_items.data')

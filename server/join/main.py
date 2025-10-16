@@ -1,3 +1,5 @@
+import gc
+import json
 import logging
 import os
 import sys
@@ -32,7 +34,27 @@ class DataSourceType(Enum):
     BEST_SELLING = "q2_best_selling"
     MOST_PROFIT = "q2_most_profit"
 
-
+@dataclass
+class PeerCleanupSignal:
+    """Señal para coordinar limpieza entre nodos."""
+    sending_node_id: int
+    client_id: str
+    
+    def to_bytes(self) -> bytes:
+        data = {
+            'sending_node_id': self.sending_node_id,
+            'client_id': self.client_id
+        }
+        return json.dumps(data).encode('utf-8')
+    
+    @classmethod
+    def from_bytes(cls, data: bytes) -> 'PeerCleanupSignal':
+        obj = json.loads(data.decode('utf-8'))
+        return cls(
+            sending_node_id=obj['sending_node_id'],
+            client_id=obj['client_id']
+        )
+        
 @dataclass
 class ClientProcessingState:
     stores_loaded: bool = False
@@ -57,6 +79,9 @@ class ClientProcessingState:
     peer_requests_pending: int = 0
     top_customers_processed: bool = False 
     
+    nodes_ready_to_cleanup: set = field(default_factory=set)
+    cleanup_broadcasted: bool = False
+    
     def is_q3_ready(self) -> bool:
         return (self.stores_loaded and 
                 self.groupby_eof_count >= self.expected_groupby_nodes and 
@@ -80,6 +105,11 @@ class ClientProcessingState:
                 self.most_profit_loaded and 
                 not self.most_profit_sent)
 
+    def all_queries_completed(self) -> bool:
+        return (self.q3_results_sent and 
+                self.q4_results_sent and 
+                self.best_selling_sent and 
+                self.most_profit_sent)
 
 class JoinNode:    
     def __init__(self):
@@ -96,7 +126,9 @@ class JoinNode:
         self.total_topk_aggregators = int(os.getenv('TOTAL_TOPK_NODES', '2'))
         self.total_groupby_semester_nodes = int(os.getenv('TOTAL_GROUPBY_SEMESTER_NODES', '2'))
         self.node_name = f"join_node_{self.node_id}"
-        
+        self.cleanup_required_nodes = self.total_join_nodes
+
+
         self.client_states: Dict[str, ClientProcessingState] = defaultdict(
             lambda: ClientProcessingState(
                 expected_groupby_nodes=self.total_groupby_semester_nodes,
@@ -117,7 +149,8 @@ class JoinNode:
         self.q3_joined_data_by_client: Dict[str, List[Dict]] = {}
         
         self.join_engine = JoinEngine()
-        
+        self.client_locks: Dict[str, threading.Lock] = defaultdict(threading.Lock)
+
         self.router = MessageRouter()
         self._setup_message_routes()
         
@@ -181,6 +214,7 @@ class JoinNode:
             # Peer communication
             'user_request': self._handle_peer_user_request,
             'user_response': self._handle_peer_user_response,
+            'cleanup_signal': self._handle_peer_cleanup_signal,
         }
         
         for routing_key, handler in routes.items():
@@ -231,13 +265,15 @@ class JoinNode:
             exchange_name=self.peer_exchange,
             routing_keys=[
                 f'join_node_{self.node_id}.user_request',
-                f'join_node_{self.node_id}.user_response'
+                f'join_node_{self.node_id}.user_response',
+                f'join_node_{self.node_id}.cleanup_signal',
             ]
         )
         route_keys = []
         for i in range(self.total_join_nodes):
             route_keys.append(f'join_node_{i}.user_request')
             route_keys.append(f'join_node_{i}.user_response')
+            route_keys.append(f'join_node_{i}.cleanup_signal') 
         
         self.peer_output_middleware_main = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
@@ -506,6 +542,23 @@ class JoinNode:
         
         return False
     
+    def _handle_peer_cleanup_signal(self, message: bytes, headers: dict = None) -> bool:
+        """Maneja señales de cleanup."""
+        try:
+            signal = PeerCleanupSignal.from_bytes(message)
+            client_id = signal.client_id
+            
+            logger.info(f"Recibida señal de cleanup para cliente '{client_id}'")
+            
+            # Limpiar inmediatamente
+            self._cleanup_client_data(client_id)
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error manejando cleanup signal: {e}", exc_info=True)
+            return False
+    
     def _process_top_customers_with_new_users(self, client_id: str, new_user_ids: set):
         
         state = self.client_states[client_id]
@@ -609,91 +662,98 @@ class JoinNode:
         return None
     
     def _check_and_execute_joins(self, client_id: str):
-        state = self.client_states[client_id]
+        with self.client_locks[client_id]:
+            state = self.client_states[client_id]
         
-        if (not state.top_customers_processed and 
-            state.users_loaded and 
-            state.top_customers_eof_count >= state.expected_top_customers_aggregators):
-            
-            if state.pending_top_customers:
-                logger.info(f"🔄 Users disponibles, procesando {len(state.pending_top_customers)} top_customers para cliente '{client_id}'")
-                self._process_pending_top_customers(client_id)
-            else:
-                logger.info(f"🔄 No hay top_customers para cliente '{client_id}' en este nodo (sharding) - marcando como procesado")
-            
-            state.top_customers_processed = True
-        
-        logger.debug(f"[Q4 CHECK] Cliente '{client_id}':")
-        logger.debug(f"  stores_loaded: {state.stores_loaded}")
-        logger.debug(f"  users_loaded: {state.users_loaded}")
-        logger.debug(f"  top_customers_eof_count: {state.top_customers_eof_count}/{state.expected_top_customers_aggregators}")
-        logger.debug(f"  top_customers_processed: {state.top_customers_processed}")
-        logger.debug(f"  peer_requests_pending: {state.peer_requests_pending}")
-        logger.debug(f"  q4_results_sent: {state.q4_results_sent}")
-        
-        # Q3: TPV + Stores
-        if state.is_q3_ready():
-            logger.info(f"Condiciones listas para JOIN Q3 de cliente '{client_id}'")
-            joined_data = self.join_engine.join_tpv_stores(
-                self.tpv_processors[client_id].get_data(),
-                self.store_processors[client_id].get_data()
-            )
-            self.q3_joined_data_by_client[client_id] = joined_data
-            self._send_q3_results(client_id, joined_data)
-            state.q3_results_sent = True
-        
-        # Q4: Top Customers + Stores + Users (con peer users)
-        if state.is_q4_ready():
-            logger.info(f"✅ Condiciones listas para JOIN Q4 de cliente '{client_id}'")
-            logger.info(f"  Top customers procesados: {len(self.top_customers_processors[client_id].get_data())}")
-            logger.info(f"  Users locales: {len(self.user_processors[client_id].get_data())}")
-            logger.info(f"  Users de peers: {len(state.received_peer_users)}")
-            
-            joined_data = self.join_engine.join_top_customers(
-                self.top_customers_processors[client_id].get_data(),
-                self.store_processors[client_id].get_data(),
-                self.user_processors[client_id].get_data(),
-                state.received_peer_users
-            )
-            self._send_q4_results(client_id, joined_data)
-            state.q4_results_sent = True
-        else:
-            if not state.q4_results_sent:
-                reasons = []
-                if not state.stores_loaded:
-                    reasons.append("stores not loaded")
-                if not state.users_loaded:
-                    reasons.append("users not loaded")
-                if state.top_customers_eof_count < state.expected_top_customers_aggregators:
-                    reasons.append(f"EOF pending ({state.top_customers_eof_count}/{state.expected_top_customers_aggregators})")
-                if not state.top_customers_processed:
-                    reasons.append("top_customers not processed yet")
-                if state.peer_requests_pending > 0:
-                    reasons.append(f"peer requests pending ({state.peer_requests_pending})")
+            if (not state.top_customers_processed and 
+                state.users_loaded and 
+                state.top_customers_eof_count >= state.expected_top_customers_aggregators):
                 
-                logger.debug(f"⏳ Q4 no listo para cliente '{client_id}': {', '.join(reasons)}")
-        
-        # Q2 Best Selling 
-        if state.is_best_selling_ready():
-            logger.info(f"Condiciones listas para JOIN Q2 Best Selling de cliente '{client_id}'")
-            joined_data = self.join_engine.join_with_menu_items(
-                self.best_selling_processors[client_id].get_data(),
-                self.menu_item_processors[client_id].get_data(),
-                'sellings_qty'
-            )
-            self._send_best_selling_results(client_id, joined_data)
-            state.best_selling_sent = True
-        
-        # Q2 Most Profit 
-        if state.is_most_profit_ready():
-            logger.info(f"Condiciones listas para JOIN Q2 Most Profit de cliente '{client_id}'")
-            joined_data = self.join_engine.join_with_menu_items(
-                self.most_profit_processors[client_id].get_data(),
-                self.menu_item_processors[client_id].get_data(),
-                'profit_sum'
-            )
-            self._send_most_profit_results(client_id, joined_data)
-            state.most_profit_sent = True
+                if state.pending_top_customers:
+                    logger.info(f"Users disponibles, procesando {len(state.pending_top_customers)} top_customers para cliente '{client_id}'")
+                    self._process_pending_top_customers(client_id)
+                else:
+                    logger.info(f"No hay top_customers para cliente '{client_id}' en este nodo (sharding) - marcando como procesado")
+                
+                state.top_customers_processed = True
+            
+            logger.debug(f"[Q4 CHECK] Cliente '{client_id}':")
+            logger.debug(f"  stores_loaded: {state.stores_loaded}")
+            logger.debug(f"  users_loaded: {state.users_loaded}")
+            logger.debug(f"  top_customers_eof_count: {state.top_customers_eof_count}/{state.expected_top_customers_aggregators}")
+            logger.debug(f"  top_customers_processed: {state.top_customers_processed}")
+            logger.debug(f"  peer_requests_pending: {state.peer_requests_pending}")
+            logger.debug(f"  q4_results_sent: {state.q4_results_sent}")
+            
+            # Q3: TPV + Stores
+            if state.is_q3_ready():
+                logger.info(f"Condiciones listas para JOIN Q3 de cliente '{client_id}'")
+                joined_data = self.join_engine.join_tpv_stores(
+                    self.tpv_processors[client_id].get_data(),
+                    self.store_processors[client_id].get_data()
+                )
+                self.q3_joined_data_by_client[client_id] = joined_data
+                self._send_q3_results(client_id, joined_data)
+                state.q3_results_sent = True
+            
+            # Q4: Top Customers + Stores + Users (con peer users)
+            if state.is_q4_ready():
+                logger.info(f" Condiciones listas para JOIN Q4 de cliente '{client_id}'")
+                logger.info(f"  Top customers procesados: {len(self.top_customers_processors[client_id].get_data())}")
+                logger.info(f"  Users locales: {len(self.user_processors[client_id].get_data())}")
+                logger.info(f"  Users de peers: {len(state.received_peer_users)}")
+                
+                joined_data = self.join_engine.join_top_customers(
+                    self.top_customers_processors[client_id].get_data(),
+                    self.store_processors[client_id].get_data(),
+                    self.user_processors[client_id].get_data(),
+                    state.received_peer_users
+                )
+                self._send_q4_results(client_id, joined_data)
+                state.q4_results_sent = True
+            else:
+                if not state.q4_results_sent:
+                    reasons = []
+                    if not state.stores_loaded:
+                        reasons.append("stores not loaded")
+                    if not state.users_loaded:
+                        reasons.append("users not loaded")
+                    if state.top_customers_eof_count < state.expected_top_customers_aggregators:
+                        reasons.append(f"EOF pending ({state.top_customers_eof_count}/{state.expected_top_customers_aggregators})")
+                    if not state.top_customers_processed:
+                        reasons.append("top_customers not processed yet")
+                    if state.peer_requests_pending > 0:
+                        reasons.append(f"peer requests pending ({state.peer_requests_pending})")
+                    
+                    logger.debug(f"Q4 no listo para cliente '{client_id}': {', '.join(reasons)}")
+            
+            # Q2 Best Selling 
+            if state.is_best_selling_ready():
+                logger.info(f"Condiciones listas para JOIN Q2 Best Selling de cliente '{client_id}'")
+                joined_data = self.join_engine.join_with_menu_items(
+                    self.best_selling_processors[client_id].get_data(),
+                    self.menu_item_processors[client_id].get_data(),
+                    'sellings_qty'
+                )
+                self._send_best_selling_results(client_id, joined_data)
+                state.best_selling_sent = True
+            
+            # Q2 Most Profit 
+            if state.is_most_profit_ready():
+                logger.info(f"Condiciones listas para JOIN Q2 Most Profit de cliente '{client_id}'")
+                joined_data = self.join_engine.join_with_menu_items(
+                    self.most_profit_processors[client_id].get_data(),
+                    self.menu_item_processors[client_id].get_data(),
+                    'profit_sum'
+                )
+                self._send_most_profit_results(client_id, joined_data)
+                state.most_profit_sent = True
+                
+            if state.all_queries_completed():
+                if not state.cleanup_broadcasted:
+                    self._broadcast_cleanup_signal(client_id)
+                    state.cleanup_broadcasted = True
+                    state.nodes_ready_to_cleanup.add(self.node_id)
     
     def _send_q3_results(self, client_id: str, joined_data: List[Dict]):
         try:
@@ -987,8 +1047,99 @@ class JoinNode:
         except Exception as e:
             logger.error(f"Error durante cleanup: {e}", exc_info=True)
 
+    def _cleanup_client_data(self, client_id: str):
+        """
+        Limpia todos los datos acumulados de un cliente específico.
+        Se llama después de enviar todos los EOFs.
+        """
+        try:
+            logger.info(f"Iniciando limpieza de datos para cliente '{client_id}'")
+            
+            if client_id in self.store_processors:
+                self.store_processors[client_id].get_data().clear()
+                del self.store_processors[client_id]
+                logger.debug(f"Store processor eliminado")
+            
+            if client_id in self.user_processors:
+                self.user_processors[client_id].get_data().clear()
+                del self.user_processors[client_id]
+                logger.debug(f"User processor eliminado")
+            
+            if client_id in self.menu_item_processors:
+                self.menu_item_processors[client_id].get_data().clear()
+                del self.menu_item_processors[client_id]
+                logger.debug(f"Menu item processor eliminado")
+            
+            if client_id in self.tpv_processors:
+                self.tpv_processors[client_id].get_data().clear()
+                del self.tpv_processors[client_id]
+                logger.debug(f"TPV processor eliminado")
+            
+            if client_id in self.top_customers_processors:
+                self.top_customers_processors[client_id].get_data().clear()
+                del self.top_customers_processors[client_id]
+                logger.debug(f"Top customers processor eliminado")
+            
+            if client_id in self.best_selling_processors:
+                self.best_selling_processors[client_id].get_data().clear()
+                del self.best_selling_processors[client_id]
+                logger.debug(f"Best selling processor eliminado")
+            
+            if client_id in self.most_profit_processors:
+                self.most_profit_processors[client_id].get_data().clear()
+                del self.most_profit_processors[client_id]
+                logger.debug(f"Most profit processor eliminado")
+            
+            # Limpiar datos de joins
+            if client_id in self.q3_joined_data_by_client:
+                del self.q3_joined_data_by_client[client_id]
+                logger.debug(f"Q3 joined data eliminado")
+            
+            # Limpiar estado del cliente
+            if client_id in self.client_states:
+                state = self.client_states[client_id]
+                state.pending_top_customers.clear()
+                state.requested_users.clear()
+                state.received_peer_users.clear()
+                del self.client_states[client_id]
+                logger.debug(f"Client state eliminado")
+                    
+            if client_id in self.client_locks:
+                del self.client_locks[client_id]
+                logger.debug(f"Client lock eliminado")
+            
+            collected = gc.collect()
+            
+            logger.info(f"Limpieza completada para cliente '{client_id}'")
+            
+        except Exception as e:
+            logger.error(f"Error limpiando datos del cliente '{client_id}': {e}", exc_info=True)
+    
+    def _broadcast_cleanup_signal(self, client_id: str):
+        """Broadcast a todos los nodos que pueden limpiar este cliente."""
+        try:
+            signal = PeerCleanupSignal(
+                sending_node_id=self.node_id,  
+                client_id=client_id
+            )            
+            for target_node in range(self.total_join_nodes):
+                routing_key = f'join_node_{target_node}.cleanup_signal'
+                
+                with self.peer_lock:
+                    self.peer_output_middleware_main.send(
+                        signal.to_bytes(),
+                        routing_key=routing_key,
+                        headers={'client_id': client_id}
+                    )
+            
+            logger.info(f"✓ Cleanup signal enviado a {self.total_join_nodes} nodos para cliente '{client_id}'")
+            
+        except Exception as e:
+            logger.error(f"Error broadcasting cleanup signal: {e}", exc_info=True)
+    
 
 if __name__ == "__main__":
+    
     try:
         node = JoinNode()
         node.start()

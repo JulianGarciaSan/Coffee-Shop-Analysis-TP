@@ -113,7 +113,7 @@ class AmountNodeConfigurator(NodeConfigurator):
     
     def process_filtered_data(self, filtered_csv: str) -> str:
         return self._extract_q1_columns(filtered_csv)
-    
+
     def process_message(self, body: bytes, routing_key: str = None, client_id: Optional[int] = None) -> tuple:
         decoded_data = body.decode('utf-8').strip()
         
@@ -192,9 +192,9 @@ class AmountNodeConfigurator(NodeConfigurator):
                 continue
             
             parts = line.split(',')
-            if len(parts) >= 8:
+            if len(parts) >= 4:
                 transaction_id = parts[0]
-                final_amount = parts[7]
+                final_amount = parts[3]
                 result_lines.append(f"{transaction_id},{final_amount}")
         
         logger.debug(f"Extraídas {len(result_lines)-1} líneas con columnas Q1")
