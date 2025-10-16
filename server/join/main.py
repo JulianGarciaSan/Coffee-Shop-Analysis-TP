@@ -122,7 +122,8 @@ class JoinNode:
         self.q3_joined_data_by_client: Dict[str, List[Dict]] = {}
         
         self.join_engine = JoinEngine()
-        
+        self.client_locks: Dict[str, threading.Lock] = defaultdict(threading.Lock)
+
         self.router = MessageRouter()
         self._setup_message_routes()
         
@@ -614,95 +615,96 @@ class JoinNode:
         return None
     
     def _check_and_execute_joins(self, client_id: str):
-        state = self.client_states[client_id]
+        with self.client_locks[client_id]:
+            state = self.client_states[client_id]
         
-        if (not state.top_customers_processed and 
-            state.users_loaded and 
-            state.top_customers_eof_count >= state.expected_top_customers_aggregators):
-            
-            if state.pending_top_customers:
-                logger.info(f"Users disponibles, procesando {len(state.pending_top_customers)} top_customers para cliente '{client_id}'")
-                self._process_pending_top_customers(client_id)
-            else:
-                logger.info(f"No hay top_customers para cliente '{client_id}' en este nodo (sharding) - marcando como procesado")
-            
-            state.top_customers_processed = True
-        
-        logger.debug(f"[Q4 CHECK] Cliente '{client_id}':")
-        logger.debug(f"  stores_loaded: {state.stores_loaded}")
-        logger.debug(f"  users_loaded: {state.users_loaded}")
-        logger.debug(f"  top_customers_eof_count: {state.top_customers_eof_count}/{state.expected_top_customers_aggregators}")
-        logger.debug(f"  top_customers_processed: {state.top_customers_processed}")
-        logger.debug(f"  peer_requests_pending: {state.peer_requests_pending}")
-        logger.debug(f"  q4_results_sent: {state.q4_results_sent}")
-        
-        # Q3: TPV + Stores
-        if state.is_q3_ready():
-            logger.info(f"Condiciones listas para JOIN Q3 de cliente '{client_id}'")
-            joined_data = self.join_engine.join_tpv_stores(
-                self.tpv_processors[client_id].get_data(),
-                self.store_processors[client_id].get_data()
-            )
-            self.q3_joined_data_by_client[client_id] = joined_data
-            self._send_q3_results(client_id, joined_data)
-            state.q3_results_sent = True
-        
-        # Q4: Top Customers + Stores + Users (con peer users)
-        if state.is_q4_ready():
-            logger.info(f" Condiciones listas para JOIN Q4 de cliente '{client_id}'")
-            logger.info(f"  Top customers procesados: {len(self.top_customers_processors[client_id].get_data())}")
-            logger.info(f"  Users locales: {len(self.user_processors[client_id].get_data())}")
-            logger.info(f"  Users de peers: {len(state.received_peer_users)}")
-            
-            joined_data = self.join_engine.join_top_customers(
-                self.top_customers_processors[client_id].get_data(),
-                self.store_processors[client_id].get_data(),
-                self.user_processors[client_id].get_data(),
-                state.received_peer_users
-            )
-            self._send_q4_results(client_id, joined_data)
-            state.q4_results_sent = True
-        else:
-            if not state.q4_results_sent:
-                reasons = []
-                if not state.stores_loaded:
-                    reasons.append("stores not loaded")
-                if not state.users_loaded:
-                    reasons.append("users not loaded")
-                if state.top_customers_eof_count < state.expected_top_customers_aggregators:
-                    reasons.append(f"EOF pending ({state.top_customers_eof_count}/{state.expected_top_customers_aggregators})")
-                if not state.top_customers_processed:
-                    reasons.append("top_customers not processed yet")
-                if state.peer_requests_pending > 0:
-                    reasons.append(f"peer requests pending ({state.peer_requests_pending})")
+            if (not state.top_customers_processed and 
+                state.users_loaded and 
+                state.top_customers_eof_count >= state.expected_top_customers_aggregators):
                 
-                logger.debug(f"Q4 no listo para cliente '{client_id}': {', '.join(reasons)}")
-        
-        # Q2 Best Selling 
-        if state.is_best_selling_ready():
-            logger.info(f"Condiciones listas para JOIN Q2 Best Selling de cliente '{client_id}'")
-            joined_data = self.join_engine.join_with_menu_items(
-                self.best_selling_processors[client_id].get_data(),
-                self.menu_item_processors[client_id].get_data(),
-                'sellings_qty'
-            )
-            self._send_best_selling_results(client_id, joined_data)
-            state.best_selling_sent = True
-        
-        # Q2 Most Profit 
-        if state.is_most_profit_ready():
-            logger.info(f"Condiciones listas para JOIN Q2 Most Profit de cliente '{client_id}'")
-            joined_data = self.join_engine.join_with_menu_items(
-                self.most_profit_processors[client_id].get_data(),
-                self.menu_item_processors[client_id].get_data(),
-                'profit_sum'
-            )
-            self._send_most_profit_results(client_id, joined_data)
-            state.most_profit_sent = True
+                if state.pending_top_customers:
+                    logger.info(f"Users disponibles, procesando {len(state.pending_top_customers)} top_customers para cliente '{client_id}'")
+                    self._process_pending_top_customers(client_id)
+                else:
+                    logger.info(f"No hay top_customers para cliente '{client_id}' en este nodo (sharding) - marcando como procesado")
+                
+                state.top_customers_processed = True
             
-        if state.all_queries_completed():
-            logger.info(f"Todas las queries completadas para cliente '{client_id}', limpiando datos...")
-            self._cleanup_client_data(client_id)
+            logger.debug(f"[Q4 CHECK] Cliente '{client_id}':")
+            logger.debug(f"  stores_loaded: {state.stores_loaded}")
+            logger.debug(f"  users_loaded: {state.users_loaded}")
+            logger.debug(f"  top_customers_eof_count: {state.top_customers_eof_count}/{state.expected_top_customers_aggregators}")
+            logger.debug(f"  top_customers_processed: {state.top_customers_processed}")
+            logger.debug(f"  peer_requests_pending: {state.peer_requests_pending}")
+            logger.debug(f"  q4_results_sent: {state.q4_results_sent}")
+            
+            # Q3: TPV + Stores
+            if state.is_q3_ready():
+                logger.info(f"Condiciones listas para JOIN Q3 de cliente '{client_id}'")
+                joined_data = self.join_engine.join_tpv_stores(
+                    self.tpv_processors[client_id].get_data(),
+                    self.store_processors[client_id].get_data()
+                )
+                self.q3_joined_data_by_client[client_id] = joined_data
+                self._send_q3_results(client_id, joined_data)
+                state.q3_results_sent = True
+            
+            # Q4: Top Customers + Stores + Users (con peer users)
+            if state.is_q4_ready():
+                logger.info(f" Condiciones listas para JOIN Q4 de cliente '{client_id}'")
+                logger.info(f"  Top customers procesados: {len(self.top_customers_processors[client_id].get_data())}")
+                logger.info(f"  Users locales: {len(self.user_processors[client_id].get_data())}")
+                logger.info(f"  Users de peers: {len(state.received_peer_users)}")
+                
+                joined_data = self.join_engine.join_top_customers(
+                    self.top_customers_processors[client_id].get_data(),
+                    self.store_processors[client_id].get_data(),
+                    self.user_processors[client_id].get_data(),
+                    state.received_peer_users
+                )
+                self._send_q4_results(client_id, joined_data)
+                state.q4_results_sent = True
+            else:
+                if not state.q4_results_sent:
+                    reasons = []
+                    if not state.stores_loaded:
+                        reasons.append("stores not loaded")
+                    if not state.users_loaded:
+                        reasons.append("users not loaded")
+                    if state.top_customers_eof_count < state.expected_top_customers_aggregators:
+                        reasons.append(f"EOF pending ({state.top_customers_eof_count}/{state.expected_top_customers_aggregators})")
+                    if not state.top_customers_processed:
+                        reasons.append("top_customers not processed yet")
+                    if state.peer_requests_pending > 0:
+                        reasons.append(f"peer requests pending ({state.peer_requests_pending})")
+                    
+                    logger.debug(f"Q4 no listo para cliente '{client_id}': {', '.join(reasons)}")
+            
+            # Q2 Best Selling 
+            if state.is_best_selling_ready():
+                logger.info(f"Condiciones listas para JOIN Q2 Best Selling de cliente '{client_id}'")
+                joined_data = self.join_engine.join_with_menu_items(
+                    self.best_selling_processors[client_id].get_data(),
+                    self.menu_item_processors[client_id].get_data(),
+                    'sellings_qty'
+                )
+                self._send_best_selling_results(client_id, joined_data)
+                state.best_selling_sent = True
+            
+            # Q2 Most Profit 
+            if state.is_most_profit_ready():
+                logger.info(f"Condiciones listas para JOIN Q2 Most Profit de cliente '{client_id}'")
+                joined_data = self.join_engine.join_with_menu_items(
+                    self.most_profit_processors[client_id].get_data(),
+                    self.menu_item_processors[client_id].get_data(),
+                    'profit_sum'
+                )
+                self._send_most_profit_results(client_id, joined_data)
+                state.most_profit_sent = True
+                
+            if state.all_queries_completed():
+                logger.info(f"Todas las queries completadas para cliente '{client_id}', limpiando datos...")
+                self._cleanup_client_data(client_id)
     
     def _send_q3_results(self, client_id: str, joined_data: List[Dict]):
         try:

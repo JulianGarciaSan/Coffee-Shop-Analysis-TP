@@ -112,8 +112,8 @@ class AmountNodeConfigurator(NodeConfigurator):
         return middlewares
     
     def process_filtered_data(self, filtered_csv: str) -> str:
-        return filtered_csv
-    
+        return self._extract_q1_columns(filtered_csv)
+
     def process_message(self, body: bytes, routing_key: str = None, client_id: Optional[int] = None) -> tuple:
         decoded_data = body.decode('utf-8').strip()
         
@@ -183,22 +183,22 @@ class AmountNodeConfigurator(NodeConfigurator):
             )
             logger.info(f"EOF enviado a Q1 (report exchange) para cliente {client_id}")
 
-    # def _extract_q1_columns(self, csv_data: str) -> str:
-    #     result_lines = ["transaction_id,final_amount"]
+    def _extract_q1_columns(self, csv_data: str) -> str:
+        result_lines = ["transaction_id,final_amount"]
         
-    #     for line in csv_data.split('\n'):
-    #         line = line.strip()
-    #         if not line:
-    #             continue
+        for line in csv_data.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
             
-    #         parts = line.split(',')
-    #         if len(parts) >= 8:
-    #             transaction_id = parts[0]
-    #             final_amount = parts[7]
-    #             result_lines.append(f"{transaction_id},{final_amount}")
+            parts = line.split(',')
+            if len(parts) >= 4:
+                transaction_id = parts[0]
+                final_amount = parts[3]
+                result_lines.append(f"{transaction_id},{final_amount}")
         
-    #     logger.debug(f"Extraídas {len(result_lines)-1} líneas con columnas Q1")
-    #     return '\n'.join(result_lines)
+        logger.debug(f"Extraídas {len(result_lines)-1} líneas con columnas Q1")
+        return '\n'.join(result_lines)
     
     def handle_eof(self, counter: int, total_filters: int, eof_type: str,
                    middlewares: Dict[str, Any], input_middleware: Any, client_id: Optional[int] = None) -> bool:

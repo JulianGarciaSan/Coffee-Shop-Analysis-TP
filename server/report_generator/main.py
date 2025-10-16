@@ -1,7 +1,10 @@
+import heapq
 import logging
 import os
 from datetime import datetime
+import shutil
 import sys
+import tempfile
 from typing import Optional
 from rabbitmq.middleware import MessageMiddlewareExchange
 from dtos.dto import TransactionBatchDTO, BatchType, ReportBatchDTO
@@ -75,12 +78,11 @@ class ReportGenerator:
             if client_id not in self.client_data:
                 self.client_data[client_id] = {
                     'csv_files': {},
-                    'eof_count_by_query': {}  # Cambiar a contador por query
+                    'eof_count_by_query': {}  
                 }
                 logger.info(f"Nuevo cliente detectado: {client_id}")
             
             if dto.batch_type == BatchType.EOF:
-                # Incrementar contador de EOF para esta query
                 eof_counts = self.client_data[client_id]['eof_count_by_query']
                 eof_counts[query_name] = eof_counts.get(query_name, 0) + 1
                 
@@ -89,12 +91,10 @@ class ReportGenerator:
                 
                 logger.info(f"EOF recibido para cliente {client_id}, query {query_name}: {current_count}/{expected_count}")
                 
-                # Solo cerrar archivo cuando recibimos TODOS los EOFs esperados para esta query
                 if current_count >= expected_count:
                     logger.info(f"Todos los EOFs recibidos para cliente {client_id}, query {query_name} - cerrando archivo")
                     self._close_csv_file(client_id, query_name)
                 
-                # Verificar si todas las queries están completas
                 all_complete = True
                 for q_name, expected in self.expected_queries.items():
                     received = eof_counts.get(q_name, 0)
@@ -105,9 +105,9 @@ class ReportGenerator:
                 if all_complete:
                     logger.info(f"Cliente {client_id}: Todos los reportes completados")
                     self._publish_reports_for_client(client_id)
+                    self._cleanup_client_reports(client_id)
                     del self.client_data[client_id]
                 else:
-                    # Log del progreso
                     progress = []
                     for q_name, expected in self.expected_queries.items():
                         received = eof_counts.get(q_name, 0)
@@ -242,14 +242,121 @@ class ReportGenerator:
                 csv_files = self.client_data[client_id]['csv_files']
                 if query_name in csv_files:
                     csv_files[query_name].close()
+                    if query_name == 'q1':
+                        self._sort_q1_file(client_id)  
                     if query_name == 'q4':
-                        self._sort_q4_file(client_id)  # HABILITAR ordenamiento Q4
+                        self._sort_q4_file(client_id) 
                     logger.info(f"Cliente {client_id}: Archivo CSV cerrado para {query_name}")
                     del csv_files[query_name]
         except Exception as e:
             logger.error(f"Cliente {client_id}: Error cerrando CSV para {query_name}: {e}")
             
+    def _sort_q1_file(self, client_id: int):
+        """Ordena el archivo Q1 por transaction_id usando sorting externo si es necesario."""
+        try:
+            reports_dir = f'./reports/client_{client_id}'
+            files = [f for f in os.listdir(reports_dir) 
+                    if f.startswith('q1_') and f.endswith('.csv')]
+            
+            if not files:
+                return
+            
+            file_path = os.path.join(reports_dir, files[0])
+            file_size = os.path.getsize(file_path)
+            MAX_MEMORY_SIZE = 100 * 1024 * 1024 
+            
+            if file_size < MAX_MEMORY_SIZE:
+                self._sort_q1_in_memory(file_path)
+            else:
+                self._sort_q1_external(file_path)
+            
+            logger.info(f"Cliente {client_id}: Archivo Q1 ordenado ({file_size} bytes)")
+            
+        except Exception as e:
+            logger.error(f"Cliente {client_id}: Error ordenando Q1: {e}")
+
+    def _sort_q1_in_memory(self, file_path: str):
+        """Ordena Q1 en memoria (archivos pequeños)."""
+        with open(file_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        if len(lines) <= 1:
+            return
+        
+        header = lines[0]
+        data_lines = lines[1:]
+        
+        data_lines.sort(key=lambda line: line.split(',')[0])
+        
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(header)
+            f.writelines(data_lines)
+
+    def _sort_q1_external(self, file_path: str):
+        """Ordena Q1 usando merge sort externo (archivos grandes)."""
+        CHUNK_SIZE = 10000
+        temp_files = []
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                header = f.readline()
+                chunk = []
+                
+                for line in f:
+                    chunk.append(line)
+                    
+                    if len(chunk) >= CHUNK_SIZE:
+                        chunk.sort(key=lambda x: x.split(',')[0])
+                        temp_file = self._write_temp_chunk(chunk)
+                        temp_files.append(temp_file)
+                        chunk = []
+                
+                if chunk:
+                    chunk.sort(key=lambda x: x.split(',')[0])
+                    temp_file = self._write_temp_chunk(chunk)
+                    temp_files.append(temp_file)
+            
+            self._merge_sorted_chunks_q1(temp_files, file_path, header)
+            
+        finally:
+            for temp_file in temp_files:
+                try:
+                    os.unlink(temp_file)
+                except:
+                    pass
+
+    def _merge_sorted_chunks_q1(self, temp_files: list, output_path: str, header: str):
+        """Merge de chunks ordenados para Q1."""
+        file_handles = [open(f, 'r', encoding='utf-8') for f in temp_files]
+        
+        try:
+            heap = []
+            
+            for i, fh in enumerate(file_handles):
+                line = fh.readline()
+                if line:
+                    transaction_id = line.split(',')[0]
+                    heapq.heappush(heap, (transaction_id, line, i))
+            
+            with open(output_path, 'w', encoding='utf-8') as output:
+                output.write(header)
+                
+                while heap:
+                    transaction_id, line, file_idx = heapq.heappop(heap)
+                    output.write(line)
+                    
+                    next_line = file_handles[file_idx].readline()
+                    if next_line:
+                        next_id = next_line.split(',')[0]
+                        heapq.heappush(heap, (next_id, next_line, file_idx))
+        
+        finally:
+            for fh in file_handles:
+                fh.close()
+
+    
     def _sort_q4_file(self, client_id: int):
+        """Ordena el archivo Q4 por store_name, purchases_qty DESC, birthdate ASC."""
         try:
             reports_dir = f'./reports/client_{client_id}'
             files = [f for f in os.listdir(reports_dir) 
@@ -259,44 +366,119 @@ class ReportGenerator:
                 return
             
             file_path = os.path.join(reports_dir, files[0])
+            file_size = os.path.getsize(file_path)
+            MAX_MEMORY_SIZE = 100 * 1024 * 1024 
             
-            with open(file_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
+            if file_size < MAX_MEMORY_SIZE:
+                self._sort_q4_in_memory(file_path)
+            else:
+                self._sort_q4_external(file_path)
             
-            if len(lines) <= 1: 
-                return
-            
-            header = lines[0]
-            data_lines = lines[1:]
-            
-            records = []
-            for line in data_lines:
-                parts = line.strip().split(',')
-                if len(parts) >= 2:  # Q4 solo tiene 2 columnas: store_name, birthdate
-                    records.append({
-                        'store_name': parts[0],
-                        'birthdate': parts[1],
-                        'original': line
-                    })
-            
-            # Ordenar por store_name, luego birthdate (sin purchases_qty)
-            records.sort(key=lambda x: (x['store_name'], x['birthdate']))
-            
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(header)
-                for record in records:
-                    f.write(record['original'])
-            
-            logger.info(f"Cliente {client_id}: Archivo Q4 ordenado ({len(records)} registros)")
+            logger.info(f"Cliente {client_id}: Archivo Q4 ordenado ({file_size} bytes)")
             
         except Exception as e:
             logger.error(f"Cliente {client_id}: Error ordenando Q4: {e}")
 
+    def _sort_q4_in_memory(self, file_path: str):
+        with open(file_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        if len(lines) <= 1:
+            return
+        
+        header = lines[0]
+        data_lines = lines[1:]
+        
+        def sort_key(line):
+            parts = line.split(',')
+            store_name = parts[0]
+            birthdate = parts[1] if len(parts) > 1 else ''
+            purchases_qty = int(parts[2]) if len(parts) > 2 and parts[2].strip().isdigit() else 0
+            return (store_name, -purchases_qty, birthdate)
+        
+        data_lines.sort(key=sort_key)
+        
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(header)
+            f.writelines(data_lines)
+
+    def _sort_q4_external(self, file_path: str):
+        CHUNK_SIZE = 10000
+        temp_files = []
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                header = f.readline()
+                chunk = []
+                
+                for line in f:
+                    chunk.append(line)
+                    
+                    if len(chunk) >= CHUNK_SIZE:
+                        chunk.sort(key=lambda x: self._q4_sort_key(x))
+                        temp_file = self._write_temp_chunk(chunk)
+                        temp_files.append(temp_file)
+                        chunk = []
+                
+                if chunk:
+                    chunk.sort(key=lambda x: self._q4_sort_key(x))
+                    temp_file = self._write_temp_chunk(chunk)
+                    temp_files.append(temp_file)
+            
+            self._merge_sorted_chunks_q4(temp_files, file_path, header)
+            
+        finally:
+            for temp_file in temp_files:
+                try:
+                    os.unlink(temp_file)
+                except:
+                    pass
+
+    def _q4_sort_key(self, line: str):
+        parts = line.split(',')
+        store_name = parts[0]
+        birthdate = parts[1] if len(parts) > 1 else ''
+        purchases_qty = int(parts[2]) if len(parts) > 2 and parts[2].strip().isdigit() else 0
+        return (store_name, -purchases_qty, birthdate)
+
+    def _merge_sorted_chunks_q4(self, temp_files: list, output_path: str, header: str):
+        file_handles = [open(f, 'r', encoding='utf-8') for f in temp_files]
+        
+        try:
+            heap = []
+            
+            for i, fh in enumerate(file_handles):
+                line = fh.readline()
+                if line:
+                    sort_key = self._q4_sort_key(line)
+                    heapq.heappush(heap, (sort_key, line, i))
+            
+            with open(output_path, 'w', encoding='utf-8') as output:
+                output.write(header)
+                
+                while heap:
+                    sort_key, line, file_idx = heapq.heappop(heap)
+                    output.write(line)
+                    
+                    next_line = file_handles[file_idx].readline()
+                    if next_line:
+                        next_key = self._q4_sort_key(next_line)
+                        heapq.heappush(heap, (next_key, next_line, file_idx))
+        
+        finally:
+            for fh in file_handles:
+                fh.close()
+    
+    def _write_temp_chunk(self, chunk: list) -> str:
+        """Escribe un chunk en archivo temporal."""
+        temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, 
+                                               suffix='.csv', encoding='utf-8')
+        temp_file.writelines(chunk)
+        temp_file.close()
+        return temp_file.name
+
     def _publish_reports_for_client(self, client_id: int):
-        """
-        Publica todos los reportes de un cliente específico
-        usando routing keys con formato: client.{id}.{query}.{type}
-        """
+
         try:
             batch_size = 150
             reports_dir = f'./reports/client_{client_id}'
@@ -306,7 +488,6 @@ class ReportGenerator:
                 return
 
             for query_name in self.expected_queries.keys():
-                # Buscar archivos CSV para esta query
                 files = [f for f in os.listdir(reports_dir) 
                         if f.startswith(query_name) and f.endswith('.csv')]
 
@@ -334,7 +515,6 @@ class ReportGenerator:
                                 query_name
                             )
                             
-                            # CRÍTICO: Routing key con client_id
                             routing_key = f'client.{client_id}.{query_name}.data'
                             
                             self.publisher.send(
@@ -342,7 +522,6 @@ class ReportGenerator:
                                 routing_key=routing_key
                             )
                         
-                        # Enviar EOF
                         eof_dto = ReportBatchDTO.create_eof(query_name)
                         eof_routing_key = f'client.{client_id}.{query_name}.eof'
                         
@@ -357,6 +536,19 @@ class ReportGenerator:
             
         except Exception as e:
             logger.error(f"Cliente {client_id}: Error publicando reportes: {e}")
+
+    def _cleanup_client_reports(self, client_id: int):
+        try:
+            reports_dir = f'./reports/client_{client_id}'
+            
+            if os.path.exists(reports_dir):
+                shutil.rmtree(reports_dir)
+                logger.info(f"Cliente {client_id}: Directorio de reportes eliminado: {reports_dir}")
+            else:
+                logger.warning(f"Cliente {client_id}: Directorio de reportes no existe: {reports_dir}")
+                
+        except Exception as e:
+            logger.error(f"Cliente {client_id}: Error eliminando directorio de reportes: {e}")
 
 if __name__ == "__main__":
     try:
