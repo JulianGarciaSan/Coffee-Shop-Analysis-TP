@@ -1,4 +1,5 @@
 import gc
+import json
 import logging
 import os
 import sys
@@ -33,7 +34,27 @@ class DataSourceType(Enum):
     BEST_SELLING = "q2_best_selling"
     MOST_PROFIT = "q2_most_profit"
 
-
+@dataclass
+class PeerCleanupSignal:
+    """Señal para coordinar limpieza entre nodos."""
+    sending_node_id: int
+    client_id: str
+    
+    def to_bytes(self) -> bytes:
+        data = {
+            'sending_node_id': self.sending_node_id,
+            'client_id': self.client_id
+        }
+        return json.dumps(data).encode('utf-8')
+    
+    @classmethod
+    def from_bytes(cls, data: bytes) -> 'PeerCleanupSignal':
+        obj = json.loads(data.decode('utf-8'))
+        return cls(
+            sending_node_id=obj['sending_node_id'],
+            client_id=obj['client_id']
+        )
+        
 @dataclass
 class ClientProcessingState:
     stores_loaded: bool = False
@@ -57,6 +78,9 @@ class ClientProcessingState:
     received_peer_users: Dict[str, Dict] = field(default_factory=dict)
     peer_requests_pending: int = 0
     top_customers_processed: bool = False 
+    
+    nodes_ready_to_cleanup: set = field(default_factory=set)
+    cleanup_broadcasted: bool = False
     
     def is_q3_ready(self) -> bool:
         return (self.stores_loaded and 
@@ -102,7 +126,9 @@ class JoinNode:
         self.total_topk_aggregators = int(os.getenv('TOTAL_TOPK_NODES', '2'))
         self.total_groupby_semester_nodes = int(os.getenv('TOTAL_GROUPBY_SEMESTER_NODES', '2'))
         self.node_name = f"join_node_{self.node_id}"
-        
+        self.cleanup_required_nodes = self.total_join_nodes
+
+
         self.client_states: Dict[str, ClientProcessingState] = defaultdict(
             lambda: ClientProcessingState(
                 expected_groupby_nodes=self.total_groupby_semester_nodes,
@@ -188,6 +214,7 @@ class JoinNode:
             # Peer communication
             'user_request': self._handle_peer_user_request,
             'user_response': self._handle_peer_user_response,
+            'cleanup_signal': self._handle_peer_cleanup_signal,
         }
         
         for routing_key, handler in routes.items():
@@ -238,13 +265,15 @@ class JoinNode:
             exchange_name=self.peer_exchange,
             routing_keys=[
                 f'join_node_{self.node_id}.user_request',
-                f'join_node_{self.node_id}.user_response'
+                f'join_node_{self.node_id}.user_response',
+                f'join_node_{self.node_id}.cleanup_signal',
             ]
         )
         route_keys = []
         for i in range(self.total_join_nodes):
             route_keys.append(f'join_node_{i}.user_request')
             route_keys.append(f'join_node_{i}.user_response')
+            route_keys.append(f'join_node_{i}.cleanup_signal') 
         
         self.peer_output_middleware_main = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
@@ -513,6 +542,23 @@ class JoinNode:
         
         return False
     
+    def _handle_peer_cleanup_signal(self, message: bytes, headers: dict = None) -> bool:
+        """Maneja señales de cleanup."""
+        try:
+            signal = PeerCleanupSignal.from_bytes(message)
+            client_id = signal.client_id
+            
+            logger.info(f"Recibida señal de cleanup para cliente '{client_id}'")
+            
+            # Limpiar inmediatamente
+            self._cleanup_client_data(client_id)
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error manejando cleanup signal: {e}", exc_info=True)
+            return False
+    
     def _process_top_customers_with_new_users(self, client_id: str, new_user_ids: set):
         
         state = self.client_states[client_id]
@@ -704,8 +750,10 @@ class JoinNode:
                 state.most_profit_sent = True
                 
             if state.all_queries_completed():
-                logger.info(f"Todas las queries completadas para cliente '{client_id}', limpiando datos...")
-                self._cleanup_client_data(client_id)
+                if not state.cleanup_broadcasted:
+                    self._broadcast_cleanup_signal(client_id)
+                    state.cleanup_broadcasted = True
+                    state.nodes_ready_to_cleanup.add(self.node_id)
     
     def _send_q3_results(self, client_id: str, joined_data: List[Dict]):
         try:
@@ -1067,8 +1115,31 @@ class JoinNode:
         except Exception as e:
             logger.error(f"Error limpiando datos del cliente '{client_id}': {e}", exc_info=True)
     
+    def _broadcast_cleanup_signal(self, client_id: str):
+        """Broadcast a todos los nodos que pueden limpiar este cliente."""
+        try:
+            signal = PeerCleanupSignal(
+                sending_node_id=self.node_id,  
+                client_id=client_id
+            )            
+            for target_node in range(self.total_join_nodes):
+                routing_key = f'join_node_{target_node}.cleanup_signal'
+                
+                with self.peer_lock:
+                    self.peer_output_middleware_main.send(
+                        signal.to_bytes(),
+                        routing_key=routing_key,
+                        headers={'client_id': client_id}
+                    )
+            
+            logger.info(f"✓ Cleanup signal enviado a {self.total_join_nodes} nodos para cliente '{client_id}'")
+            
+        except Exception as e:
+            logger.error(f"Error broadcasting cleanup signal: {e}", exc_info=True)
+    
 
 if __name__ == "__main__":
+    
     try:
         node = JoinNode()
         node.start()
