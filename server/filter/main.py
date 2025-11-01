@@ -1,9 +1,12 @@
+from datetime import datetime
 import logging
 import os
 import sys
+import time
 import threading
 from typing import Optional
 from rabbitmq.middleware import MessageMiddlewareQueue
+from logger_writter import LogWriter
 from strategies import FilterStrategyFactory
 from configurators import NodeConfiguratorFactory
 from dtos.dto import TransactionBatchDTO, TransactionItemBatchDTO, BatchType, FileType
@@ -70,6 +73,9 @@ class FilterNode:
             if middleware and hasattr(middleware, 'shutdown'):
                 middleware.shutdown = self.shutdown
 
+        self.logger = LogWriter('/app/logs.txt')
+        self.client_logger = LogWriter('/app/client_logs.txt')
+        self.is_first_message = True
 
     def _on_shutdown_signal(self):
         logger.info("FilterNode: Señal de shutdown recibida, deteniendo consumo...")
@@ -137,8 +143,10 @@ class FilterNode:
                 return True
                         
             processed_data = self.node_configurator.process_filtered_data(filtered_csv)
+            self.logger.write(f"[{datetime.now().isoformat()}] Informo que Filtre el mensaje")
+            time.sleep(30)
             self.node_configurator.send_data(processed_data, self.middlewares, batch_type, client_id=client_id)
-            
+            self.logger.write(f"[{datetime.now().isoformat()}] Informo que encole el mensaje")
             return False
 
         except Exception as e:
@@ -177,6 +185,7 @@ class FilterNode:
         
     def on_message_callback(self, ch, method, properties, body):
         try:
+            logging.info("Mensaje recibido en FilterNode")
             if self.shutdown.is_shutting_down():
                 logger.warning("Shutdown solicitado, deteniendo consumo")
                 ch.stop_consuming()
@@ -185,20 +194,48 @@ class FilterNode:
             client_id = None
             if properties and properties.headers:
                 client_id = properties.headers.get('client_id')
-            
-            
+                message_id = properties.headers.get('message_id')
+                
+                
             routing_key = method.routing_key if hasattr(method, 'routing_key') else None
+            
+            if self.is_first_message:
+                self.is_first_message = False
+                last_log = self.logger._get_last_line()
+                logger.info(f"Esto es la ultima linea del logger: {last_log}")
+                self.analize_log(last_log, client_id, message_id)
+                 
+            self.client_logger.write(f"{client_id};{message_id}")
             should_stop = self.process_message(body, routing_key, client_id)
+            self.logger.write(f"[{datetime.now().isoformat()}] Termine la iteracion")
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+
             
             if should_stop:
                 logger.info("EOF procesado - deteniendo consuming")
                 ch.stop_consuming()
         except Exception as e:
             logger.error(f"Error en callback: {e}")
+            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+
+
+    def analize_log(self,log, client_id, message_id):
+        logger.info(f"Analizando log: {log}")
+        last_line_client = self.client_logger._get_last_line()
+        logger.info(f"Ultima linea del client log: {last_line_client}")
+        client, id = last_line_client.split(';')
+        
+        if("Informo que encole el mensaje" in log):
+            if(client == client_id and id == message_id):
+                return "input"
+                #Solo me queda mandar el ack
+        if("Informo que Filtre" in log):
+            logger.info(f"FilterNode: Reintento filtrar y enviar el mensaje")
 
     def start(self):
-
         try:
+            logger.info(f"Esto es la ultima linea del logger: {self.logger._get_last_line()}")
+
             logger.info("Iniciando consumo de mensajes...")
             self.input_middleware.start_consuming(self.on_message_callback)
         except KeyboardInterrupt:
@@ -208,6 +245,7 @@ class FilterNode:
             raise
         finally:
             self._cleanup()
+                   
 
     def _cleanup(self):
         """Limpieza ordenada de recursos"""

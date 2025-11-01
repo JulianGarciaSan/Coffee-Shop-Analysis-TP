@@ -406,3 +406,337 @@ class MessageMiddlewareQueue(MessageMiddleware):
             logger.warning(f"Excepción durante cierre: {e}")
         finally:
             self._closing = False
+            
+class MessageMiddlewareQueueManual(MessageMiddleware):
+    def __init__(self, host: str, queue_name: str, exchange_name: str = None, 
+                 routing_keys: list = None):
+        self.host = host
+        self.queue_name = queue_name
+        self.exchange_name = exchange_name
+        self.routing_keys = routing_keys or []
+        self.connection = None
+        self.channel = None
+        self.shutdown = None
+        self._closing = False  
+        self._connect()
+
+    def _connect(self):
+        try:
+            credentials = pika.PlainCredentials('admin', 'admin')
+            parameters = pika.ConnectionParameters(
+                host=self.host, 
+                credentials=credentials,
+                heartbeat=1200,
+                blocked_connection_timeout=1800,
+                frame_max=131072
+            )
+            self.connection = pika.BlockingConnection(parameters)
+            self.channel = self.connection.channel()
+            
+            self.channel.queue_declare(queue=self.queue_name, durable=True)
+            
+            if self.exchange_name and self.routing_keys:
+                self.channel.exchange_declare(
+                    exchange=self.exchange_name, 
+                    exchange_type='topic', 
+                    durable=True
+                )
+                
+                for routing_key in self.routing_keys:
+                    self.channel.queue_bind(
+                        queue=self.queue_name,
+                        exchange=self.exchange_name,
+                        routing_key=routing_key
+                    )
+                    logger.info(f"Queue '{self.queue_name}' bindeada a '{self.exchange_name}' con routing_key '{routing_key}'")
+            
+            logger.info(f"Conectado a RabbitMQ. Cola declarada: {self.queue_name}")
+        except pika.exceptions.AMQPConnectionError as e:
+            logger.error(f"Error conectando a RabbitMQ: {e}")
+            raise MessageMiddlewareDisconnectedError("No se pudo conectar a RabbitMQ")
+
+    def send(self, message: str, headers: dict = None):
+        try:
+            if not self.channel:
+                raise MessageMiddlewareDisconnectedError("No hay conexión activa con RabbitMQ")
+            self.channel.basic_publish(
+                exchange='',  
+                routing_key=self.queue_name,
+                body=message,
+                properties=pika.BasicProperties(
+                    delivery_mode=2,
+                    headers=headers or {}
+                )
+            )
+        except MessageMiddlewareDisconnectedError:
+            raise 
+        except Exception as e:
+            logger.error(f"Error enviando mensaje: {e}")
+            raise MessageMiddlewareMessageError(f"Error enviando mensaje: {e}")
+
+    def start_consuming(self, on_message_callback):
+        """
+        Inicia el consumo de mensajes con ACK manual.
+        
+        El callback debe manejar el ACK/NACK manualmente usando:
+        - channel.basic_ack(delivery_tag) para confirmar
+        - channel.basic_nack(delivery_tag, requeue=True/False) para rechazar
+        """
+        try:
+            if not self.channel:
+                raise MessageMiddlewareDisconnectedError("No hay conexión activa con RabbitMQ")
+            
+            # Optimizado para throughput
+            self.channel.basic_qos(prefetch_count=1)
+            
+            logger.info(f"Esperando mensajes en cola {self.queue_name}...")
+            
+            for method_frame, properties, body in self.channel.consume(
+                self.queue_name,
+                auto_ack=False,  # ACK MANUAL
+                inactivity_timeout=5
+            ):
+            
+                if self.shutdown and self.shutdown.is_shutting_down():
+                    logger.info("Shutdown detectado en middleware, dejando de consumir")
+                    break
+                
+                if method_frame is None:
+                    continue
+                
+                if not self.channel or not self.channel.is_open:
+                    logger.info("Canal cerrado durante consumo, saliendo del loop")
+                    break
+                
+                # El callback ahora es responsable de hacer ACK/NACK
+                on_message_callback(self.channel, method_frame, properties, body)
+                    
+        except MessageMiddlewareDisconnectedError:
+            raise
+        except pika.exceptions.AMQPConnectionError as e:
+            logger.error(f"Conexión con RabbitMQ perdida: {e}")
+            raise MessageMiddlewareDisconnectedError("Conexión con RabbitMQ perdida")
+        except Exception as e:
+            logger.error(f"Error durante el consumo de mensajes: {e}")
+            raise MessageMiddlewareMessageError(f"Error durante el consumo de mensajes: {e}")
+        finally:
+            logger.info("Finalizando consumo...")
+            self.stop_consuming()
+
+    def stop_consuming(self):
+        """Detener el consumo de mensajes de forma segura"""
+        if self.channel:
+            try:
+                logger.info("Deteniendo consumo de mensajes...")
+                self.channel.stop_consuming()
+                self._consuming = False
+                logger.info("Consumo de mensajes detenido")
+                
+                time.sleep(0.2) 
+                
+            except Exception as e:
+                logger.error(f"Error deteniendo el consumo: {e}")
+                self._consuming = False
+
+    def delete(self):
+        try:
+            if self.channel:
+                self.channel.queue_delete(queue=self.queue_name)
+                logger.info(f"Cola {self.queue_name} eliminada")
+        except Exception as e:
+            logger.error(f"Error eliminando la cola: {e}")
+            raise MessageMiddlewareDeleteError(f"Error eliminando la cola: {e}")
+
+    def close(self):
+        """Cierre idempotente y seguro"""
+        if self._closing:
+            logger.debug("Ya en proceso de cierre, ignorando")
+            return
+        
+        self._closing = True
+        
+        try:
+            if self.channel and self.channel.is_open:
+                try:
+                    self.channel.close()
+                    logger.debug("Canal cerrado")
+                    time.sleep(0.3)
+                except Exception as e:
+                    logger.debug(f"Error cerrando canal: {e}")
+            
+            if self.connection and self.connection.is_open:
+                try:
+                    self.connection.close()
+                    logger.info("Conexión con RabbitMQ cerrada")
+                except Exception as e:
+                    logger.debug(f"Error cerrando conexión: {e}")
+                    
+        except Exception as e:
+            logger.warning(f"Excepción durante cierre: {e}")
+        finally:
+            self._closing = False   
+            
+            
+class MessageMiddlewareExchangeManual(MessageMiddleware):
+    def __init__(self, host: str, exchange_name: str, route_keys: list):
+        self.host = host
+        self.exchange_name = exchange_name
+        self.route_keys = route_keys if isinstance(route_keys, list) else [route_keys]
+        self.connection = None
+        self.channel = None
+        self.consumer_queue = None  
+        self.shutdown = None    
+        self._closing = False
+
+        self._connect()
+
+    def _connect(self):
+        try:
+            credentials = pika.PlainCredentials('admin', 'admin')
+            parameters = pika.ConnectionParameters(
+                host=self.host, 
+                credentials=credentials,
+                heartbeat=1200, 
+                blocked_connection_timeout=1800,  
+                frame_max=131072 
+            )
+            self.connection = pika.BlockingConnection(parameters)
+            self.channel = self.connection.channel()
+            self.channel.exchange_declare(exchange=self.exchange_name, exchange_type='topic', durable=True)
+            self.channel.confirm_delivery()
+            logger.info(f"Conectado a RabbitMQ. Exchange declarado: {self.exchange_name}")
+        except pika.exceptions.AMQPConnectionError as e:
+            logger.error(f"Error conectando a RabbitMQ: {e}")
+            raise MessageMiddlewareDisconnectedError("No se pudo conectar a RabbitMQ")
+
+    def send(self, message: str, routing_key: str = None, headers: dict = None):
+        try:
+            if not self.channel:
+                raise MessageMiddlewareDisconnectedError("No hay conexión activa con RabbitMQ")
+            
+            key = routing_key if routing_key else self.route_keys[0]
+            
+            self.channel.basic_publish(
+                exchange=self.exchange_name,
+                routing_key=key,
+                body=message,
+                properties=pika.BasicProperties(
+                    delivery_mode=2,
+                    headers=headers or {}
+                )
+            )
+        except MessageMiddlewareDisconnectedError:
+            raise 
+        except Exception as e:
+            logger.error(f"Error enviando mensaje: {e}")
+            raise MessageMiddlewareMessageError(f"Error enviando mensaje: {e}")
+
+    def start_consuming(self, on_message_callback):
+        """
+        Inicia el consumo de mensajes con ACK manual.
+        
+        El callback debe manejar el ACK/NACK manualmente usando:
+        - channel.basic_ack(delivery_tag) para confirmar
+        - channel.basic_nack(delivery_tag, requeue=True/False) para rechazar
+        """
+        try:
+            if not self.channel:
+                raise MessageMiddlewareDisconnectedError("No hay conexión activa con RabbitMQ")
+            
+            result = self.channel.queue_declare(queue='', exclusive=True)
+            self.consumer_queue = result.method.queue
+            
+            for route_key in self.route_keys:
+                self.channel.queue_bind(
+                    exchange=self.exchange_name,
+                    queue=self.consumer_queue,
+                    routing_key=route_key
+                )
+            
+            self.channel.basic_qos(prefetch_count=1)
+            
+            logger.info(f"Esperando mensajes en exchange {self.exchange_name} con routing keys {self.route_keys}...")
+            
+            for method_frame, properties, body in self.channel.consume(
+                self.consumer_queue,
+                auto_ack=False,  # ACK MANUAL
+                inactivity_timeout=5  
+            ):
+                if self.shutdown and self.shutdown.is_shutting_down():
+                    logger.info("Shutdown detectado en exchange middleware, dejando de consumir")
+                    break
+                
+                if method_frame is None:
+                    continue
+                
+                if not self.channel or not self.channel.is_open:
+                    logger.info("Canal cerrado durante consumo, saliendo del loop")
+                    break
+                
+                # El callback ahora es responsable de hacer ACK/NACK
+                on_message_callback(self.channel, method_frame, properties, body)
+                    
+        except pika.exceptions.AMQPConnectionError as e:
+            logger.error(f"Conexión con RabbitMQ perdida: {e}")
+            raise MessageMiddlewareDisconnectedError("Conexión con RabbitMQ perdida")
+        except MessageMiddlewareDisconnectedError:
+            raise
+        except Exception as e:
+            logger.error(f"Error durante el consumo de mensajes: {e}")
+            raise MessageMiddlewareMessageError(f"Error durante el consumo de mensajes: {e}")
+        finally:
+            logger.info("Finalizando consumo en exchange...")
+            self.stop_consuming()
+
+    def stop_consuming(self):
+        """Detener el consumo de mensajes de forma segura"""
+        if self.channel:
+            try:
+                logger.info("Deteniendo consumo de mensajes...")
+                self.channel.stop_consuming()
+                self._consuming = False
+                logger.info("Consumo de mensajes detenido")
+                
+                time.sleep(0.2) 
+                
+            except Exception as e:
+                logger.error(f"Error deteniendo el consumo: {e}")
+                self._consuming = False
+
+    def delete(self):
+        try:
+            if self.channel:
+                self.channel.exchange_delete(exchange=self.exchange_name)
+                logger.info(f"Exchange {self.exchange_name} eliminado")
+        except Exception as e:
+            logger.error(f"Error eliminando el exchange: {e}")
+            raise MessageMiddlewareDeleteError(f"Error eliminando el exchange: {e}")
+
+    def close(self):
+        """Cierre idempotente y seguro"""
+        if self._closing:
+            logger.debug("Ya en proceso de cierre, ignorando")
+            return
+        
+        self._closing = True
+        
+        try:
+            if self.channel and self.channel.is_open:
+                try:
+                    self.channel.close()
+                    logger.debug("Canal cerrado")
+                    time.sleep(0.3)
+                except Exception as e:
+                    logger.debug(f"Error cerrando canal: {e}")
+            
+            if self.connection and self.connection.is_open:
+                try:
+                    self.connection.close()
+                    logger.info("Conexión con RabbitMQ cerrada")
+                except Exception as e:
+                    logger.debug(f"Error cerrando conexión: {e}")
+                    
+        except Exception as e:
+            logger.warning(f"Excepción durante cierre: {e}")
+        finally:
+            self._closing = False

@@ -60,7 +60,7 @@ class ClientHandler(threading.Thread):
         self.client_router = ClientRouter(total_join_nodes=total_join_nodes)
         self.assigned_join_node = self.client_router.get_node_for_client(self.client_id)
         
-        
+        self.message_id = 0
         
     def _setup_middlewares(self):
         try:
@@ -86,6 +86,8 @@ class ClientHandler(threading.Thread):
         
         try:
             for message in self.protocol.receive_messages():
+                self.message_id += 1
+                
                 if not self._is_running: 
                     logger.info(f"Cliente {self.client_id}: _is_running=False, saliendo")
                     break
@@ -147,7 +149,7 @@ class ClientHandler(threading.Thread):
         try:
             if file_type == "D":
                 eof_dto = TransactionBatchDTO("EOF:1", batch_type=BatchType.EOF)
-                self._output_middleware.send(eof_dto.to_bytes_fast(), routing_key='transactions', headers={'client_id': self.client_id})
+                self._output_middleware.send(eof_dto.to_bytes_fast(), routing_key='transactions', headers={'client_id': self.client_id, 'message_id': self.message_id})
                 logger.info("EOF:1 enviado")
                 
             elif file_type == "S":
@@ -191,7 +193,7 @@ class ClientHandler(threading.Thread):
         try:
             dto = TransactionBatchDTO(message.data, BatchType.RAW_CSV)
             dto.filter_columns()
-            self._output_middleware.send(dto.to_bytes_fast(), routing_key='transactions', headers={'client_id': self.client_id})
+            self._output_middleware.send(dto.to_bytes_fast(), routing_key='transactions', headers={'client_id': self.client_id,'message_id': self.message_id})
         except Exception as e:
             logger.error(f"Error procesando mensaje de tipo 'D': {e}")
 

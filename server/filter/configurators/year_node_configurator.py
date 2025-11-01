@@ -3,7 +3,7 @@ import logging
 import os
 import threading
 from typing import Optional, Dict, Any
-from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
+from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange, MessageMiddlewareQueueManual
 from dtos.dto import TransactionBatchDTO, TransactionItemBatchDTO, BatchType, CoordinationMessageDTO
 from .base_configurator import NodeConfigurator
 from coordinator.coordinator import PeerCoordinator 
@@ -116,7 +116,7 @@ class YearNodeConfigurator(NodeConfigurator):
         
         logger.info(f"YearNode: Queue={queue_name}, routing_key={routing_key}")
         
-        return MessageMiddlewareQueue(
+        return MessageMiddlewareQueueManual(
             host=self.rabbitmq_host,
             queue_name=queue_name,
             exchange_name=input_exchange,

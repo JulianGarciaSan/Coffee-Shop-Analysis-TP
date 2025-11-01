@@ -57,10 +57,10 @@ class Client:
             #"D": "/data/transactions",
             "D": "/data/transactions_test",
             #"I": "/data/transaction_items",
-            "I": "/data/transactions_items_test",
-            "U": "/data/users",
-            "S": "/data/stores",
-            "M": "/data/menu_items",
+            # "I": "/data/transactions_items_test",
+            # "U": "/data/users",
+            # "S": "/data/stores",
+            # "M": "/data/menu_items",
             #"payment_methods": "/data/payment_methods",
             #"vouchers": "/data/vouchers"
         }

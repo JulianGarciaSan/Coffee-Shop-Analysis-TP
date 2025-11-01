@@ -18,12 +18,19 @@ build: docker-image
 .PHONY: build
 
 #Levanta todo el sistema CON logs visibles en la terminal
-docker-compose-up: docker-image
+start: docker-image
 	docker compose -f docker-compose.yaml up --build -d
 .PHONY: docker-compose-up
 
-docker-compose-down:
+stop:
 	docker compose -f docker-compose.yaml stop -t 30
+	docker compose -f docker-compose.yaml down
+	echo -n > server/client_logs.txt
+	echo -n > server/logs.txt
+.PHONY: stop
+
+# Limpieza profunda (usar solo cuando realmente quieras limpiar todo)
+clean-all: stop
 	docker compose -f docker-compose.yaml down -v
 	docker images --format "{{.Repository}}:{{.Tag}}" | grep -v "python" | xargs -r docker rmi -f || true
 	docker container prune -f
@@ -31,10 +38,10 @@ docker-compose-down:
 	docker builder prune -f
 	docker volume prune -f
 	sudo rm -rf report*
+.PHONY: clean-all
 
-.PHONY: docker-compose-down
 
-docker-compose-logs:
+logs:
 	docker compose -f docker-compose.yaml logs -f
 .PHONY: docker-compose-logs
 
@@ -56,5 +63,7 @@ clean:
 
 # Restart specific service
 restart-%:
-	docker compose -f docker-compose.yaml restart $*
+	docker compose -f docker-compose.yaml stop $*
+	sleep 2
+	docker compose -f docker-compose.yaml start $*
 .PHONY: restart-%
