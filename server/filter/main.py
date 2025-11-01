@@ -144,9 +144,9 @@ class FilterNode:
                         
             processed_data = self.node_configurator.process_filtered_data(filtered_csv)
             self.logger.write(f"[{datetime.now().isoformat()}] Informo que Filtre el mensaje")
-            time.sleep(30)
             self.node_configurator.send_data(processed_data, self.middlewares, batch_type, client_id=client_id)
             self.logger.write(f"[{datetime.now().isoformat()}] Informo que encole el mensaje")
+            time.sleep(30)
             return False
 
         except Exception as e:
@@ -204,6 +204,12 @@ class FilterNode:
                 last_log = self.logger._get_last_line()
                 logger.info(f"Esto es la ultima linea del logger: {last_log}")
                 self.analize_log(last_log, client_id, message_id)
+                
+                if self.analize_log(last_log, client_id, message_id):
+                    logger.info("Mensaje ya procesado, haciendo ACK y continuando")
+                    ch.basic_ack(delivery_tag=method.delivery_tag)
+                    self.logger.write(f"[{datetime.now().isoformat()}] Termine la iteracion")
+                    return 
                  
             self.client_logger.write(f"{client_id};{message_id}")
             should_stop = self.process_message(body, routing_key, client_id)
@@ -219,18 +225,29 @@ class FilterNode:
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
 
 
-    def analize_log(self,log, client_id, message_id):
+    def analize_log(self, log, client_id, message_id):
         logger.info(f"Analizando log: {log}")
         last_line_client = self.client_logger._get_last_line()
         logger.info(f"Ultima linea del client log: {last_line_client}")
+        
+        if not last_line_client or ';' not in last_line_client:
+            logger.warning("No hay logs previos válidos")
+            return False
+        
         client, id = last_line_client.split(';')
         
-        if("Informo que encole el mensaje" in log):
-            if(client == client_id and id == message_id):
-                return "input"
-                #Solo me queda mandar el ack
-        if("Informo que Filtre" in log):
+        client_str = str(client_id) if client_id is not None else ""
+        message_str = str(message_id) if message_id is not None else ""
+        
+        if "Informo que encole el mensaje" in log:
+            if client == client_str and id == message_str:
+                return True
+                
+        if "Informo que Filtre" in log:
             logger.info(f"FilterNode: Reintento filtrar y enviar el mensaje")
+            return False
+        
+        return False
 
     def start(self):
         try:
