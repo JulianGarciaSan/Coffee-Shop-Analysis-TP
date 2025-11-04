@@ -12,10 +12,10 @@ class NodeConfiguratorFactory:
     }
     
     @staticmethod
-    def create_configurator(filter_mode: str, rabbitmq_host: str) -> NodeConfigurator:
+    def create_configurator(filter_mode: str, rabbitmq_host: str, logging_instance, client_logging_instance, eof_logging_instance) -> NodeConfigurator:
         configurator_class = NodeConfiguratorFactory._configurators.get(filter_mode)
         
         if configurator_class is None:
             raise ValueError(f"Unknown filter mode: {filter_mode}")
-        
-        return configurator_class(rabbitmq_host)
+
+        return configurator_class(rabbitmq_host, logging_instance, client_logging_instance, eof_logging_instance)

@@ -135,56 +135,57 @@ services:
       - ./server/config.ini:/app/config.ini
       - ./server/logs.txt:/app/logs.txt
       - ./server/client_logs.txt:/app/client_logs.txt
+      - ./server/eof_logs.txt:/app/eof_logs.txt
 
-  # filter_year_2:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/filter/Dockerfile
-  #   container_name: filter_year_2
-  #   restart: on-failure
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - FILTER_MODE=year
-  #     - OUTPUT_Q1=year_filtered
-  #     - TOTAL_YEAR_FILTERS=3
-  #     - FILTER_YEARS=2024,2025
-  #     - OUTPUT_Q4=year_filtered_q4
-  #     - OUTPUT_Q2=year_data.exchange
-  #     - INPUT_EXCHANGE=raw_data_exchange
-  #     - FILE_MODE=transactions
-  #     - NODE_ID=year_node_2
-  #     - ALL_NODE_IDS=year_node_1,year_node_2,year_node_3
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
+  filter_year_2:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_year_2
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=year
+      - OUTPUT_Q1=year_filtered
+      - TOTAL_YEAR_FILTERS=3
+      - FILTER_YEARS=2024,2025
+      - OUTPUT_Q4=year_filtered_q4
+      - OUTPUT_Q2=year_data.exchange
+      - INPUT_EXCHANGE=raw_data_exchange
+      - FILE_MODE=transactions
+      - NODE_ID=year_node_2
+      - ALL_NODE_IDS=year_node_1,year_node_2,year_node_3
+    volumes:
+      - ./server/config.ini:/app/config.ini
 
-  # filter_year_3:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/filter/Dockerfile
-  #   container_name: filter_year_3
-  #   restart: on-failure
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - FILTER_MODE=year
-  #     - OUTPUT_Q1=year_filtered
-  #     - TOTAL_YEAR_FILTERS=3
-  #     - FILTER_YEARS=2024,2025
-  #     - OUTPUT_Q4=year_filtered_q4
-  #     - OUTPUT_Q2=year_data.exchange
-  #     - INPUT_EXCHANGE=raw_data_exchange
-  #     - FILE_MODE=transactions
-  #     - NODE_ID=year_node_3
-  #     - ALL_NODE_IDS=year_node_1,year_node_2,year_node_3
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
+  filter_year_3:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_year_3
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=year
+      - OUTPUT_Q1=year_filtered
+      - TOTAL_YEAR_FILTERS=3
+      - FILTER_YEARS=2024,2025
+      - OUTPUT_Q4=year_filtered_q4
+      - OUTPUT_Q2=year_data.exchange
+      - INPUT_EXCHANGE=raw_data_exchange
+      - FILE_MODE=transactions
+      - NODE_ID=year_node_3
+      - ALL_NODE_IDS=year_node_1,year_node_2,year_node_3
+    volumes:
+      - ./server/config.ini:/app/config.ini
 
   # filter_year_4:
   #   build:

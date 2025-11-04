@@ -25,8 +25,12 @@ start: docker-image
 stop:
 	docker compose -f docker-compose.yaml stop -t 30
 	docker compose -f docker-compose.yaml down
+	sudo cp server/client_logs.txt server/clients_logs_backup.txt || true
+	sudo cp server/logs.txt server/logs_backup.txt || true
+	sudo cp server/eof_logs.txt server/eof_logs_backup.txt || true
 	echo -n > server/client_logs.txt
 	echo -n > server/logs.txt
+	echo -n > server/eof_logs.txt
 .PHONY: stop
 
 # Limpieza profunda (usar solo cuando realmente quieras limpiar todo)

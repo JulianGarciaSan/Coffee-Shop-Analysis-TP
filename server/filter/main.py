@@ -6,7 +6,7 @@ import time
 import threading
 from typing import Optional
 from rabbitmq.middleware import MessageMiddlewareQueue
-from logger_writter import LogWriter
+from logger_monitor import LoggerMonitor
 from strategies import FilterStrategyFactory
 from configurators import NodeConfiguratorFactory
 from dtos.dto import TransactionBatchDTO, TransactionItemBatchDTO, BatchType, FileType
@@ -45,11 +45,17 @@ class FilterNode:
         
         self.filter_strategy = self._create_filter_strategy()
         
+        self.logger = LoggerMonitor('/app/logs.txt')
+        self.client_logger = LoggerMonitor('/app/client_logs.txt')
+        self.eof_logger = LoggerMonitor('/app/eof_logs.txt')
+        self.is_first_message = True
+        
         self.node_configurator = NodeConfiguratorFactory.create_configurator(
             self.filter_mode,
             self.rabbitmq_host
+        , self.logger, self.client_logger, self.eof_logger
         )
-        
+                
         if self.filter_mode == 'year':
             self.input_middleware = self.node_configurator.create_input_middleware(
                 self.input_exchange, self.input_queue
@@ -72,10 +78,6 @@ class FilterNode:
         for name, middleware in self.middlewares.items():
             if middleware and hasattr(middleware, 'shutdown'):
                 middleware.shutdown = self.shutdown
-
-        self.logger = LogWriter('/app/logs.txt')
-        self.client_logger = LogWriter('/app/client_logs.txt')
-        self.is_first_message = True
 
     def _on_shutdown_signal(self):
         logger.info("FilterNode: Señal de shutdown recibida, deteniendo consumo...")
@@ -121,14 +123,17 @@ class FilterNode:
                 body, routing_key, client_id
             )
             
-            if is_eof:
-                return self._handle_eof_message(dto, batch_type, client_id)
+            # if is_eof:
+            #     return self._handle_eof_message(dto, batch_type, client_id)
             
+            if is_eof:
+                self.logger.write_with_timestamp(f"END:{client_id}")
+                return False
+
             if should_stop:
                 return True
                         
             decoded_data = body.decode('utf-8').strip()
-            
             
             if hasattr(self.filter_strategy, 'set_dto_helper'):
                 self.filter_strategy.set_dto_helper(dto)
@@ -143,45 +148,16 @@ class FilterNode:
                 return True
                         
             processed_data = self.node_configurator.process_filtered_data(filtered_csv)
-            self.logger.write(f"[{datetime.now().isoformat()}] Informo que Filtre el mensaje")
+            self.logger.write_with_timestamp(f"Informo que Filtre el mensaje")
             self.node_configurator.send_data(processed_data, self.middlewares, batch_type, client_id=client_id)
-            self.logger.write(f"[{datetime.now().isoformat()}] Informo que encole el mensaje")
+            self.logger.write_with_timestamp(f"Informo que encole el mensaje")
             time.sleep(30)
+            self.logger.write_with_timestamp(f"Termine la iteracion")
             return False
 
         except Exception as e:
             logger.error(f"Error procesando mensaje: {e}")
             return False
-        
-    def _handle_eof_message(self, dto: TransactionBatchDTO, eof_type: str, client_id: Optional[int] = None):
-        try:
-            eof_data = dto.data.strip()
-            if ":" in eof_data:
-                parts = eof_data.split(':')
-                counter = int(parts[-1])  
-            else:
-                counter = 1
-            
-            logger.info(f"EOF recibido: tipo={eof_type}, counter={counter}, total_filters={self.total_filters}, client_id={client_id}")
-            
-            should_stop = self.node_configurator.handle_eof(
-                counter=counter,
-                total_filters=self.total_filters,
-                eof_type=eof_type,
-                middlewares=self.middlewares,
-                input_middleware=self.input_middleware,
-                client_id=client_id
-            )
-            
-            if should_stop:
-                logger.info("Configurador indica que debe cerrarse el nodo")
-            
-            return should_stop
-            
-        except Exception as e:
-            logger.error(f"Error manejando EOF: {e}")
-            return False
-        
         
     def on_message_callback(self, ch, method, properties, body):
         try:
@@ -203,17 +179,15 @@ class FilterNode:
                 self.is_first_message = False
                 last_log = self.logger._get_last_line()
                 logger.info(f"Esto es la ultima linea del logger: {last_log}")
-                self.analize_log(last_log, client_id, message_id)
                 
                 if self.analize_log(last_log, client_id, message_id):
                     logger.info("Mensaje ya procesado, haciendo ACK y continuando")
                     ch.basic_ack(delivery_tag=method.delivery_tag)
-                    self.logger.write(f"[{datetime.now().isoformat()}] Termine la iteracion")
-                    return 
-                 
+                    self.logger.write_with_timestamp(f"Termine la iteracion")
+                    return
+
             self.client_logger.write(f"{client_id};{message_id}")
             should_stop = self.process_message(body, routing_key, client_id)
-            self.logger.write(f"[{datetime.now().isoformat()}] Termine la iteracion")
             ch.basic_ack(delivery_tag=method.delivery_tag)
 
             
@@ -229,18 +203,63 @@ class FilterNode:
         logger.info(f"Analizando log: {log}")
         last_line_client = self.client_logger._get_last_line()
         logger.info(f"Ultima linea del client log: {last_line_client}")
+        last_line_eof = self.eof_logger._get_last_line()
+        logger.info(f"Ultima linea del eof log: {last_line_eof}")
+        
+        client_id = str(client_id) if client_id is not None else ""
+        message_id = str(message_id) if message_id is not None else ""
         
         if not last_line_client or ';' not in last_line_client:
             logger.warning("No hay logs previos válidos")
             return False
         
-        client, id = last_line_client.split(';')
+        client_id_client_log, message_id_client_log = last_line_client.split(';')
+
+        if not last_line_eof or ':' not in last_line_eof:
+            logger.warning("No hay logs previos válidos")
+            return False
+
+        eof_eof_log, client_id_eof_log, batch_type_eof_log = last_line_eof.split(':')
+
+               
+        if "END" in log:
+            if "END" in eof_eof_log:
+                if client_id == client_id_client_log and message_id == message_id_client_log:
+                    return True
+                return False
+            
+            if "EOF" in eof_eof_log:
+                self.node_configurator._on_all_acks_received(client_id_eof_log, batch_type_eof_log)
+                
+                #Esto es de el mensaje de los logs client
+                if client_id == client_id_client_log and message_id == message_id_client_log:
+                    return True
+                
+                return False
+            
+            if "BEF" in eof_eof_log:
+                self.node_configurator.process_message(TransactionBatchDTO("", BatchType.EOF),client_id_eof_log)
+                return False
+            
+        if "EOF" in log:
+            if "END" in eof_eof_log:
+                #De alguna manera llegaron todos los acks, antes de que envie el ack del Primero EOF recibido
+                #Solo falta mandar el ACK del primero EOF recibido
+                if client_id_client_log == client_id_eof_log == client_id and message_id_client_log == message_id:
+                    return True
+                return False
+            
+            if "EOF" in eof_eof_log:
+                self.node_configurator._on_all_acks_received(client_id_eof_log, batch_type_eof_log)
+                #Solo falta mandar el ACK del primero EOF recibido
+                if client_id_client_log == client_id_eof_log == client_id and message_id_client_log == message_id:
+                    return True
+                return 
         
-        client_str = str(client_id) if client_id is not None else ""
-        message_str = str(message_id) if message_id is not None else ""
-        
+            return False
+
         if "Informo que encole el mensaje" in log:
-            if client == client_str and id == message_str:
+            if client_id_client_log == client_id and message_id_client_log == message_id:
                 return True
                 
         if "Informo que Filtre" in log:

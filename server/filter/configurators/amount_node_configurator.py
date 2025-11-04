@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 
 
 class AmountNodeConfigurator(NodeConfigurator):
-    def __init__(self, rabbitmq_host: str):
-        super().__init__(rabbitmq_host)
+    def __init__(self, rabbitmq_host: str, logging_instance, client_logging_instance, eof_logging_instance):
+        super().__init__(rabbitmq_host, logging_instance, client_logging_instance, eof_logging_instance)
         self.node_id = os.getenv('NODE_ID', f'amount_node_{os.getpid()}')
         self.total_nodes = int(os.getenv('TOTAL_AMOUNT_FILTERS', '1'))
         all_node_ids_str = os.getenv('ALL_NODE_IDS', self.node_id)

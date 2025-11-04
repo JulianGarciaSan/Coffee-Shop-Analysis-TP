@@ -43,6 +43,10 @@ class PeerCoordinator:
             route_keys=['coord']
         )
         
+        self.client_logger = None
+        self.logger = None
+        self.eof_logger = None
+        
         logger.info(f"PeerCoordinator inicializado para {node_id}")
         logger.info(f"  Total nodos: {total_nodes}")
         logger.info(f"  Nodos: {all_node_ids}")
@@ -167,15 +171,14 @@ class PeerCoordinator:
         
         if pending_count == 0:
             logger.info(f"Todos los ACKs recibidos para cliente {client_id}. Propagando EOF downstream")
-            
             # Llamar al callback
             callback = self.pending_acks[client_id]['callback']
             batch_type_stored = self.pending_acks[client_id]['batch_type']
             callback(client_id, batch_type_stored)
-            
             # Limpiar estado
             del self.pending_acks[client_id]
             self.leader_clients.discard(client_id)
+            
     
     def handle_eof_fanout_received(self, client_id: str, leader_node: str, batch_type: str):
         """Procesa un EOF_FANOUT recibido"""
@@ -184,6 +187,11 @@ class PeerCoordinator:
             return
         
         logger.info(f"EOF_FANOUT recibido para cliente {client_id} de líder {leader_node}")
+       
+        event = self.eof_events.get(client_id)
+        if not (event is None or not event.is_set()):
+            logger.info(f"Evento ya seteado para el cliente: {client_id}")
+            return
         
         event = threading.Event()
         event.set()
@@ -192,7 +200,7 @@ class PeerCoordinator:
         
         # Iniciar timer de timeout (10 segundos)
         # Si no se procesa ningún mensaje en este tiempo, enviar ACK de todas formas
-        timeout_seconds = 10
+        timeout_seconds = 60
         timer = threading.Timer(
             timeout_seconds,
             self._timeout_ack,
@@ -204,7 +212,14 @@ class PeerCoordinator:
         
         logger.info(f"Event activado para cliente {client_id}. Timer de {timeout_seconds}s iniciado.")
         logger.info(f"Procesaré hasta 1 mensaje más o enviaré ACK cuando expire el timer.")
-    
+
+    def set_loggers(self, logger_instance, client_logger_instance, eof_logger_instance):
+        """Configura los loggers para el coordinador"""
+        self.logger = logger_instance
+        self.client_logger = client_logger_instance
+        self.eof_logger = eof_logger_instance
+        logger.info("Loggers configurados en PeerCoordinator")
+        
     def close(self):
         """Cierra las conexiones"""
         logger.info("Cerrando PeerCoordinator...")

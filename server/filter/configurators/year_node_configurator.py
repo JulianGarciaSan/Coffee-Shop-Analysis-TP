@@ -1,4 +1,5 @@
 from collections import defaultdict
+from datetime import datetime
 import logging
 import os
 import threading
@@ -11,8 +12,8 @@ logger = logging.getLogger(__name__)
 
 
 class YearNodeConfigurator(NodeConfigurator):
-    def __init__(self, rabbitmq_host: str):
-        super().__init__(rabbitmq_host)
+    def __init__(self, rabbitmq_host: str, logging_instance, client_logging_instance, eof_logging_instance):
+        super().__init__(rabbitmq_host, logging_instance, client_logging_instance, eof_logging_instance)
         self.file_mode = os.getenv('FILE_MODE', 'transactions')
         
 
@@ -55,13 +56,13 @@ class YearNodeConfigurator(NodeConfigurator):
                 host=rabbitmq_host,
                 exchange_name='groupby_input.exchange',
                 route_keys=groupby_routes
-            )
-        
+            )       
         self._start_coordination_thread()
         
         logger.info(f"YearNodeConfigurator inicializado con coordinación multi-cliente")
         logger.info(f"  Node ID: {self.node_id}")
         logger.info(f"  Total nodos: {self.total_nodes}")
+        
     
     def _start_coordination_thread(self):
         self.coordination_running = True
@@ -91,14 +92,15 @@ class YearNodeConfigurator(NodeConfigurator):
                     msg.node_id,
                     msg.batch_type_str
                 )
-            
+                self.logger.write_with_timestamp(f"Informo que recibí el FANOUT de EOF para {msg.client_id}")
+
             elif msg.msg_type == CoordinationMessageDTO.ACK:
                 self.coordinator.handle_ack_received(
                     msg.client_id,
                     msg.node_id,
                     msg.batch_type_str
                 )
-            
+                self.logger.write_with_timestamp(f"Informo que recibí el ACK de {msg.node_id} para {msg.client_id}")
             else:
                 logger.warning(f"Tipo de mensaje desconocido: {msg.msg_type}")
         
@@ -130,8 +132,11 @@ class YearNodeConfigurator(NodeConfigurator):
         
         if decoded_data.startswith("EOF:"):
             logger.info(f"EOF recibido para cliente {client_id_str}")
-            
+
             batch_type = 'transactions' if self.file_mode == 'transactions' else 'transaction_items'
+            self.logger.write_with_timestamp(f"EOF:{client_id_str}")
+            self.eof_logger.write_with_timestamp(f"BEF:{client_id_str}:{batch_type}")
+
             self.coordinator.take_leadership(
                 client_id_str, 
                 batch_type,
@@ -143,7 +148,7 @@ class YearNodeConfigurator(NodeConfigurator):
             else:
                 dto = TransactionItemBatchDTO(decoded_data, BatchType.EOF)
             
-            return (False, batch_type, dto, False)
+            return (False, batch_type, dto, True)
         
         if not self.coordinator.should_process_message(client_id_str):
             logger.info(f"Cliente {client_id_str} ya finalizó, ignorando mensaje")
@@ -219,7 +224,9 @@ class YearNodeConfigurator(NodeConfigurator):
 
     def _on_all_acks_received(self, client_id: str, batch_type: str):
         logger.info(f"Todos los ACKs recibidos para cliente {client_id}, propagando EOF downstream")
-        
+
+        self.eof_logger.write_with_timestamp(f"EOF:{client_id}:{batch_type}")
+
         if self.output_middlewares is None:
             logger.error("output_middlewares no está configurado")
             return
@@ -231,6 +238,8 @@ class YearNodeConfigurator(NodeConfigurator):
         else:
             self.send_eof(self.output_middlewares, "transaction_items", client_id=client_id_int)
 
+        self.eof_logger.write_with_timestamp(f"END:{client_id}:{batch_type}")
+        
     def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None):
         headers = self.create_headers(client_id)
         
@@ -258,41 +267,6 @@ class YearNodeConfigurator(NodeConfigurator):
         logger.warning("handle_eof llamado pero ya no se usa (coordinador maneja EOF)")
         return False
     
-    # def _send_transaction_items_by_year(self, data: str, q2_middleware, client_id: Optional[int] = None):
-    #     headers = self.create_headers(client_id)
-    #     lines = data.strip().split('\n')
-    #     header = lines[0] if lines else ""
-        
-    #     logger.info(f"Procesando {len(lines)} líneas de TransactionItems para Q2")
-        
-    #     data_by_year = {'2024': [header], '2025': [header]}
-    #     dto_helper = TransactionItemBatchDTO("", BatchType.RAW_CSV)
-        
-    #     for line in lines[1:]:
-    #         if not line.strip():
-    #             continue
-                
-    #         try:
-    #             created_at = dto_helper.get_column_value(line, 'created_at')
-    #             if created_at and len(created_at) >= 4:
-    #                 year = created_at[:4]
-    #                 if year in data_by_year:
-    #                     data_by_year[year].append(line)
-    #             else:
-    #                 logger.warning(f"Created_at inválido: '{created_at}' en línea: {line[:50]}...")
-    #         except Exception as e:
-    #             logger.warning(f"Error procesando línea TransactionItem para Q2: {e}")
-    #             continue
-        
-    #     for year, year_lines in data_by_year.items():
-    #         if len(year_lines) > 1:
-    #             year_csv = '\n'.join(year_lines)
-    #             year_dto = TransactionItemBatchDTO(year_csv, batch_type=BatchType.RAW_CSV)
-    #             q2_middleware.send(year_dto.to_bytes_fast(), routing_key=year, headers=headers)
-    #             logger.info(f"TransactionItemBatchDTO enviado a Q2 con routing key {year}: {len(year_lines)-1} líneas")
-    #         else:
-    #             logger.info(f"No hay datos para año {year} - solo header")
-                
     def _send_transaction_items_by_year(self, data: str, client_id: str):
         lines = data.strip().split('\n')
         header = lines[0] if lines else "created_at,transaction_id,item_id,quantity,subtotal"
@@ -362,8 +336,7 @@ class YearNodeConfigurator(NodeConfigurator):
                 )
         
         logger.info(f"EOF enviado a TODOS los nodos GroupBy para cliente {client_id}")
-        
-    
+            
     def close(self):
         """Cleanup del configurator"""
         logger.info("Cerrando YearNodeConfigurator...")
