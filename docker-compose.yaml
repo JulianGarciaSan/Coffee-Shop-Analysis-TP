@@ -133,9 +133,9 @@ services:
       - ALL_NODE_IDS=year_node_1,year_node_2,year_node_3
     volumes:
       - ./server/config.ini:/app/config.ini
-      - ./server/logs.txt:/app/logs.txt
-      - ./server/client_logs.txt:/app/client_logs.txt
-      - ./server/eof_logs.txt:/app/eof_logs.txt
+      - ./server/logs/filter_year_1/logs.txt:/app/logs.txt
+      - ./server/logs/filter_year_1/client_logs.txt:/app/client_logs.txt
+      - ./server/logs/filter_year_1/eof_logs.txt:/app/eof_logs.txt
 
   filter_year_2:
     build:
@@ -161,6 +161,10 @@ services:
       - ALL_NODE_IDS=year_node_1,year_node_2,year_node_3
     volumes:
       - ./server/config.ini:/app/config.ini
+      - ./server/logs/filter_year_2/logs.txt:/app/logs.txt
+      - ./server/logs/filter_year_2/client_logs.txt:/app/client_logs.txt
+      - ./server/logs/filter_year_2/eof_logs.txt:/app/eof_logs.txt
+      
 
   filter_year_3:
     build:
@@ -186,6 +190,9 @@ services:
       - ALL_NODE_IDS=year_node_1,year_node_2,year_node_3
     volumes:
       - ./server/config.ini:/app/config.ini
+      - ./server/logs/filter_year_3/logs.txt:/app/logs.txt
+      - ./server/logs/filter_year_3/client_logs.txt:/app/client_logs.txt
+      - ./server/logs/filter_year_3/eof_logs.txt:/app/eof_logs.txt
 
   # filter_year_4:
   #   build:

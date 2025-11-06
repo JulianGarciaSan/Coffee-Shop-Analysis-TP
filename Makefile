@@ -17,20 +17,38 @@ docker-image:
 build: docker-image
 .PHONY: build
 
-#Levanta todo el sistema CON logs visibles en la terminal
+# Levanta todo el sistema CON logs visibles en la terminal
 start: docker-image
 	docker compose -f docker-compose.yaml up --build -d
-.PHONY: docker-compose-up
+.PHONY: start
 
 stop:
 	docker compose -f docker-compose.yaml stop -t 30
 	docker compose -f docker-compose.yaml down
-	sudo cp server/client_logs.txt server/clients_logs_backup.txt || true
-	sudo cp server/logs.txt server/logs_backup.txt || true
-	sudo cp server/eof_logs.txt server/eof_logs_backup.txt || true
-	echo -n > server/client_logs.txt
-	echo -n > server/logs.txt
-	echo -n > server/eof_logs.txt
+	# Backup de logs de filter_year_1
+	sudo cp server/logs/filter_year_1/client_logs.txt server/logs/filter_year_1/client_logs_backup.txt || true
+	sudo cp server/logs/filter_year_1/logs.txt server/logs/filter_year_1/logs_backup.txt || true
+	sudo cp server/logs/filter_year_1/eof_logs.txt server/logs/filter_year_1/eof_logs_backup.txt || true
+	# Backup de logs de filter_year_2
+	sudo cp server/logs/filter_year_2/client_logs.txt server/logs/filter_year_2/client_logs_backup.txt || true
+	sudo cp server/logs/filter_year_2/logs.txt server/logs/filter_year_2/logs_backup.txt || true
+	sudo cp server/logs/filter_year_2/eof_logs.txt server/logs/filter_year_2/eof_logs_backup.txt || true
+	# Backup de logs de filter_year_3
+	sudo cp server/logs/filter_year_3/client_logs.txt server/logs/filter_year_3/client_logs_backup.txt || true
+	sudo cp server/logs/filter_year_3/logs.txt server/logs/filter_year_3/logs_backup.txt || true
+	sudo cp server/logs/filter_year_3/eof_logs.txt server/logs/filter_year_3/eof_logs_backup.txt || true
+	# Limpiar logs de filter_year_1
+	echo -n > server/logs/filter_year_1/client_logs.txt
+	echo -n > server/logs/filter_year_1/logs.txt
+	echo -n > server/logs/filter_year_1/eof_logs.txt
+	# Limpiar logs de filter_year_2
+	echo -n > server/logs/filter_year_2/client_logs.txt
+	echo -n > server/logs/filter_year_2/logs.txt
+	echo -n > server/logs/filter_year_2/eof_logs.txt
+	# Limpiar logs de filter_year_3
+	echo -n > server/logs/filter_year_3/client_logs.txt
+	echo -n > server/logs/filter_year_3/logs.txt
+	echo -n > server/logs/filter_year_3/eof_logs.txt
 .PHONY: stop
 
 # Limpieza profunda (usar solo cuando realmente quieras limpiar todo)
@@ -42,8 +60,10 @@ clean-all: stop
 	docker builder prune -f
 	docker volume prune -f
 	sudo rm -rf report*
+	sudo rm -rf server/logs/filter_year_1/*
+	sudo rm -rf server/logs/filter_year_2/*
+	sudo rm -rf server/logs/filter_year_3/*
 .PHONY: clean-all
-
 
 logs:
 	docker compose -f docker-compose.yaml logs -f

@@ -1,0 +1,5 @@
+
+[2025-11-06 18:20:00.810] EOF:0
+[2025-11-06 18:20:00.813] Informo que recibí el FANOUT de EOF para 0
+[2025-11-06 18:20:00.820] END:0
+[2025-11-06 18:21:00.818] Informo que recibí el ACK de year_node_2 para 0

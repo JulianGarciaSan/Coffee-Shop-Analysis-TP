@@ -1,7 +1,0 @@
-
-[2025-11-01 23:15:52.975] Informo que Filtre el mensaje
-[2025-11-01 23:15:52.976] Informo que encole el mensaje
-[2025-11-01 23:15:52.983] Informo que recibí el FANOUT de EOF para 0
-[2025-11-01 23:16:23.006] Termine la iteracion
-[2025-11-01 23:16:52.987] Informo que recibí el ACK de year_node_2 para 0
-[2025-11-01 23:16:52.993] Informo que recibí el ACK de year_node_1 para 0

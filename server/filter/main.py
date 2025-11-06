@@ -151,7 +151,7 @@ class FilterNode:
             self.logger.write_with_timestamp(f"Informo que Filtre el mensaje")
             self.node_configurator.send_data(processed_data, self.middlewares, batch_type, client_id=client_id)
             self.logger.write_with_timestamp(f"Informo que encole el mensaje")
-            time.sleep(30)
+            # time.sleep(30)
             self.logger.write_with_timestamp(f"Termine la iteracion")
             return False
 
