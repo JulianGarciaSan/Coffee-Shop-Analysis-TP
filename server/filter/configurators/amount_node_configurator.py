@@ -2,7 +2,7 @@ import logging
 import os
 import threading
 from typing import Optional, Dict, Any
-from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
+from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue, MessageMiddlewareQueueManual
 from dtos.dto import TransactionBatchDTO, BatchType, CoordinationMessageDTO
 from .base_configurator import NodeConfigurator
 from coordinator.coordinator import PeerCoordinator 
@@ -89,7 +89,7 @@ class AmountNodeConfigurator(NodeConfigurator):
     def create_input_middleware(self, input_queue: str, node_id: str):
         logger.info(f"AmountNode: Usando working queue compartida '{input_queue}'")
         
-        return MessageMiddlewareQueue(
+        return MessageMiddlewareQueueManual(
             host=self.rabbitmq_host,
             queue_name=input_queue
         )

@@ -25,6 +25,7 @@ start: docker-image
 stop:
 	docker compose -f docker-compose.yaml stop -t 30
 	docker compose -f docker-compose.yaml down
+	sudo rm -rf report*
 	# Backup de logs de filter_year_1
 	sudo cp server/logs/filter_year_1/client_logs.txt server/logs/filter_year_1/client_logs_backup.txt || true
 	sudo cp server/logs/filter_year_1/logs.txt server/logs/filter_year_1/logs_backup.txt || true

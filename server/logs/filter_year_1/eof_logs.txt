@@ -1,4 +1,0 @@
-
-[2025-11-06 18:38:30.316] BEF:0:transactions
-[2025-11-06 18:39:30.328] EOF:0:transactions
-[2025-11-06 18:39:30.329] END:0:transactions

@@ -178,7 +178,7 @@ class FilterNode:
             if self.is_first_message:
                 self.is_first_message = False
                 last_log = self.logger._get_last_line()
-                logger.info(f"Esto es la ultima linea del logger: {last_log}")
+                # logger.info(f"Esto es la ultima linea del logger: {last_log}")
                 
                 if self.analize_log(last_log, client_id, message_id):
                     logger.info("Mensaje ya procesado, haciendo ACK y continuando")
@@ -199,8 +199,32 @@ class FilterNode:
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
 
 
+    def pre_analyze_eof_log(self):
+        logger.info(f"Analizando EOF log en pre_analyze_eof_log")
+        last_line = self.eof_logger._get_last_line()
+        logger.info(f"Ultima linea del eof log: {last_line}")
+        
+        if not last_line or ':' not in last_line:
+            logger.warning("No hay logs EOF previos válidos")
+            return False
+        
+        parts = last_line.split(':', 2)
+        eof_status = parts[0] if len(parts) > 0 else ""
+        client_id_eof_log = parts[1] if len(parts) > 1 else ""
+        batch_type_eof_log = parts[2] if len(parts) > 2 else ""
+        
+        if "EOF" in eof_status:
+            self.node_configurator._on_all_acks_received(client_id_eof_log, batch_type_eof_log)
+            return False
+
+        if "BEF" in eof_status:
+            self.node_configurator.process_message(TransactionBatchDTO("", BatchType.EOF),client_id_eof_log)
+            return False
+
+        return True
+    
     def analize_log(self, log, client_id, message_id):
-        logger.info(f"Analizando log: {log}")
+        logger.info(f"Analizando log en analize_log: {log}")
         last_line_client = self.client_logger._get_last_line()
         logger.info(f"Ultima linea del client log: {last_line_client}")
         last_line_eof = self.eof_logger._get_last_line()
@@ -270,9 +294,8 @@ class FilterNode:
 
     def start(self):
         try:
-            logger.info(f"Esto es la ultima linea del logger: {self.logger._get_last_line()}")
-
             logger.info("Iniciando consumo de mensajes...")
+            self.is_first_message = self.pre_analyze_eof_log()
             self.input_middleware.start_consuming(self.on_message_callback)
         except KeyboardInterrupt:
             logger.info("Filtro detenido manualmente")

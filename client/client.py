@@ -20,7 +20,7 @@ class Client:
         self.client_socket = None
         self.protocol = None  
         self.processor = None
-        self.expected_reports = 5
+        self.expected_reports = 1
 
     def _on_shutdown_signal(self):
         logger.info("Señal de shutdown recibida en Client")

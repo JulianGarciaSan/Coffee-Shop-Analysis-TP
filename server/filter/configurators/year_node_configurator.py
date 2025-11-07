@@ -3,6 +3,7 @@ from datetime import datetime
 import logging
 import os
 import threading
+import time
 from typing import Optional, Dict, Any
 from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange, MessageMiddlewareQueueManual
 from dtos.dto import TransactionBatchDTO, TransactionItemBatchDTO, BatchType, CoordinationMessageDTO
@@ -135,7 +136,7 @@ class YearNodeConfigurator(NodeConfigurator):
 
             batch_type = 'transactions' if self.file_mode == 'transactions' else 'transaction_items'
             self.logger.write_with_timestamp(f"EOF:{client_id_str}")
-            self.eof_logger.write_with_timestamp(f"BEF:{client_id_str}:{batch_type}")
+            self.eof_logger.write(f"BEF:{client_id_str}:{batch_type}")
 
             self.coordinator.take_leadership(
                 client_id_str, 
@@ -171,7 +172,7 @@ class YearNodeConfigurator(NodeConfigurator):
         middlewares = {}
 
         if output_q1:
-            middlewares['q1'] = MessageMiddlewareQueue(
+            middlewares['q1'] = MessageMiddlewareQueueManual(
                 host=self.rabbitmq_host,
                 queue_name=output_q1
             )
@@ -225,8 +226,10 @@ class YearNodeConfigurator(NodeConfigurator):
     def _on_all_acks_received(self, client_id: str, batch_type: str):
         logger.info(f"Todos los ACKs recibidos para cliente {client_id}, propagando EOF downstream")
 
-        self.eof_logger.write_with_timestamp(f"EOF:{client_id}:{batch_type}")
+        self.eof_logger.write(f"EOF:{client_id}:{batch_type}")
 
+        # time.sleep(100)
+        
         if self.output_middlewares is None:
             logger.error("output_middlewares no está configurado")
             return
@@ -238,7 +241,7 @@ class YearNodeConfigurator(NodeConfigurator):
         else:
             self.send_eof(self.output_middlewares, "transaction_items", client_id=client_id_int)
 
-        self.eof_logger.write_with_timestamp(f"END:{client_id}:{batch_type}")
+        self.eof_logger.write(f"END:{client_id}:{batch_type}")
         
     def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None):
         headers = self.create_headers(client_id)

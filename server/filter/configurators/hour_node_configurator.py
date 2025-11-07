@@ -4,7 +4,7 @@ import logging
 import os
 import threading
 from typing import Optional, Dict, Any
-from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
+from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange, MessageMiddlewareQueueManual
 from dtos.dto import TransactionBatchDTO, BatchType, CoordinationMessageDTO
 from .base_configurator import NodeConfigurator
 from coordinator.coordinator import PeerCoordinator 
@@ -91,7 +91,7 @@ class HourNodeConfigurator(NodeConfigurator):
     def create_input_middleware(self, input_queue: str, node_id: str):
         logger.info(f"HourNode: Usando working queue compartida '{input_queue}'")
         
-        return MessageMiddlewareQueue(
+        return MessageMiddlewareQueueManual(
             host=self.rabbitmq_host,
             queue_name=input_queue
         )
@@ -102,7 +102,7 @@ class HourNodeConfigurator(NodeConfigurator):
         logger.info(f"Configurando middlewares de salida para HourNodeConfigurator {output_q1}, {output_q3}")
 
         if output_q1:
-            middlewares['q1'] = MessageMiddlewareQueue(
+            middlewares['q1'] = MessageMiddlewareQueueManual(
                 host=self.rabbitmq_host,
                 queue_name=output_q1
             )

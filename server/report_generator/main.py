@@ -44,10 +44,10 @@ class ReportGenerator:
             self.publisher.shutdown = self.shutdown
             
         self.expected_queries = {'q1': 1,     
-                                 'q3': 1,      
-                                 'q4': 2,      
-                                 'q2_most_profit': 1,   
-                                 'q2_best_selling': 1   
+                                #  'q3': 1,      
+                                #  'q4': 2,      
+                                #  'q2_most_profit': 1,   
+                                #  'q2_best_selling': 1   
                                 }
         
         self.csv_files = {}  

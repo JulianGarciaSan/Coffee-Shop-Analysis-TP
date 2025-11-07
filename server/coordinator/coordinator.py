@@ -200,7 +200,7 @@ class PeerCoordinator:
         
         # Iniciar timer de timeout (10 segundos)
         # Si no se procesa ningún mensaje en este tiempo, enviar ACK de todas formas
-        timeout_seconds = 60
+        timeout_seconds = 10
         timer = threading.Timer(
             timeout_seconds,
             self._timeout_ack,
