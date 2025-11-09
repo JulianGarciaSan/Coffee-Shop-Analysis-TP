@@ -7,6 +7,7 @@ import threading
 from typing import Optional
 from rabbitmq.middleware import MessageMiddlewareQueue
 from logger_monitor import LoggerMonitor
+from healthchecker.healthchecker import HealthChecker
 from strategies import FilterStrategyFactory
 from configurators import NodeConfiguratorFactory
 from dtos.dto import TransactionBatchDTO, TransactionItemBatchDTO, BatchType, FileType
@@ -78,6 +79,10 @@ class FilterNode:
         for name, middleware in self.middlewares.items():
             if middleware and hasattr(middleware, 'shutdown'):
                 middleware.shutdown = self.shutdown
+                
+        health_port = int(os.getenv('HEALTH_PORT', '9999'))
+        self.health_server = HealthChecker(port=health_port)
+        self.health_server.start()
 
     def _on_shutdown_signal(self):
         logger.info("FilterNode: Señal de shutdown recibida, deteniendo consumo...")
@@ -326,7 +331,12 @@ class FilterNode:
                         logger.info(f"Middleware '{name}' cerrado")
                     except Exception as e:
                         logger.error(f"Error cerrando middleware '{name}': {e}")
-                
+             
+            if self.health_server:
+                self.health_server.stop()
+                self.health_server.join(timeout=5.0)
+                logger.info("HealthChecker detenido")
+                   
         except Exception as e:
             logger.error(f"Error durante cleanup: {e}")
 

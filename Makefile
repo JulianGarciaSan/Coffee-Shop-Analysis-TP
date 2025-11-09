@@ -92,3 +92,8 @@ restart-%:
 	sleep 2
 	docker compose -f docker-compose.yaml start $*
 .PHONY: restart-%
+
+# Restart specific service
+down-%:
+	docker compose -f docker-compose.yaml stop $*
+.PHONY: down-%

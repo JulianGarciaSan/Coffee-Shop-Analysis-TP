@@ -15,6 +15,26 @@ services:
       - RABBITMQ_DEFAULT_USER=admin
       - RABBITMQ_DEFAULT_PASS=admin
 
+  watchdog:
+    build:
+      context: .
+      dockerfile: ./server/watchdog/Dockerfile
+    container_name: watchdog
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - HOST_IP=host.docker.internal
+      - PYTHONUNBUFFERED=1
+      - CHECK_INTERVAL=10
+      - MAX_FAILURES=3
+      - PING_TIMEOUT=2.0
+      - STARTUP_DELAY=15
+      - MONITORED_NODES=filter_year_1:9999,filter_year_2:9999,filter_year_3:9999,filter_hour_1:9999,filter_hour_2:9999,filter_hour_3:9999,filter_amount_1:9999,filter_amount_2:9999,filter_amount_3:9999
+    depends_on:
+      gateway:
+        condition: service_started
+
   client_1:
     build:
       context: .
@@ -115,6 +135,8 @@ services:
       dockerfile: ./server/filter/Dockerfile
     container_name: filter_year_1
     restart: on-failure
+    ports:
+      - "19991:9999"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -143,6 +165,8 @@ services:
       dockerfile: ./server/filter/Dockerfile
     container_name: filter_year_2
     restart: on-failure
+    ports:
+      - "19992:9999"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -172,6 +196,8 @@ services:
       dockerfile: ./server/filter/Dockerfile
     container_name: filter_year_3
     restart: on-failure
+    ports:
+      - "19993:9999"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -278,6 +304,8 @@ services:
       dockerfile: ./server/filter/Dockerfile
     container_name: filter_hour_1
     restart: on-failure
+    ports:
+      - "19994:9999"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -301,6 +329,8 @@ services:
       dockerfile: ./server/filter/Dockerfile
     container_name: filter_hour_2
     restart: on-failure
+    ports:
+      - "19995:9999"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -323,6 +353,8 @@ services:
       context: .
       dockerfile: ./server/filter/Dockerfile
     container_name: filter_hour_3
+    ports:
+      - "19996:9999"
     restart: on-failure
     depends_on:
       rabbitmq:
@@ -391,6 +423,8 @@ services:
       dockerfile: ./server/filter/Dockerfile
     container_name: filter_amount_1
     restart: on-failure
+    ports:
+      - "19997:9999"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -413,6 +447,8 @@ services:
       dockerfile: ./server/filter/Dockerfile
     container_name: filter_amount_2
     restart: on-failure
+    ports:
+      - "19998:9999"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -434,6 +470,8 @@ services:
       context: .
       dockerfile: ./server/filter/Dockerfile
     container_name: filter_amount_3
+    ports:
+      - "19999:9999"
     restart: on-failure
     depends_on:
       rabbitmq:
@@ -457,6 +495,8 @@ services:
       dockerfile: ./server/report_generator/Dockerfile
     container_name: report_generator
     restart: on-failure
+    ports:
+      - "19990:9999"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -917,4 +957,3 @@ services:
   #     - TOTAL_GROUPBY_NODES=1
   #   volumes:
   #     - ./server/config.ini:/app/config.ini
-
