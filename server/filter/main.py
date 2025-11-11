@@ -12,6 +12,7 @@ from strategies import FilterStrategyFactory
 from configurators import NodeConfiguratorFactory
 from dtos.dto import TransactionBatchDTO, TransactionItemBatchDTO, BatchType, FileType
 from common.graceful_shutdown import GracefulShutdown  
+from consensus_node import ConsensusNode
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class FilterNode:
         self.output_q4 = os.getenv('OUTPUT_Q4', None)
         self.filter_mode = os.getenv('FILTER_MODE', 'year')
         self.input_exchange = os.getenv('INPUT_EXCHANGE', None)
+
         
         total_env_var = f'TOTAL_{self.filter_mode.upper()}_FILTERS'
         self.total_filters = int(os.getenv(total_env_var, '1'))
@@ -83,6 +85,8 @@ class FilterNode:
         health_port = int(os.getenv('HEALTH_PORT', '9999'))
         self.health_server = HealthChecker(port=health_port)
         self.health_server.start()
+        
+
 
     def _on_shutdown_signal(self):
         logger.info("FilterNode: Señal de shutdown recibida, deteniendo consumo...")
@@ -119,13 +123,13 @@ class FilterNode:
         
         return "default"
 
-    def process_message(self, body: bytes, routing_key: str = None, client_id: int = None):
+    def process_message(self, body: bytes, routing_key: str = None, client_id: int = None,message_id:int = None):
         if self.shutdown.is_shutting_down():
             logger.warning("Shutdown en progreso, ignorando mensaje")
         
         try:
             should_stop, batch_type, dto, is_eof = self.node_configurator.process_message(
-                body, routing_key, client_id
+                body, routing_key, client_id, message_id
             )
             
             # if is_eof:
@@ -154,7 +158,7 @@ class FilterNode:
                         
             processed_data = self.node_configurator.process_filtered_data(filtered_csv)
             self.logger.write_with_timestamp(f"Informo que Filtre el mensaje")
-            self.node_configurator.send_data(processed_data, self.middlewares, batch_type, client_id=client_id)
+            self.node_configurator.send_data(processed_data, self.middlewares, batch_type, client_id=client_id,message_id=message_id)
             self.logger.write_with_timestamp(f"Informo que encole el mensaje")
             # time.sleep(30)
             self.logger.write_with_timestamp(f"Termine la iteracion")
@@ -166,13 +170,14 @@ class FilterNode:
         
     def on_message_callback(self, ch, method, properties, body):
         try:
-            logging.info("Mensaje recibido en FilterNode")
+            #logging.info("Mensaje recibido en FilterNode")
             if self.shutdown.is_shutting_down():
                 logger.warning("Shutdown solicitado, deteniendo consumo")
                 ch.stop_consuming()
                 return
             
             client_id = None
+            message_id = None
             if properties and properties.headers:
                 client_id = properties.headers.get('client_id')
                 message_id = properties.headers.get('message_id')
@@ -192,7 +197,9 @@ class FilterNode:
                     return
 
             self.client_logger.write(f"{client_id};{message_id}")
-            should_stop = self.process_message(body, routing_key, client_id)
+            logging.info("Mensaje recibido en FilterNode")
+            should_stop = self.process_message(body, routing_key, client_id,message_id)
+            time.sleep(30)
             ch.basic_ack(delivery_tag=method.delivery_tag)
 
             

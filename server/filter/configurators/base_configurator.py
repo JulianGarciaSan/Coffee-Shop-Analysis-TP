@@ -22,11 +22,11 @@ class NodeConfigurator(ABC):
         pass
     
     @abstractmethod
-    def send_data(self, data: str, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None):
+    def send_data(self, data: str, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None, message_id:Optional[int]=None):
         pass
     
     @abstractmethod
-    def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None):
+    def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None,message_id:Optional[int]=None):
         pass
     
     @abstractmethod
@@ -39,16 +39,19 @@ class NodeConfigurator(ABC):
         pass
     
     @abstractmethod
-    def process_message(self, body: bytes, routing_key: str = None, client_id: Optional[int] = None) -> tuple:
+    def process_message(self, body: bytes, routing_key: str = None, client_id: Optional[int] = None, message_id: Optional[int] = None) -> tuple:
         pass
     
     def extract_client_id(self, properties) -> Optional[int]:
         if properties and properties.headers:
             return properties.headers.get('client_id')
         return None
-    
-    def create_headers(self, client_id: Optional[int]) -> Dict[str, Any]:
-        if client_id is not None:
-            return {'client_id': client_id}
+
+    def create_headers(self, client_id: Optional[int], message_id: Optional[int]) -> Dict[str, Any]:
+        headers = {}
+        if client_id is not None and message_id is not None:
+            return {'client_id': client_id,
+                    'message_id': message_id
+                    }
         return {}
 

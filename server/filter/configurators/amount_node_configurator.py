@@ -114,16 +114,18 @@ class AmountNodeConfigurator(NodeConfigurator):
     def process_filtered_data(self, filtered_csv: str) -> str:
         return self._extract_q1_columns(filtered_csv)
     
-    def process_message(self, body: bytes, routing_key: str = None, client_id: Optional[int] = None) -> tuple:
+    def process_message(self, body: bytes, routing_key: str = None, client_id: Optional[int] = None,message_id: Optional[int] = None) -> tuple:
         decoded_data = body.decode('utf-8').strip()
         
         client_id_str = str(client_id) if client_id is not None else "default"
+        message_id_str = str(message_id) if message_id is not None else "default"
         
         if decoded_data.startswith("EOF:"):
             logger.info(f"EOF recibido para cliente {client_id_str}")
             
             self.coordinator.take_leadership(
                 client_id_str, 
+                message_id_str,
                 'transactions',
                 self._on_all_acks_received
             )
@@ -138,10 +140,10 @@ class AmountNodeConfigurator(NodeConfigurator):
         
         dto = TransactionBatchDTO(decoded_data, BatchType.RAW_CSV)
         return (False, 'transactions', dto, False)
-    
-    def send_data(self, data: str, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None):
-        headers = self.create_headers(client_id)
-        
+
+    def send_data(self, data: str, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None, message_id: Optional[int] = None):
+        headers = self.create_headers(client_id, message_id)
+
         if client_id:
             client_id_str = str(client_id)
             if self.coordinator.should_send_ack_after_processing(client_id_str):
@@ -156,7 +158,7 @@ class AmountNodeConfigurator(NodeConfigurator):
             )
             logger.debug(f"Datos enviados a Q1 exchange con routing key 'q1.data'")
 
-    def _on_all_acks_received(self, client_id: str, batch_type: str):
+    def _on_all_acks_received(self, client_id: str,message_id: str, batch_type: str):
         logger.info(f"Todos los ACKs recibidos para cliente {client_id}, propagando EOF downstream")
         
         if self.output_middlewares is None:
@@ -164,15 +166,16 @@ class AmountNodeConfigurator(NodeConfigurator):
             return
         
         client_id_int = int(client_id) if client_id.isdigit() else None
-        self.send_eof(self.output_middlewares, "transactions", client_id=client_id_int)
+        message_id_int = int(message_id) if message_id.isdigit() else None
+        self.send_eof(self.output_middlewares, "transactions", client_id=client_id_int,message_id=message_id_int)
 
-    def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None):
+    def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None,message_id: Optional[int] = None):
         if 'q1' in middlewares:
             eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
             middlewares['q1'].send(
                 eof_dto.to_bytes_fast(),
                 routing_key='q1.data',
-                headers=self.create_headers(client_id)
+                headers=self.create_headers(client_id,message_id)
             )
             logger.info(f"EOF enviado a Q1 (report exchange) para cliente {client_id}")
 

@@ -14,6 +14,8 @@ services:
     environment:
       - RABBITMQ_DEFAULT_USER=admin
       - RABBITMQ_DEFAULT_PASS=admin
+    # networks:
+    #   - coffee_network
 
   watchdog:
     build:
@@ -153,6 +155,7 @@ services:
       - FILE_MODE=transactions
       - NODE_ID=year_node_1
       - ALL_NODE_IDS=year_node_1,year_node_2,year_node_3
+
     volumes:
       - ./server/config.ini:/app/config.ini
       - ./server/logs/filter_year_1/logs.txt:/app/logs.txt
@@ -311,6 +314,7 @@ services:
         condition: service_healthy
     environment:
       - PYTHONUNBUFFERED=1
+      - HOST_IP=host.docker.internal
       - RABBITMQ_HOST=rabbitmq
       - FILTER_MODE=hour
       - INPUT_QUEUE=year_filtered
@@ -320,8 +324,17 @@ services:
       - OUTPUT_Q3=groupby.join.exchange
       - NODE_ID=hour_node_1
       - ALL_NODE_IDS=hour_node_1,hour_node_2,hour_node_3
+      - LEADER_ID=hour_node_1
+      - NODE_ADDRESSES=filter_hour_1:5000,filter_hour_2:5001,filter_hour_3:5002
     volumes:
       - ./server/config.ini:/app/config.ini
+      - ./server/logs/filter_hour_1/logs.txt:/app/logs.txt
+      - ./server/logs/filter_hour_1/client_logs.txt:/app/client_logs.txt
+      - ./server/logs/filter_hour_1/eof_logs.txt:/app/eof_logs.txt
+      - ./server/logs/filter_hour_1/message_logs.txt:/app/message_logs.txt
+    # networks:
+    #   - coffee_network
+
 
   filter_hour_2:
     build:
@@ -336,6 +349,7 @@ services:
         condition: service_healthy
     environment:
       - PYTHONUNBUFFERED=1
+      - HOST_IP=host.docker.internal
       - RABBITMQ_HOST=rabbitmq
       - FILTER_MODE=hour
       - INPUT_QUEUE=year_filtered
@@ -345,8 +359,17 @@ services:
       - OUTPUT_Q3=groupby.join.exchange
       - NODE_ID=hour_node_2
       - ALL_NODE_IDS=hour_node_1,hour_node_2,hour_node_3
+      - LEADER_ID=hour_node_1
+      - NODE_ADDRESSES=filter_hour_1:5000,filter_hour_2:5001,filter_hour_3:5002
     volumes:
       - ./server/config.ini:/app/config.ini
+      - ./server/logs/filter_hour_2/logs.txt:/app/logs.txt
+      - ./server/logs/filter_hour_2/client_logs.txt:/app/client_logs.txt
+      - ./server/logs/filter_hour_2/eof_logs.txt:/app/eof_logs.txt
+      - ./server/logs/filter_hour_2/message_logs.txt:/app/message_logs.txt
+    # networks:
+    #   - coffee_network
+
 
   filter_hour_3:
     build:
@@ -361,6 +384,7 @@ services:
         condition: service_healthy
     environment:
       - PYTHONUNBUFFERED=1
+      - HOST_IP=host.docker.internal
       - RABBITMQ_HOST=rabbitmq
       - FILTER_MODE=hour
       - INPUT_QUEUE=year_filtered
@@ -370,8 +394,17 @@ services:
       - OUTPUT_Q3=groupby.join.exchange
       - NODE_ID=hour_node_3
       - ALL_NODE_IDS=hour_node_1,hour_node_2,hour_node_3
+      - LEADER_ID=hour_node_1
+      - NODE_ADDRESSES=filter_hour_1:5000,filter_hour_2:5001,filter_hour_3:5002
     volumes:
       - ./server/config.ini:/app/config.ini
+      - ./server/logs/filter_hour_3/logs.txt:/app/logs.txt
+      - ./server/logs/filter_hour_3/client_logs.txt:/app/client_logs.txt
+      - ./server/logs/filter_hour_3/eof_logs.txt:/app/eof_logs.txt
+      - ./server/logs/filter_hour_3/message_logs.txt:/app/message_logs.txt
+    # networks:
+    #   - coffee_network
+
 
   # groupby_semester_1:
   #   build:
@@ -508,6 +541,11 @@ services:
     volumes:
       - ./server/config.ini:/app/config.ini
       - ./reports:/app/reports
+
+networks:
+  default:
+    name: coffee_network
+    driver: bridge
 
   # join_node_0:
   #   build:

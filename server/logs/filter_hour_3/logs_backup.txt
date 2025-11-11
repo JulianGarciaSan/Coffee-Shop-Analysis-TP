@@ -1,0 +1,7 @@
+
+[2025-11-11 23:23:49.648] Informo que Filtre el mensaje
+[2025-11-11 23:23:49.654] Informo que encole el mensaje
+[2025-11-11 23:23:49.660] Termine la iteracion
+[2025-11-11 23:24:19.695] Informo que Filtre el mensaje
+[2025-11-11 23:24:19.700] Informo que encole el mensaje
+[2025-11-11 23:24:19.701] Termine la iteracion

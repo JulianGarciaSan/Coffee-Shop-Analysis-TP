@@ -50,6 +50,35 @@ stop:
 	echo -n > server/logs/filter_year_3/client_logs.txt
 	echo -n > server/logs/filter_year_3/logs.txt
 	echo -n > server/logs/filter_year_3/eof_logs.txt
+
+
+		# Backup de logs de filter_hour_1
+	sudo cp server/logs/filter_hour_1/client_logs.txt server/logs/filter_hour_1/client_logs_backup.txt || true
+	sudo cp server/logs/filter_hour_1/logs.txt server/logs/filter_hour_1/logs_backup.txt || true
+	sudo cp server/logs/filter_hour_1/eof_logs.txt server/logs/filter_hour_1/eof_logs_backup.txt || true
+	sudo cp server/logs/filter_hour_1/message_logs.txt server/logs/filter_hour_1/message_logs_backup.txt || true
+	# Backup de logs de filter_hour_2
+	sudo cp server/logs/filter_hour_2/client_logs.txt server/logs/filter_hour_2/client_logs_backup.txt || true
+	sudo cp server/logs/filter_hour_2/logs.txt server/logs/filter_hour_2/logs_backup.txt || true
+	sudo cp server/logs/filter_hour_2/eof_logs.txt server/logs/filter_hour_2/eof_logs_backup.txt || true
+	sudo cp server/logs/filter_hour_2/message_logs.txt server/logs/filter_hour_2/message_logs_backup.txt || true
+	# Backup de logs de filter_hour_3
+	sudo cp server/logs/filter_hour_3/client_logs.txt server/logs/filter_hour_3/client_logs_backup.txt || true
+	sudo cp server/logs/filter_hour_3/logs.txt server/logs/filter_hour_3/logs_backup.txt || true
+	sudo cp server/logs/filter_hour_3/eof_logs.txt server/logs/filter_hour_3/eof_logs_backup.txt || true
+	sudo cp server/logs/filter_hour_3/message_logs.txt server/logs/filter_hour_3/message_logs_backup.txt || true
+	# Limpiar logs de filter_hour_1
+	echo -n > server/logs/filter_hour_1/client_logs.txt
+	echo -n > server/logs/filter_hour_1/logs.txt
+	echo -n > server/logs/filter_hour_1/eof_logs.txt
+	# Limpiar logs de filter_hour_2
+	echo -n > server/logs/filter_hour_2/client_logs.txt
+	echo -n > server/logs/filter_hour_2/logs.txt
+	echo -n > server/logs/filter_hour_2/eof_logs.txt
+	# Limpiar logs de filter_hour_3
+	echo -n > server/logs/filter_hour_3/client_logs.txt
+	echo -n > server/logs/filter_hour_3/logs.txt
+	echo -n > server/logs/filter_hour_3/eof_logs.txt
 .PHONY: stop
 
 # Limpieza profunda (usar solo cuando realmente quieras limpiar todo)
@@ -64,6 +93,9 @@ clean-all: stop
 	sudo rm -rf server/logs/filter_year_1/*
 	sudo rm -rf server/logs/filter_year_2/*
 	sudo rm -rf server/logs/filter_year_3/*
+	sudo rm -rf server/logs/filter_hour_1/*
+	sudo rm -rf server/logs/filter_hour_2/*
+	sudo rm -rf server/logs/filter_hour_3/*
 .PHONY: clean-all
 
 logs:

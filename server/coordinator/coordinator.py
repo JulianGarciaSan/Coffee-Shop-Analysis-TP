@@ -116,8 +116,8 @@ class PeerCoordinator:
             self.send_ack(client_id, batch_type)
         else:
             logger.debug(f"Timer expiró pero mensaje ya procesado para cliente {client_id}")
-    
-    def take_leadership(self, client_id: str, batch_type: str, on_all_acks_callback):
+
+    def take_leadership(self, client_id: str, message_id: str, batch_type: str, on_all_acks_callback):
         """
         Este nodo se convierte en líder para el cliente especificado.
         """
@@ -129,7 +129,8 @@ class PeerCoordinator:
         self.pending_acks[client_id] = {
             'nodes': set(other_nodes),
             'callback': on_all_acks_callback,
-            'batch_type': batch_type
+            'batch_type': batch_type,
+            'message_id': message_id
         }
         
         logger.info(f"Esperando ACKs de {len(other_nodes)} nodos: {other_nodes}")
@@ -151,7 +152,7 @@ class PeerCoordinator:
         # Si soy el único nodo, llamar callback inmediatamente
         if self.total_nodes == 1:
             logger.info(f"Soy el único nodo, propagando EOF de {client_id} inmediatamente")
-            on_all_acks_callback(client_id, batch_type)
+            on_all_acks_callback(client_id,message_id, batch_type)
             del self.pending_acks[client_id]
             self.leader_clients.discard(client_id)
     
@@ -174,7 +175,8 @@ class PeerCoordinator:
             # Llamar al callback
             callback = self.pending_acks[client_id]['callback']
             batch_type_stored = self.pending_acks[client_id]['batch_type']
-            callback(client_id, batch_type_stored)
+            message_id_stored = self.pending_acks[client_id]['message_id']
+            callback(client_id, message_id_stored, batch_type_stored)
             # Limpiar estado
             del self.pending_acks[client_id]
             self.leader_clients.discard(client_id)
