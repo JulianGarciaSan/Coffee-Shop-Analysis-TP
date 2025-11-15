@@ -71,6 +71,7 @@ stop:
 	echo -n > server/logs/filter_hour_1/client_logs.txt
 	echo -n > server/logs/filter_hour_1/logs.txt
 	echo -n > server/logs/filter_hour_1/eof_logs.txt
+	echo -n > server/logs/filter_hour_1/message_logs.txt
 	# Limpiar logs de filter_hour_2
 	echo -n > server/logs/filter_hour_2/client_logs.txt
 	echo -n > server/logs/filter_hour_2/logs.txt

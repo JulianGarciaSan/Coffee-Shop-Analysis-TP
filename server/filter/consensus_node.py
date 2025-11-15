@@ -23,7 +23,6 @@ class ConsensusNode:
         self._load_log()
         
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server.bind(self.nodes[node_id])
         self.server.listen(10)
         
@@ -31,12 +30,7 @@ class ConsensusNode:
         print(f"{self.node_id}: Escuchando en {self.nodes[node_id]}")
         print(f"{self.node_id}: Log actual: {len(self.log)} entradas")
         
-        #modificar deamon true
         threading.Thread(target=self._listen, daemon=True).start()
-        
-        # Si soy líder, enviar heartbeats periódicos
-        # if self.is_leader:
-        #     threading.Thread(target=self._heartbeat_loop, daemon=True).start()
     
     def _load_log(self):
         try:
@@ -57,6 +51,22 @@ class ConsensusNode:
                     f.write(entry + '\n')
         except Exception as e:
             print(f"{self.node_id}: Error guardando log: {e}")
+    
+    def _check_duplicate_in_log(self, entry):
+        parts = entry.split(':', 2)
+        if len(parts) < 3:
+            return False, None
+        
+        dedup_key = f"{parts[1]}:{parts[2]}"  # client_id:message_id
+        
+        for log_entry in self.log:
+            log_parts = log_entry.split(':', 2)
+            if len(log_parts) >= 3:
+                existing_key = f"{log_parts[1]}:{log_parts[2]}"
+                if existing_key == dedup_key:
+                    return True, log_parts[0]  # Es duplicado, procesado por log_parts[0]
+        
+        return False, None
     
     def _listen(self):
         while True:
@@ -80,17 +90,9 @@ class ConsensusNode:
             msg_type = msg['type']
             
             if msg_type == 'CLIENT_REQUEST':
-                # Follower preguntando si debe procesar
                 response = self._handle_client_request(msg)
-            
             elif msg_type == 'APPEND_ENTRIES':
-                # Líder replicando log
                 response = self._handle_append_entries(msg)
-            
-            # elif msg_type == 'HEARTBEAT':
-            #     # Heartbeat del líder
-            #     response = {'status': 'ok'}
-            
             else:
                 response = {'error': f'Unknown message type: {msg_type}'}
             
@@ -115,14 +117,16 @@ class ConsensusNode:
             }
         
         entry = msg['entry']
+        requester = msg.get('requester')  
         
         with self.log_lock:
-            # Verificar si ya está en el log
-            if entry in self.log:
-                print(f"{self.node_id}: DUPLICADO detectado de request- {entry}")
+            is_dup, processed_by = self._check_duplicate_in_log(entry)
+            
+            if is_dup:
+                print(f"{self.node_id}: DUPLICADO detectado - procesado por {processed_by}")
                 return {
                     'duplicate': True,
-                    'message': 'Entry already in log'
+                    'message': f'Entry already processed by {processed_by}'
                 }
             
             self.log.append(entry)
@@ -137,7 +141,7 @@ class ConsensusNode:
         
         threading.Thread(
             target=self._replicate_to_followers,
-            args=([entry],),
+            args=([entry], requester),  # Pasar el requester
             daemon=True
         ).start()
         
@@ -150,28 +154,24 @@ class ConsensusNode:
         entries = msg.get('entries', [])
         
         if not entries:
-            # Es solo un heartbeat
             return {'success': True}
         
         with self.log_lock:
-            # Agregar entries que no tengo
             added = 0
             for entry in entries:
                 if entry not in self.log:
                     self.log.append(entry)
                     added += 1
             
-            # Mantener solo últimas N entradas
             if len(self.log) > self.max_entries:
                 self.log = self.log[-self.max_entries:]
             
-            # Persistir si hubo cambios
             if added > 0:
                 self._save_log()
         
         return {'success': True, 'entries_added': added}
     
-    def _replicate_to_followers(self, entries):
+    def _replicate_to_followers(self, entries, exclude_node=None):
         if not self.is_leader:
             return
         
@@ -183,31 +183,15 @@ class ConsensusNode:
         
         for node_id in self.nodes:
             if node_id == self.node_id:
-                continue  
+                continue
+            
+            if node_id == exclude_node:
+                continue
             
             try:
                 self._send_rpc(node_id, msg, timeout=1)
             except Exception as e:
                 print(f"{self.node_id}: Error replicando a {node_id}: {e}")
-    
-    # def _heartbeat_loop(self):
-    #     while True:
-    #         time.sleep(1)  # Heartbeat cada segundo
-            
-    #         msg = {
-    #             'type': 'HEARTBEAT',
-    #             'leader_id': self.leader_id
-    #         }
-            
-    #         for node_id in self.nodes:
-    #             if node_id == self.node_id:
-    #                 continue
-                
-    #             try:
-    #                 self._send_rpc(node_id, msg, timeout=0.5)
-    #             except:
-    #                 # Silencioso para heartbeats
-    #                 pass
     
     def _send_rpc(self, target_node, msg, timeout=2):
         try:
@@ -254,14 +238,15 @@ class ConsensusNode:
         print(f"{self.node_id}: ERROR - No pude contactar al líder después de {max_retries} intentos")
         raise Exception(f"No se pudo contactar al líder {self.leader_id}")
     
-
     def is_duplicate(self, client_id, message_id):
         entry = f"{self.node_id}:{client_id}:{message_id}"
-        
+                
         if self.is_leader:
             with self.log_lock:
-                if entry in self.log:
-                    print(f"{self.node_id}: DUPLICADO (local) - {entry}")
+                is_dup, processed_by = self._check_duplicate_in_log(entry)
+                
+                if is_dup:
+                    print(f"{self.node_id}: DUPLICADO - {client_id}:{message_id} ya procesado por {processed_by}")
                     return True
                 
                 self.log.append(entry)
@@ -271,8 +256,9 @@ class ConsensusNode:
                     print(f"{self.node_id}: Rotando log, removido: {removed}")
                 
                 self._save_log()
-                
-                # print(f"{self.node_id}: NUEVO (local) - {entry} (total: {len(self.log)})")
+                print(f"{self.node_id}: Log actualizado ({len(self.log)} entradas):")
+                for idx, log_entry in enumerate(self.log, 1):
+                    print(f"  [{idx}] {log_entry}")
             
             # Replicar a followers
             threading.Thread(
@@ -287,4 +273,3 @@ class ConsensusNode:
             # Soy follower: pregunto al líder
             print(f"{self.node_id}: Consultando líder para {entry}")
             return self._ask_leader(entry)
-    
