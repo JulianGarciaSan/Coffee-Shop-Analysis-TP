@@ -467,80 +467,82 @@ services:
       - FILTER_MODE=amount
       - INPUT_QUEUE=hour_filtered
       - OUTPUT_Q1=report.exchange
-      - TOTAL_AMOUNT_FILTERS=3
+      #- TOTAL_AMOUNT_FILTERS=3
+      - TOTAL_AMOUNT_FILTERS=1
       - MIN_AMOUNT=75
       - NODE_ID=amount_node_1
-      - ALL_NODE_IDS=amount_node_1,amount_node_2,amount_node_3
+      # - ALL_NODE_IDS=amount_node_1,amount_node_2,amount_node_3
+      - ALL_NODE_IDS=amount_node_1
     volumes:
       - ./server/config.ini:/app/config.ini
 
-  filter_amount_2:
-    build:
-      context: .
-      dockerfile: ./server/filter/Dockerfile
-    container_name: filter_amount_2
-    restart: on-failure
-    ports:
-      - "19998:9999"
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    environment:
-      - PYTHONUNBUFFERED=1
-      - RABBITMQ_HOST=rabbitmq
-      - FILTER_MODE=amount
-      - INPUT_QUEUE=hour_filtered
-      - OUTPUT_Q1=report.exchange
-      - TOTAL_AMOUNT_FILTERS=3
-      - MIN_AMOUNT=75
-      - NODE_ID=amount_node_2
-      - ALL_NODE_IDS=amount_node_1,amount_node_2,amount_node_3
-    volumes:
-      - ./server/config.ini:/app/config.ini
+  # filter_amount_2:
+  #   build:
+  #     context: .
+  #     dockerfile: ./server/filter/Dockerfile
+  #   container_name: filter_amount_2
+  #   restart: on-failure
+  #   ports:
+  #     - "19998:9999"
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #     - RABBITMQ_HOST=rabbitmq
+  #     - FILTER_MODE=amount
+  #     - INPUT_QUEUE=hour_filtered
+  #     - OUTPUT_Q1=report.exchange
+  #     - TOTAL_AMOUNT_FILTERS=3
+  #     - MIN_AMOUNT=75
+  #     - NODE_ID=amount_node_2
+  #     - ALL_NODE_IDS=amount_node_1,amount_node_2,amount_node_3
+  #   volumes:
+  #     - ./server/config.ini:/app/config.ini
 
-  filter_amount_3:
-    build:
-      context: .
-      dockerfile: ./server/filter/Dockerfile
-    container_name: filter_amount_3
-    ports:
-      - "19999:9999"
-    restart: on-failure
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    environment:
-      - PYTHONUNBUFFERED=1
-      - RABBITMQ_HOST=rabbitmq
-      - FILTER_MODE=amount
-      - INPUT_QUEUE=hour_filtered
-      - OUTPUT_Q1=report.exchange
-      - TOTAL_AMOUNT_FILTERS=3
-      - MIN_AMOUNT=75
-      - NODE_ID=amount_node_3
-      - ALL_NODE_IDS=amount_node_1,amount_node_2,amount_node_3
-    volumes:
-      - ./server/config.ini:/app/config.ini
+  # filter_amount_3:
+  #   build:
+  #     context: .
+  #     dockerfile: ./server/filter/Dockerfile
+  #   container_name: filter_amount_3
+  #   ports:
+  #     - "19999:9999"
+  #   restart: on-failure
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #     - RABBITMQ_HOST=rabbitmq
+  #     - FILTER_MODE=amount
+  #     - INPUT_QUEUE=hour_filtered
+  #     - OUTPUT_Q1=report.exchange
+  #     - TOTAL_AMOUNT_FILTERS=3
+  #     - MIN_AMOUNT=75
+  #     - NODE_ID=amount_node_3
+  #     - ALL_NODE_IDS=amount_node_1,amount_node_2,amount_node_3
+  #   volumes:
+  #     - ./server/config.ini:/app/config.ini
 
-  report_generator:
-    build:
-      context: .
-      dockerfile: ./server/report_generator/Dockerfile
-    container_name: report_generator
-    restart: on-failure
-    ports:
-      - "19990:9999"
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    environment:
-      - PYTHONUNBUFFERED=1
-      - RABBITMQ_HOST=rabbitmq
-      - REPORT_EXCHANGE=report.exchange
-      - REPORTS_EXCHANGE=reports_exchange
-    volumes:
-      - ./server/config.ini:/app/config.ini
-      - ./reports:/app/reports
+  # report_generator:
+  #   build:
+  #     context: .
+  #     dockerfile: ./server/report_generator/Dockerfile
+  #   container_name: report_generator
+  #   restart: on-failure
+  #   ports:
+  #     - "19990:9999"
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #     - RABBITMQ_HOST=rabbitmq
+  #     - REPORT_EXCHANGE=report.exchange
+  #     - REPORTS_EXCHANGE=reports_exchange
+  #   volumes:
+  #     - ./server/config.ini:/app/config.ini
+  #     - ./reports:/app/reports
 
 networks:
   default:

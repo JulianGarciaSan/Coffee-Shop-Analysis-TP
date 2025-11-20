@@ -1,6 +1,7 @@
 import os
 import socket
 import logging
+import threading
 from common.processor import TransactionCSVProcessor
 from common.protocol import Protocol
 from common.new_protocolo import ProtocolNew
@@ -14,6 +15,7 @@ class Client:
         self.shutdown.register_callback(self._on_shutdown_signal)
         
         self.server_port = server_port
+        self.reports_port = server_port + 1
         self.max_batch_size = int(max_batch_size)
         self.client_id = client_id
         self.keep_running = False
@@ -21,6 +23,16 @@ class Client:
         self.protocol = None  
         self.processor = None
         self.expected_reports = 1
+        
+        self.report_files = {} 
+        self.report_headers = {
+        'q1': 'transaction_id,final_amount',
+        'q2_most_profit': 'year_month_created_at,item_name,profit_sum',
+        'q2_best_selling': 'year_month_created_at,item_name,sellings_qty',
+        'q3': 'year_half,store_name,tpv',
+        'q4': 'store_name,birthdate'
+        }
+        
 
     def _on_shutdown_signal(self):
         logger.info("Señal de shutdown recibida en Client")
@@ -29,7 +41,7 @@ class Client:
             try:
                 self.client_socket.close()
             except:
-                pass
+                pass     
                 
     def run(self):
         self.keep_running = True
@@ -42,6 +54,9 @@ class Client:
             self.client_socket = socket.create_connection(('gateway', self.server_port))
             
             self.protocol = ProtocolNew(self.client_socket)
+            
+            self.receiver_thread = threading.Thread(target=self.receive_reports, daemon=False)
+            self.receiver_thread.start()
 
             self.process_and_send_files_from_volumes()
 
@@ -49,8 +64,8 @@ class Client:
             logger.error(f"Error de socket: {err}")
         except Exception as err:
             logger.error(f"Error inesperado: {err}")
-        finally:
-            self._cleanup()
+        # finally:
+        #     self._cleanup()
     
     def process_and_send_files_from_volumes(self):
         mounted_folders = {
@@ -94,7 +109,7 @@ class Client:
                                 
             if self.protocol and not self.shutdown.is_shutting_down():
                 self.protocol.send_exit_message()
-                self.receive_reports()
+                #self.receive_reports()
 
         except Exception as e:
             logger.error(f"Error procesando archivos desde volúmenes: {e}")
@@ -128,10 +143,9 @@ class Client:
         except Exception as e:
             logger.error(f"Error en send_data: {e}")
             raise
-        
-        
+    
     def receive_reports(self):
-        """Recibe reportes del servidor hasta que se envíe un mensaje de salida."""
+        """Recibe reportes del servidor usando el sistema de mensajes."""
         try:
             if not self.protocol:
                 logger.error("Protocolo no inicializado. No se pueden recibir reportes.")
@@ -139,53 +153,78 @@ class Client:
             
             logger.info("Esperando reportes del servidor...")
             
-            # Esperamos recibir 3 reportes: Q1, Q3, Q4
-            reports_received = 0
-            
-            while self.keep_running and reports_received < self.expected_reports:
+            for message in self.protocol.receive_reports():
                 if self.shutdown.is_shutting_down():
-                    logger.info("Shutdown detectado, deteniendo recepción de reportes")
+                    logger.info("Shutdown detectado, deteniendo recepción")
                     break
                 
-                logger.info(f"Esperando reporte {reports_received + 1} de {self.expected_reports}...")
-                
-                report = self.protocol.receive_report()  # ← Retorna dict
-                
-                if report is None:
-                    logger.info("No se recibieron más reportes o conexión cerrada.")
+                if message.action == "L":
+                    self._process_report_data(message.file_type, message.data)
+                    
+                elif message.action == "EXIT":
+                    logger.info("EXIT recibido, cerrando archivos de reportes")
+                    self._close_all_report_files()
                     break
                 
-                reports_received += 1
-                
-                # Extraer datos del dict
-                query_id = report['query_id']
-                content = report['content']
-                
-                logger.info(f"Reporte Q{query_id} recibido: {len(content)} bytes")
-                
-                # Guardar reporte en archivo usando el content (str)
-                self._save_report_to_file(f"Q{query_id}", content)
+                else:
+                    logger.warning(f"Mensaje inesperado durante recepción de reportes: {message.action}")
             
-            logger.info(f"Recepción completada. {reports_received} reportes recibidos.")
+            logger.info("Recepción de reportes completada")
             
         except Exception as e:
             logger.error(f"Error recibiendo reportes: {e}")
             raise
-    
-    def _save_report_to_file(self, report_type, content):
-        """Guarda un reporte en un archivo."""
+        finally:
+            self._cleanup()
+        
+    def _process_report_data(self, query_name, data):
         try:
-            # Crear directorio report_<client_id> si no existe
+            if query_name not in self.report_files:
+                self._open_report_file(query_name)
+            
+            file_handle = self.report_files[query_name]
+            file_handle.write(data)
+            if not data.endswith('\n'):
+                file_handle.write('\n')
+            
+            #lines_count = data.count('\n') + (1 if data and not data.endswith('\n') else 0)
+            #logger.info(f"Datos de {query_name} escritos: {lines_count} líneas")
+            
+        except Exception as e:
+            logger.error(f"Error procesando datos de {query_name}: {e}")
+
+    def _open_report_file(self, query_name):
+        try:
             report_dir = f"/app/report_{self.client_id}"
             os.makedirs(report_dir, exist_ok=True)
             
-            # Guardar en la carpeta mapeada
-            filename = f"{report_dir}/report_{report_type.lower()}.csv"
-            with open(filename, 'w') as f:
-                f.write(content)
-            logger.info(f"Reporte {report_type} guardado en {filename}")
+            filename = f"{report_dir}/report_{query_name.lower()}.csv"
+            file_handle = open(filename, 'w')
+            
+            if query_name in self.report_headers:
+                file_handle.write(self.report_headers[query_name] + '\n')
+            
+            self.report_files[query_name] = file_handle
+            logger.info(f"Archivo {filename} abierto para {query_name}")
+            
         except Exception as e:
-            logger.error(f"Error guardando reporte {report_type}: {e}")
+            logger.error(f"Error abriendo archivo para {query_name}: {e}")
+
+    def _close_all_report_files(self):
+        try:
+            for query_name, file_handle in self.report_files.items():
+                try:
+                    file_handle.close()
+                    logger.info(f"Archivo de {query_name} cerrado")
+                except Exception as e:
+                    logger.error(f"Error cerrando archivo de {query_name}: {e}")
+            
+            self.report_files.clear()
+            logger.info("Todos los archivos de reportes cerrados")
+            
+        except Exception as e:
+            logger.error(f"Error cerrando archivos de reportes: {e}")
+
         
     def _cleanup(self):
         """Limpieza de recursos al finalizar."""
@@ -200,4 +239,67 @@ class Client:
         elif self.client_socket:
             self.client_socket.close()
             
+        try:
+            self.receiver_thread.join(timeout=5.0)
+        except Exception as e:
+            logger.error(f"Error esperando el hilo receptor: {e}") 
+            
         logger.info("Cliente cerrado completamente")
+        
+        
+        
+    # def receive_reports(self):
+    #     """Recibe reportes del servidor hasta que se envíe un mensaje de salida."""
+    #     try:
+    #         if not self.protocol:
+    #             logger.error("Protocolo no inicializado. No se pueden recibir reportes.")
+    #             return
+            
+    #         logger.info("Esperando reportes del servidor...")
+            
+    #         # Esperamos recibir 3 reportes: Q1, Q3, Q4
+    #         reports_received = 0
+            
+    #         while self.keep_running and reports_received < self.expected_reports:
+    #             if self.shutdown.is_shutting_down():
+    #                 logger.info("Shutdown detectado, deteniendo recepción de reportes")
+    #                 break
+                
+    #             logger.info(f"Esperando reporte {reports_received + 1} de {self.expected_reports}...")
+                
+    #             report = self.protocol.receive_report()  # ← Retorna dict
+                
+    #             if report is None:
+    #                 logger.info("No se recibieron más reportes o conexión cerrada.")
+    #                 break
+                
+    #             reports_received += 1
+                
+    #             # Extraer datos del dict
+    #             query_id = report['query_id']
+    #             content = report['content']
+                
+    #             logger.info(f"Reporte Q{query_id} recibido: {len(content)} bytes")
+                
+    #             # Guardar reporte en archivo usando el content (str)
+    #             self._save_report_to_file(f"Q{query_id}", content)
+            
+    #         logger.info(f"Recepción completada. {reports_received} reportes recibidos.")
+            
+    #     except Exception as e:
+    #         logger.error(f"Error recibiendo reportes: {e}")
+    #         raise
+    
+    # def _save_report_to_file(self, report_type, content):
+    #     try:
+    #         # Crear directorio report_<client_id> si no existe
+    #         report_dir = f"/app/report_{self.client_id}"
+    #         os.makedirs(report_dir, exist_ok=True)
+            
+    #         # Guardar en la carpeta mapeada
+    #         filename = f"{report_dir}/report_{report_type.lower()}.csv"
+    #         with open(filename, 'w') as f:
+    #             f.write(content)
+    #         logger.info(f"Reporte {report_type} guardado en {filename}")
+    #     except Exception as e:
+    #         logger.error(f"Error guardando reporte {report_type}: {e}")

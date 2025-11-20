@@ -102,7 +102,8 @@ class AmountNodeConfigurator(NodeConfigurator):
         if output_q1:
             middlewares['q1'] = MessageMiddlewareExchange(
                 host=self.rabbitmq_host,
-                exchange_name=output_q1,
+                #exchange_name=output_q1,
+                exchange_name='reports_exchange',
                 route_keys=['q1.data']
             )
             logger.info(f"  Output Q1 Exchange: {output_q1}")
@@ -143,7 +144,7 @@ class AmountNodeConfigurator(NodeConfigurator):
 
     def send_data(self, data: str, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None, message_id: Optional[int] = None):
         headers = self.create_headers(client_id, message_id)
-
+        print(f"AmountNodeConfigurator: Sending data: {data}")
         if client_id:
             client_id_str = str(client_id)
             if self.coordinator.should_send_ack_after_processing(client_id_str):

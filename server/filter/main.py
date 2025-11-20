@@ -199,7 +199,8 @@ class FilterNode:
             self.client_logger.write(f"{client_id};{message_id}")
             logging.info("Mensaje recibido en FilterNode")
             should_stop = self.process_message(body, routing_key, client_id,message_id)
-            time.sleep(30)
+            logging.info("Esperando 30 segundos antes de ack")
+            #time.sleep(30)
             ch.basic_ack(delivery_tag=method.delivery_tag)
 
             
