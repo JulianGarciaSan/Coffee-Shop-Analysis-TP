@@ -1,3 +1,0 @@
-hour_node_2:0:1
-hour_node_3:0:2
-hour_node_1:0:3

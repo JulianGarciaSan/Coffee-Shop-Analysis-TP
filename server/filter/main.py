@@ -128,15 +128,23 @@ class FilterNode:
             logger.warning("Shutdown en progreso, ignorando mensaje")
         
         try:
-            should_stop, batch_type, dto, is_eof = self.node_configurator.process_message(
-                body, routing_key, client_id, message_id
-            )
+            result = self.node_configurator.process_message(body, routing_key, client_id, message_id)
             
+            if len(result) == 5:
+                should_stop, batch_type, dto, is_eof, is_dup = result
+            else:
+                should_stop, batch_type, dto, is_eof = result
+                is_dup = False 
+                
             # if is_eof:
             #     return self._handle_eof_message(dto, batch_type, client_id)
             
             if is_eof:
                 self.logger.write_with_timestamp(f"END:{client_id}")
+                return False
+            
+            if is_dup:
+                logger.info(f"Mensaje duplicado detectado para client_id {client_id}, message_id {message_id}. Ignorando procesamiento.")
                 return False
 
             if should_stop:
@@ -218,7 +226,7 @@ class FilterNode:
         
         if not last_line or ':' not in last_line:
             logger.warning("No hay logs EOF previos válidos")
-            return False
+            return True
         
         parts = last_line.split(':', 2)
         eof_status = parts[0] if len(parts) > 0 else ""
@@ -226,11 +234,13 @@ class FilterNode:
         batch_type_eof_log = parts[2] if len(parts) > 2 else ""
         
         if "EOF" in eof_status:
+            logger.info(f"Procesando EOF pendiente para client_id {client_id_eof_log}")
             self.node_configurator._on_all_acks_received(client_id_eof_log, batch_type_eof_log)
             return False
 
         if "BEF" in eof_status:
-            self.node_configurator.process_message(TransactionBatchDTO("", BatchType.EOF).to_bytes_fast(),client_id_eof_log)
+            logger.info(f"Reenviando EOF pendiente para client_id {client_id_eof_log}")
+            self.node_configurator.process_message(TransactionBatchDTO("EOF:1", BatchType.EOF).to_bytes_fast(), None, client_id_eof_log)
             return False
 
         return True
@@ -245,59 +255,79 @@ class FilterNode:
         client_id = str(client_id) if client_id is not None else ""
         message_id = str(message_id) if message_id is not None else ""
         
-        if not last_line_client or ';' not in last_line_client:
-            logger.warning("No hay logs previos válidos")
-            return False
+        # Parsear client log (si existe)
+        client_id_client_log = None
+        message_id_client_log = None
+        if last_line_client and ';' in last_line_client:
+            try:
+                client_id_client_log, message_id_client_log = last_line_client.split(';')
+            except ValueError:
+                logger.warning(f"Error parseando client log: {last_line_client}")
         
-        client_id_client_log, message_id_client_log = last_line_client.split(';')
-
-        if not last_line_eof or ':' not in last_line_eof:
-            logger.warning("No hay logs previos válidos")
-            return False
-
-        eof_eof_log, client_id_eof_log, batch_type_eof_log = last_line_eof.split(':')
-
-               
+        # Parsear EOF log (si existe)
+        eof_eof_log = None
+        client_id_eof_log = None
+        batch_type_eof_log = None
+        if last_line_eof and ':' in last_line_eof:
+            try:
+                parts = last_line_eof.split(':')
+                if len(parts) >= 3:
+                    eof_eof_log, client_id_eof_log, batch_type_eof_log = parts[0], parts[1], parts[2]
+            except ValueError:
+                logger.warning(f"Error parseando eof log: {last_line_eof}")
+        
+        # Ahora evaluar los casos con los datos parseados (o None si fallaron)
+        
         if "END" in log:
-            if "END" in eof_eof_log:
+            if eof_eof_log == "END":
                 if client_id == client_id_client_log and message_id == message_id_client_log:
                     return True
                 return False
             
-            if "EOF" in eof_eof_log:
-                self.node_configurator._on_all_acks_received(client_id_eof_log, batch_type_eof_log)
+            if eof_eof_log == "EOF":
+                if client_id_eof_log and batch_type_eof_log:
+                    self.node_configurator._on_all_acks_received(client_id_eof_log, batch_type_eof_log)
                 
-                #Esto es de el mensaje de los logs client
+                # Esto es del mensaje de los logs client
                 if client_id == client_id_client_log and message_id == message_id_client_log:
                     return True
                 
                 return False
             
-            if "BEF" in eof_eof_log:
-                self.node_configurator.process_message(TransactionBatchDTO("", BatchType.EOF).to_bytes_fast(),client_id_eof_log)
+            if eof_eof_log == "BEF":
+                if client_id_eof_log:
+                    self.node_configurator.process_message(
+                        TransactionBatchDTO("EOF:1", BatchType.EOF).to_bytes_fast(), 
+                        None, 
+                        client_id_eof_log
+                    )
                 return False
             
         if "EOF" in log:
-            if "END" in eof_eof_log:
-                #De alguna manera llegaron todos los acks, antes de que envie el ack del Primero EOF recibido
-                #Solo falta mandar el ACK del primero EOF recibido
+            if eof_eof_log == "END":
+                # De alguna manera llegaron todos los acks, antes de que envíe el ack del Primero EOF recibido
+                # Solo falta mandar el ACK del primero EOF recibido
                 if client_id_client_log == client_id_eof_log == client_id and message_id_client_log == message_id:
                     return True
                 return False
             
-            if "EOF" in eof_eof_log:
-                self.node_configurator._on_all_acks_received(client_id_eof_log, batch_type_eof_log)
-                #Solo falta mandar el ACK del primero EOF recibido
+            if eof_eof_log == "EOF":
+                if client_id_eof_log and batch_type_eof_log:
+                    self.node_configurator._on_all_acks_received(client_id_eof_log, batch_type_eof_log)
+                
+                # Solo falta mandar el ACK del primero EOF recibido
                 if client_id_client_log == client_id_eof_log == client_id and message_id_client_log == message_id:
                     return True
-                return 
+                return False
         
             return False
 
         if "Informo que encole el mensaje" in log:
             if client_id_client_log == client_id and message_id_client_log == message_id:
+                logger.info(f"FilterNode: Mensaje encolado para client_id {client_id}")
                 return True
-                
+            logger.info(f"FilterNode: Mensaje no corresponde a client_id {client_id}, client_id log: {client_id_client_log}, message_id log: {message_id_client_log}, message_id: {message_id}")
+
         if "Informo que Filtre" in log:
             logger.info(f"FilterNode: Reintento filtrar y enviar el mensaje")
             return False

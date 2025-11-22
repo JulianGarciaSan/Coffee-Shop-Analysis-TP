@@ -107,6 +107,8 @@ class HourNodeConfigurator(NodeConfigurator):
                     msg.node_id,
                     msg.batch_type_str
                 )
+                self.logger.write_with_timestamp(f"Informo que recibí el FANOUT de EOF para {msg.client_id}")
+
             
             elif msg.msg_type == CoordinationMessageDTO.ACK:
                 self.coordinator.handle_ack_received(
@@ -114,6 +116,7 @@ class HourNodeConfigurator(NodeConfigurator):
                     msg.node_id,
                     msg.batch_type_str
                 )
+                self.logger.write_with_timestamp(f"Informo que recibí el ACK de {msg.node_id} para {msg.client_id}")
             
             else:
                 logger.warning(f"Tipo de mensaje desconocido: {msg.msg_type}")
@@ -161,15 +164,18 @@ class HourNodeConfigurator(NodeConfigurator):
         if(self.consensus_node.is_duplicate(client_id, message_id)):
             logger.info(f"NODO: {self.node_id} detecto duplicado: {message_id}")
             dto = TransactionBatchDTO('', BatchType.RAW_CSV)
-            return (False, 'transactions', dto, False)
+            return (False, 'transactions', dto, False, True)
 
         decoded_data = body.decode('utf-8').strip()
         
         client_id_str = str(client_id) if client_id is not None else "default"
         message_id_str = str(message_id) if message_id is not None else "default"
+        
         if decoded_data.startswith("EOF:"):
             logger.info(f"EOF recibido para cliente {client_id_str}")
-            
+            self.logger.write_with_timestamp(f"EOF:{client_id_str}")
+            self.eof_logger.write(f"BEF:{client_id_str}:transactions")
+
             self.coordinator.take_leadership(
                 client_id_str, 
                 message_id_str,
@@ -205,7 +211,8 @@ class HourNodeConfigurator(NodeConfigurator):
 
     def _on_all_acks_received(self, client_id: str,message_id:str, batch_type: str):
         logger.info(f"Todos los ACKs recibidos para cliente {client_id}, propagando EOF downstream")
-        
+        self.eof_logger.write(f"EOF:{client_id}:{batch_type}")
+
         if self.output_middlewares is None:
             logger.error("output_middlewares no está configurado")
             return
@@ -213,6 +220,7 @@ class HourNodeConfigurator(NodeConfigurator):
         client_id_int = int(client_id) if client_id.isdigit() else None
         message_id_int = int(message_id) if message_id.isdigit() else None
         self.send_eof(self.output_middlewares, "transactions", client_id=client_id_int,message_id=message_id_int)
+        self.eof_logger.write(f"END:{client_id}:{batch_type}")
 
     def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None,message_id:Optional[int]=None):
         headers = self.create_headers(client_id,message_id)
