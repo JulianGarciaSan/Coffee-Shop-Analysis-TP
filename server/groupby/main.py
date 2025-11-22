@@ -3,6 +3,7 @@ import os
 import sys
 from configurators import GroupByConfiguratorFactory
 from strategies.groupby_strategy import GroupByStrategyFactory
+from logger_monitor.logger_monitor import LoggerMonitor
 from dtos.dto import BatchType
 from common.graceful_shutdown import GracefulShutdown
 
@@ -21,11 +22,16 @@ class GroupByNode:
         
         logger.info(f"GroupByNode inicializado en modo {self.groupby_mode}")
         
+        self.logger = LoggerMonitor('/app/logs.txt')
+        self.client_logger = LoggerMonitor('/app/client_logs.txt')
+        self.eof_logger = LoggerMonitor('/app/eof_logs.txt')
+        self.is_first_message = True 
+        
         # Crear configurator (maneja middlewares y routing)
         self.configurator = GroupByConfiguratorFactory.create_configurator(
             self.groupby_mode,
             self.rabbitmq_host,
-            self.output_exchange
+            self.output_exchange,
         )
         
         # Crear strategy (maneja lógica de negocio)
@@ -34,6 +40,9 @@ class GroupByNode:
             self.groupby_mode, 
             **strategy_config
         )
+        
+        self.configurator.set_loggers(self.logger, self.client_logger, self.eof_logger)
+        self.strategy.set_loggers(self.logger, self.client_logger, self.eof_logger)
         
         self.input_middleware = self.configurator.create_input_middleware()
         if hasattr(self.input_middleware, 'shutdown'):
@@ -46,7 +55,7 @@ class GroupByNode:
         
         if self.groupby_mode in ['top_customers', 'best_selling']:
             self.output_middlewares['input_queue'] = self.input_middleware
-   
+            
     def _on_shutdown_signal(self):
         logger.info("Señal de shutdown recibida en GroupByNode")
         if self.input_middleware:
@@ -73,6 +82,7 @@ class GroupByNode:
                     if line.strip():
                         # Delegar procesamiento de líneas a la strategy
                         self.strategy.process_csv_line(line.strip(), client_id)
+                        self.logger.write_with_timestamp(f"Informo que Filtre el mensaje")
             
             return False
             
@@ -87,9 +97,18 @@ class GroupByNode:
                 ch.stop_consuming()
                 return
             
+            client_id = None
+            message_id = None
+            if properties and properties.headers:
+                client_id = properties.headers.get('client_id')
+                message_id = properties.headers.get('message_id')
+                
             headers = properties.headers if properties and hasattr(properties, 'headers') else None
+            self.client_logger.write(f"{client_id};{message_id}")
             
             should_stop = self.process_message(body, headers)
+            self.logger.write_with_timestamp(f"Termine la iteracion")
+            ch.basic_ack(delivery_tag=method.delivery_tag)
             if should_stop:
                 logger.info("EOF procesado - deteniendo consuming")
                 ch.stop_consuming()

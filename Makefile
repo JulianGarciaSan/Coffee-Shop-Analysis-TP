@@ -80,6 +80,17 @@ stop:
 	echo -n > server/logs/filter_hour_3/client_logs.txt
 	echo -n > server/logs/filter_hour_3/logs.txt
 	echo -n > server/logs/filter_hour_3/eof_logs.txt
+
+
+	# Backup de logs de top_customers
+	sudo cp server/logs/top_customers/client_logs.txt server/logs/top_customers/client_logs_backup.txt || true
+	sudo cp server/logs/top_customers/logs.txt server/logs/top_customers/logs_backup.txt || true
+	sudo cp server/logs/top_customers/eof_logs.txt server/logs/top_customers/eof_logs_backup.txt || true
+	
+	# Limpiar logs de top_customers
+	echo -n > server/logs/top_customers/client_logs.txt
+	echo -n > server/logs/top_customers/logs.txt
+	echo -n > server/logs/top_customers/eof_logs.txt
 .PHONY: stop
 
 # Limpieza profunda (usar solo cuando realmente quieras limpiar todo)

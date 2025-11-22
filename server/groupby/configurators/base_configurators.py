@@ -12,6 +12,10 @@ class GroupByConfigurator(ABC):
         self.rabbitmq_host = rabbitmq_host
         self.output_exchange = output_exchange
         self.dto_helper = TransactionBatchDTO("", BatchType.RAW_CSV)
+        self.logger = None
+        self.logger_client = None
+        self.eof_logger = None
+
     
     @abstractmethod
     def create_input_middleware(self):
@@ -42,3 +46,8 @@ class GroupByConfigurator(ABC):
     @abstractmethod
     def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict, strategy) -> bool:
         pass
+    
+    def set_loggers(self, logger, logger_client, eof_logger):
+        self.logger = logger
+        self.logger_client = logger_client
+        self.eof_logger = eof_logger

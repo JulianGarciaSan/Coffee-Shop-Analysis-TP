@@ -6,7 +6,7 @@ import time
 import threading
 from typing import Optional
 from rabbitmq.middleware import MessageMiddlewareQueue
-from logger_monitor import LoggerMonitor
+from logger_monitor.logger_monitor import LoggerMonitor
 from healthchecker.healthchecker import HealthChecker
 from strategies import FilterStrategyFactory
 from configurators import NodeConfiguratorFactory
@@ -161,7 +161,6 @@ class FilterNode:
             self.node_configurator.send_data(processed_data, self.middlewares, batch_type, client_id=client_id,message_id=message_id)
             self.logger.write_with_timestamp(f"Informo que encole el mensaje")
             # time.sleep(30)
-            self.logger.write_with_timestamp(f"Termine la iteracion")
             return False
 
         except Exception as e:
@@ -199,9 +198,9 @@ class FilterNode:
             self.client_logger.write(f"{client_id};{message_id}")
             logging.info("Mensaje recibido en FilterNode")
             should_stop = self.process_message(body, routing_key, client_id,message_id)
-            logging.info("Esperando 30 segundos antes de ack")
             #time.sleep(30)
             ch.basic_ack(delivery_tag=method.delivery_tag)
+            self.logger.write_with_timestamp(f"Termine la iteracion")
 
             
             if should_stop:

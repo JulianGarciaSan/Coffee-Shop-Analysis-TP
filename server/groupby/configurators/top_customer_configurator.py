@@ -2,7 +2,7 @@ from collections import defaultdict
 import logging
 import os
 from typing import Dict, Any
-from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
+from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue, MessageMiddlewareQueueManual, MessageMiddlewareExchangeManual
 from dtos.dto import TransactionBatchDTO, BatchType
 from .base_configurators import GroupByConfigurator
 
@@ -19,8 +19,9 @@ class TopCustomerConfigurator(GroupByConfigurator):
         logger.info(f"  Input Queue: {self.input_queue_name}")
         logger.info(f"  Total nodos: {self.total_groupby_nodes}")
 
+
     def create_input_middleware(self):
-        middleware = MessageMiddlewareQueue(
+        middleware = MessageMiddlewareQueueManual(
             host=self.rabbitmq_host,
             queue_name=self.input_queue_name
         )
@@ -28,7 +29,7 @@ class TopCustomerConfigurator(GroupByConfigurator):
         return middleware
 
     def create_output_middlewares(self) -> Dict[str, Any]:
-        output_middleware = MessageMiddlewareExchange(
+        output_middleware = MessageMiddlewareExchangeManual(
             host=self.rabbitmq_host,
             exchange_name=self.output_exchange,
             route_keys=['store.*']
@@ -59,6 +60,7 @@ class TopCustomerConfigurator(GroupByConfigurator):
         return False
 
     def _send_data_by_store_for_client(self, output_middleware, strategy, client_id):
+        
         store_user_purchases_by_client = getattr(strategy, 'store_user_purchases_by_client', {})
         client_data = store_user_purchases_by_client.get(client_id, {})
         if not client_data:
@@ -78,6 +80,7 @@ class TopCustomerConfigurator(GroupByConfigurator):
             logger.info(f"Store {store_id}: {len(store_csv_lines)-1} users '{routing_key}' para client_id={client_id}")
 
     def _send_eof_by_store_for_client(self, output_middleware, strategy, client_id):
+        
         store_user_purchases_by_client = getattr(strategy, 'store_user_purchases_by_client', {})
         client_data = store_user_purchases_by_client.get(client_id, {})
         if not client_data:
