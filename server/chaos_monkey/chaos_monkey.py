@@ -11,20 +11,22 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - [CHAOS] - %(messag
 logger = logging.getLogger(__name__)
 
 class ChaosMonkey:
-    def __init__(self, kill_interval: int = 1, excluded_containers: Set[str] = None):
+    def __init__(self, kill_interval: int = 1, excluded_containers: Set[str] = None,
+                 min_kills: int = 1, max_kills: int = 3):
         """
-        Script que mata contenedores al azar.
-        
         Args:
-            kill_interval: Segundos entre cada caída de nodo
-            excluded_containers: Nombres de contenedores que NO deben caerse
+            kill_interval: Segundos entre cada ronda de caídas
+            excluded_containers: Contenedores que NO deben caerse
+            min_kills: Mínimo de contenedores a matar por ronda
+            max_kills: Máximo de contenedores a matar por ronda
         """
         self.client = docker.from_env()
         self.kill_interval = kill_interval
         self.excluded_containers = excluded_containers or set()
+        self.min_kills = min_kills
+        self.max_kills = max_kills
         self.running = True
-        self.kill_count = 0
-        self.kill_history = []  # Historial de caídas
+        self.total_kills = 0
         
     def get_killable_containers(self):
         """Obtiene contenedores que pueden ser detenidos"""
@@ -32,11 +34,9 @@ class ChaosMonkey:
         killable = []
         
         for container in all_containers:
-            # Excluir protegidos
             if container.name in self.excluded_containers:
                 continue
             
-            # Solo incluir nodos del sistema distribuido
             if any(keyword in container.name.lower() for keyword in [
                 'filter_year',
                 'groupby', 'join_node', 'aggregator'
@@ -45,49 +45,44 @@ class ChaosMonkey:
         
         return killable
     
-    def kill_random_container(self):
-        """Mata un contenedor al azar"""
+    def kill_round(self):
+        """Mata entre min_kills y max_kills contenedores al azar"""
         killable = self.get_killable_containers()
         
         if not killable:
-            logger.warning("No hay contenedores disponibles para matar")
-            return False
+            logger.warning("⚠️  No hay contenedores disponibles para matar")
+            return 0
         
-        victim = random.choice(killable)
+        # Decidir cuántos matar (aleatorio entre min y max)
+        # Pero no más de los disponibles
+        num_to_kill = random.randint(self.min_kills, 
+                                      min(self.max_kills, len(killable)))
         
-        try:
-            logger.info(f"🔥 Matando contenedor: {victim.name}")
-            victim.kill()  # Usa kill en lugar de stop para simular crash abrupto
-            self.kill_count += 1
-            self.kill_history.append({
-                'name': victim.name,
-                'time': time.time()
-            })
-            logger.info(f"💀 Contenedor {victim.name} detenido. Total: {self.kill_count}")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Error matando {victim.name}: {e}")
-            return False
-    
-    def print_stats(self):
-        """Imprime estadísticas cada 10 kills"""
-        if self.kill_count % 10 == 0 and self.kill_count > 0:
-            logger.info(f"📊 Estadísticas: {self.kill_count} contenedores caídos")
-            
-            # Contar por tipo
-            from collections import Counter
-            types = Counter([h['name'].split('_')[0] + '_' + h['name'].split('_')[1] 
-                           for h in self.kill_history])
-            for container_type, count in types.most_common():
-                logger.info(f"   - {container_type}: {count} caídas")
+        # Seleccionar víctimas al azar
+        victims = random.sample(killable, num_to_kill)
+        
+        killed_count = 0
+        logger.info(f"🎯 Seleccionando {num_to_kill} contenedor(es) para matar...")
+        
+        for victim in victims:
+            try:
+                logger.info(f"   🔥 Matando: {victim.name}")
+                victim.kill()
+                killed_count += 1
+                self.total_kills += 1
+            except Exception as e:
+                logger.error(f"   ❌ Error matando {victim.name}: {e}")
+        
+        logger.info(f"💀 Ronda completada: {killed_count}/{num_to_kill} contenedores caídos (Total: {self.total_kills})")
+        return killed_count
     
     def chaos_loop(self):
         """Loop principal de caos"""
         logger.info("🐵 Chaos Monkey iniciado")
-        logger.info(f"⏱️  Intervalo de caídas: {self.kill_interval}s")
+        logger.info(f"⏱️  Intervalo entre rondas: {self.kill_interval}s")
+        logger.info(f"🎲 Kills por ronda: {self.min_kills}-{self.max_kills}")
         logger.info(f"🛡️  Contenedores protegidos: {self.excluded_containers}")
         
-        # Esperar a que el sistema esté estable
         logger.info("⏳ Esperando 30 segundos para que el sistema se estabilice...")
         time.sleep(30)
         
@@ -95,8 +90,11 @@ class ChaosMonkey:
         
         while self.running:
             try:
-                self.kill_random_container()
-                self.print_stats()
+                self.kill_round()
+                
+                if self.total_kills % 10 == 0 and self.total_kills > 0:
+                    logger.info(f"📊 Estadística: {self.total_kills} contenedores caídos en total")
+                
                 time.sleep(self.kill_interval)
                 
             except KeyboardInterrupt:
@@ -106,7 +104,7 @@ class ChaosMonkey:
                 logger.error(f"❌ Error en chaos loop: {e}")
                 time.sleep(self.kill_interval)
         
-        logger.info(f"📈 Total de contenedores caídos: {self.kill_count}")
+        logger.info(f"📈 Total final de contenedores caídos: {self.total_kills}")
     
     def stop(self):
         """Detiene el chaos monkey"""
@@ -120,7 +118,6 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    # Contenedores que NO deben caerse
     protected = {
         "client_1",
         "gateway",
@@ -128,10 +125,16 @@ def main():
         "watchdog",
     }
     
-    # Leer intervalo de variable de entorno
     kill_interval = int(os.getenv("KILL_INTERVAL", "1"))
+    min_kills = int(os.getenv("MIN_KILLS", "1"))
+    max_kills = int(os.getenv("MAX_KILLS", "3"))
     
-    chaos = ChaosMonkey(kill_interval=kill_interval, excluded_containers=protected)
+    chaos = ChaosMonkey(
+        kill_interval=kill_interval,
+        excluded_containers=protected,
+        min_kills=min_kills,
+        max_kills=max_kills
+    )
     
     try:
         chaos.chaos_loop()
