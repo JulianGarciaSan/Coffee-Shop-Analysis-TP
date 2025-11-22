@@ -153,23 +153,31 @@ class Client:
             
             logger.info("Esperando reportes del servidor...")
             
+            # total_messages_received = 0
+            # total_lines_received = 0
+            
             for message in self.protocol.receive_reports():
                 if self.shutdown.is_shutting_down():
                     logger.info("Shutdown detectado, deteniendo recepción")
                     break
                 
                 if message.action == "L":
+                    # lines_in_message = len([l for l in message.data.strip().split('\n') if l.strip()])
+                    # total_messages_received += 1
+                    # total_lines_received += lines_in_message
+                    
                     self._process_report_data(message.file_type, message.data)
                     
                 elif message.action == "EXIT":
                     logger.info("EXIT recibido, cerrando archivos de reportes")
+                    #logger.info(f"TOTAL RECIBIDO: {total_messages_received} mensajes, {total_lines_received} líneas")
                     self._close_all_report_files()
                     break
                 
                 else:
-                    logger.warning(f"Mensaje inesperado durante recepción de reportes: {message.action}")
+                    logger.warning(f"Mensaje inesperado: {message.action}")
             
-            logger.info("Recepción de reportes completada")
+            #logger.info(f"Recepción completada: {total_messages_received} mensajes, {total_lines_received} líneas")
             
         except Exception as e:
             logger.error(f"Error recibiendo reportes: {e}")
@@ -189,6 +197,7 @@ class Client:
             
             #lines_count = data.count('\n') + (1 if data and not data.endswith('\n') else 0)
             #logger.info(f"Datos de {query_name} escritos: {lines_count} líneas")
+            file_handle.flush()
             
         except Exception as e:
             logger.error(f"Error procesando datos de {query_name}: {e}")
@@ -239,10 +248,10 @@ class Client:
         elif self.client_socket:
             self.client_socket.close()
             
-        try:
-            self.receiver_thread.join(timeout=5.0)
-        except Exception as e:
-            logger.error(f"Error esperando el hilo receptor: {e}") 
+        # try:
+        #     self.receiver_thread.join(timeout=5.0)
+        # except Exception as e:
+        #     logger.error(f"Error esperando el hilo receptor: {e}") 
             
         logger.info("Cliente cerrado completamente")
         

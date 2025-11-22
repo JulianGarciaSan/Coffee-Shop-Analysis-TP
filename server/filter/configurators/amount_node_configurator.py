@@ -17,6 +17,7 @@ class AmountNodeConfigurator(NodeConfigurator):
         all_node_ids_str = os.getenv('ALL_NODE_IDS', self.node_id)
         all_node_ids = [nid.strip() for nid in all_node_ids_str.split(',')]
         
+        
         self.coordinator = PeerCoordinator(
             node_id=self.node_id,
             rabbitmq_host=rabbitmq_host,
@@ -144,7 +145,7 @@ class AmountNodeConfigurator(NodeConfigurator):
 
     def send_data(self, data: str, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None, message_id: Optional[int] = None):
         headers = self.create_headers(client_id, message_id)
-        print(f"AmountNodeConfigurator: Sending data: {data}")
+        
         if client_id:
             client_id_str = str(client_id)
             if self.coordinator.should_send_ack_after_processing(client_id_str):
@@ -161,7 +162,6 @@ class AmountNodeConfigurator(NodeConfigurator):
 
     def _on_all_acks_received(self, client_id: str,message_id: str, batch_type: str):
         logger.info(f"Todos los ACKs recibidos para cliente {client_id}, propagando EOF downstream")
-        
         if self.output_middlewares is None:
             logger.error("output_middlewares no está configurado")
             return

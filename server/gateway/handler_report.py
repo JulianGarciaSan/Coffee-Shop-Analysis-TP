@@ -27,6 +27,7 @@ class ReportHandler(threading.Thread):
             self._middleware.shutdown = self._shutdown
 
         self._stopped = threading.Event()
+        
 
     def run(self):
         logger.info("ReportHandler iniciado")

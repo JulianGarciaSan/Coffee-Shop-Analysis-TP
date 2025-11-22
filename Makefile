@@ -102,12 +102,12 @@ clean-all: stop
 	docker builder prune -f
 	docker volume prune -f
 	sudo rm -rf report*
-	sudo rm -rf server/logs/filter_year_1/*
-	sudo rm -rf server/logs/filter_year_2/*
-	sudo rm -rf server/logs/filter_year_3/*
-	sudo rm -rf server/logs/filter_hour_1/*
-	sudo rm -rf server/logs/filter_hour_2/*
-	sudo rm -rf server/logs/filter_hour_3/*
+# 	sudo rm -rf server/logs/filter_year_1/*
+# 	sudo rm -rf server/logs/filter_year_2/*
+# 	sudo rm -rf server/logs/filter_year_3/*
+# 	sudo rm -rf server/logs/filter_hour_1/*
+# 	sudo rm -rf server/logs/filter_hour_2/*
+# 	sudo rm -rf server/logs/filter_hour_3/*
 .PHONY: clean-all
 
 logs:

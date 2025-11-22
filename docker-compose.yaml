@@ -471,58 +471,58 @@ services:
       - TOTAL_AMOUNT_FILTERS=1
       - MIN_AMOUNT=75
       - NODE_ID=amount_node_1
-      # - ALL_NODE_IDS=amount_node_1,amount_node_2,amount_node_3
+      #- ALL_NODE_IDS=amount_node_1,amount_node_2,amount_node_3
       - ALL_NODE_IDS=amount_node_1
     volumes:
       - ./server/config.ini:/app/config.ini
 
-  # filter_amount_2:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/filter/Dockerfile
-  #   container_name: filter_amount_2
-  #   restart: on-failure
-  #   ports:
-  #     - "19998:9999"
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - FILTER_MODE=amount
-  #     - INPUT_QUEUE=hour_filtered
-  #     - OUTPUT_Q1=report.exchange
-  #     - TOTAL_AMOUNT_FILTERS=3
-  #     - MIN_AMOUNT=75
-  #     - NODE_ID=amount_node_2
-  #     - ALL_NODE_IDS=amount_node_1,amount_node_2,amount_node_3
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
+  filter_amount_2:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_amount_2
+    restart: on-failure
+    ports:
+      - "19998:9999"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=amount
+      - INPUT_QUEUE=hour_filtered
+      - OUTPUT_Q1=report.exchange
+      - TOTAL_AMOUNT_FILTERS=3
+      - MIN_AMOUNT=75
+      - NODE_ID=amount_node_2
+      - ALL_NODE_IDS=amount_node_1,amount_node_2,amount_node_3
+    volumes:
+      - ./server/config.ini:/app/config.ini
 
-  # filter_amount_3:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/filter/Dockerfile
-  #   container_name: filter_amount_3
-  #   ports:
-  #     - "19999:9999"
-  #   restart: on-failure
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - FILTER_MODE=amount
-  #     - INPUT_QUEUE=hour_filtered
-  #     - OUTPUT_Q1=report.exchange
-  #     - TOTAL_AMOUNT_FILTERS=3
-  #     - MIN_AMOUNT=75
-  #     - NODE_ID=amount_node_3
-  #     - ALL_NODE_IDS=amount_node_1,amount_node_2,amount_node_3
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
+  filter_amount_3:
+    build:
+      context: .
+      dockerfile: ./server/filter/Dockerfile
+    container_name: filter_amount_3
+    ports:
+      - "19999:9999"
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - FILTER_MODE=amount
+      - INPUT_QUEUE=hour_filtered
+      - OUTPUT_Q1=report.exchange
+      - TOTAL_AMOUNT_FILTERS=3
+      - MIN_AMOUNT=75
+      - NODE_ID=amount_node_3
+      - ALL_NODE_IDS=amount_node_1,amount_node_2,amount_node_3
+    volumes:
+      - ./server/config.ini:/app/config.ini
 
   # report_generator:
   #   build:
@@ -543,6 +543,37 @@ services:
   #   volumes:
   #     - ./server/config.ini:/app/config.ini
   #     - ./reports:/app/reports
+
+  chaos_monkey:
+    build:
+      context: ./server/chaos_monkey
+      dockerfile: Dockerfile
+    container_name: chaos_monkey
+    restart: "no"  # No reiniciar automáticamente
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - KILL_INTERVAL=5  # Segundos entre caídas
+    depends_on:
+      gateway:
+        condition: service_started
+      filter_year_1:
+        condition: service_started
+      filter_year_2:
+        condition: service_started  
+      filter_year_3:
+        condition: service_started
+      filter_hour_1:
+        condition: service_started
+      filter_hour_2:
+        condition: service_started 
+      filter_hour_3:
+        condition: service_started
+      filter_amount_1:
+        condition: service_started
+      client_1:
+        condition: service_started
 
 
   # join_node_0:

@@ -26,6 +26,7 @@ class ProtocolNew:
     
     HEADER_SIZE = 9  
 
+
     def __init__(self, socket_conn: socket.socket):
         self.socket_conn = socket_conn
         self.next_msg_id = 1
@@ -35,6 +36,10 @@ class ProtocolNew:
         
         self.receiver_thread = threading.Thread(target=self._receiver_loop, daemon=True)
         self.receiver_thread.start()
+        
+        self.popped_report_lines = 0
+
+
     
     def _receiver_loop(self):
         """Lee TODO del socket y distribuye según tipo de mensaje."""
@@ -57,7 +62,16 @@ class ProtocolNew:
                         
                 elif msg_type == self.MSG_TYPE_PUSH:
                     if payload:
-                        self.report_queue.put(payload.decode('utf-8'))
+                        decoded_payload = payload.decode('utf-8')
+                    # EXIT_REPORTS es crítico → enviar ACK
+                        if decoded_payload == "EXIT_REPORTS":
+                            self._send_ack(msg_id)  # ← ACK obligatorio
+                            self.report_queue.put("EXIT")
+                            logger.info("EXIT_REPORTS recibido y confirmado con ACK")
+                        else:
+                            # Datos normales → NO ACK (fire-and-forget)
+                            self.report_queue.put(decoded_payload)
+                            # NO enviar ACK para throughput
                         
                 elif msg_type == self.MSG_TYPE_BATCH:
                     if payload:
@@ -65,7 +79,6 @@ class ProtocolNew:
                         if message:
                             self._send_ack(msg_id)
                             self.report_queue.put(("COMMAND", message))
-                            
                 elif msg_type == self.MSG_TYPE_EXIT:
                     self.report_queue.put("EXIT")
                     break
@@ -116,12 +129,27 @@ class ProtocolNew:
             return False
 
     def send_report_data_to_client(self, data, query_name):
-        """Envía datos de reporte SIN esperar ACK."""
+        """Envía datos de reporte SIN esperar ACK (fire-and-forget)."""
         try:
             message = f"L|{query_name}|0|{data}"
-            return self._send_push(message)
+            return self._send_push_no_ack(message)  # ← Nuevo método
         except Exception as e:
             logger.error(f"Error enviando datos de reporte: {e}")
+            return False
+        
+    def _send_push_no_ack(self, message: str) -> bool:
+        """Envía PUSH sin esperar ACK (fire-and-forget para throughput)."""
+        msg_id = self.next_msg_id
+        self.next_msg_id += 1
+        return self._send_with_header(self.MSG_TYPE_PUSH, msg_id, message)
+        
+    def send_reports_exit_message(self):
+        """Envía EXIT_REPORTS como PUSHp (con ACK)."""
+        try:
+            message = "EXIT_REPORTS"
+            return self._send_push(message)
+        except Exception as e:
+            logger.error(f"Error enviando EXIT_REPORTS: {e}")
             return False
 
     def _send_with_ack(self, msg_type: int, message: str) -> bool:
@@ -146,9 +174,28 @@ class ProtocolNew:
             self.pending_acks.pop(msg_id, None)
 
     def _send_push(self, message: str) -> bool:
-        """Envía mensaje tipo PUSH (sin ACK)."""
-        msg_id = 0 
-        return self._send_with_header(self.MSG_TYPE_PUSH, msg_id, message)
+        msg_id = self.next_msg_id
+        self.next_msg_id += 1
+        
+        # Preparar para esperar ACK
+        ack_event = threading.Event()
+        self.pending_acks[msg_id] = ack_event
+        
+        try:
+            # Enviar mensaje
+            success = self._send_with_header(self.MSG_TYPE_PUSH, msg_id, message)
+            if not success:
+                return False
+            
+            # Esperar ACK
+            if ack_event.wait(timeout=10.0):
+                return True
+            else:
+                logger.error(f"Timeout esperando ACK para PUSH msg_id {msg_id}")
+                return False
+        finally:
+            # Limpiar
+            self.pending_acks.pop(msg_id, None)
 
     def _send_ack(self, msg_id: int) -> bool:
         """Envía ACK para un mensaje específico."""
@@ -220,14 +267,13 @@ class ProtocolNew:
                 
                 if isinstance(item, str) and item.startswith("L|"):
                     parts = item.split('|', 3)
-                    if len(parts) == 4:
-                        yield ProtocolMessage(
-                            action=parts[0],
-                            file_type=parts[1],
-                            last_batch=parts[2] == "1",
-                            data=parts[3],
-                            size=len(item)
-                        )
+                    yield ProtocolMessage(
+                        action=parts[0],
+                        file_type=parts[1],
+                        last_batch=parts[2] == "1",
+                        data=parts[3],
+                        size=len(item)
+                    )
                         
         except Exception as e:
             logger.error(f"Error recibiendo reportes: {e}")
