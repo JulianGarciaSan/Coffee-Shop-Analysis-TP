@@ -66,6 +66,8 @@ class ClientHandler(threading.Thread):
         
         self.message_id = 0
         
+        self.lines_sent_per_client = 0
+        
         self.gateway.register_client(self)
         # Lista de headers conocidos que deben ser filtrados
         self.known_headers = [
@@ -341,8 +343,12 @@ class ClientHandler(threading.Thread):
             logger.error(f"Error procesando mensaje de tipo 'M': {e}")
 
         
+    # En gateway_client.py - collect_data_for_reports()
     def collect_data_for_reports(self):
         logger.info(f"Reports collector started for client {self.client_id}")
+        # total_lines_sent = 0
+        # total_messages_sent = 0
+        
         while self._is_running and not (self.shutdown and self.shutdown.is_shutting_down()):
             try:
                 item = self._report_queue.get()  
@@ -350,21 +356,35 @@ class ClientHandler(threading.Thread):
                 parts = routing_key.split('.') if routing_key else []
                 query_name = parts[0] if parts else routing_key
                 dto = ReportBatchDTO.from_bytes_fast(body)
+                
                 if dto.batch_type == BatchType.EOF:
                     self.eof_count += 1
+                    logger.info(f"EOF {self.eof_count}/{self.max_expected_reports} recibido")
+                    # logger.info(f"TOTAL ENVIADO AL CLIENTE: {total_messages_sent} mensajes, {total_lines_sent} líneas")
+                    
                     if self.validate_eofs():
-                        #self._send_reports_to_client(self.report_data)
                         self._send_end_of_reports()
                         break
                 else:
+                    # filtered_data = self._remove_headers_from_data(dto.data)
+                    # lines_in_batch = len([l for l in filtered_data.strip().split('\n') if l.strip()])
+                    
+                    # Enviar al cliente
                     self._send_report_data_to_client(dto.data, query_name)
-                    logger.info(f"Enviando datos de reporte {query_name} al cliente {self.client_id}")
+                    
+                    # total_messages_sent += 1
+                    # total_lines_sent += lines_in_batch
+                    
+                    # if total_messages_sent % 100 == 0:  # Log cada 100 mensajes
+                    #     logger.info(f"Cliente {self.client_id}: {total_messages_sent} mensajes, {total_lines_sent} líneas enviadas")
 
             finally:
                 try:
                     self._report_queue.task_done()
                 except Exception:
                     pass
+                    
+        # logger.info(f"RESUMEN FINAL Cliente {self.client_id}: {total_messages_sent} mensajes, {total_lines_sent} líneas enviadas")
         self._is_running = False
         self._cleanup()
 
@@ -393,7 +413,7 @@ class ClientHandler(threading.Thread):
 
     def _send_end_of_reports(self):
         try:
-            success = self.protocol.send_exit_message()
+            success = self.protocol.send_reports_exit_message()
             if success:
                 logger.info(f"EXIT enviado al cliente {self.client_id}")
             else:
@@ -589,10 +609,10 @@ class ClientHandler(threading.Thread):
             self.receiver_thread.join(timeout=5.0)
         except Exception as e:
             logger.error(f"Error esperando receiver_thread: {e}")
-        try:
-            self.sender_thread.join(timeout=5.0) 
-        except Exception as e:
-            logger.error(f"Error esperando sender_thread: {e}")
+        # try:
+        #     self.sender_thread.join(timeout=5.0) 
+        # except Exception as e:
+        #     logger.error(f"Error esperando sender_thread: {e}")
                 
         try:
             if self.report_middleware:

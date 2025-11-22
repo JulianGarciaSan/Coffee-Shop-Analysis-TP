@@ -199,7 +199,6 @@ class FilterNode:
             self.client_logger.write(f"{client_id};{message_id}")
             logging.info("Mensaje recibido en FilterNode")
             should_stop = self.process_message(body, routing_key, client_id,message_id)
-            logging.info("Esperando 30 segundos antes de ack")
             #time.sleep(30)
             ch.basic_ack(delivery_tag=method.delivery_tag)
 
@@ -231,7 +230,7 @@ class FilterNode:
             return False
 
         if "BEF" in eof_status:
-            self.node_configurator.process_message(TransactionBatchDTO("", BatchType.EOF),client_id_eof_log)
+            self.node_configurator.process_message(TransactionBatchDTO("", BatchType.EOF).to_bytes_fast(),client_id_eof_log)
             return False
 
         return True
@@ -275,7 +274,7 @@ class FilterNode:
                 return False
             
             if "BEF" in eof_eof_log:
-                self.node_configurator.process_message(TransactionBatchDTO("", BatchType.EOF),client_id_eof_log)
+                self.node_configurator.process_message(TransactionBatchDTO("", BatchType.EOF).to_bytes_fast(),client_id_eof_log)
                 return False
             
         if "EOF" in log:
