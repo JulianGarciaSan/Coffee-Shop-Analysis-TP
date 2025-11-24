@@ -15,7 +15,6 @@ class TopCustomerConfigurator(GroupByConfigurator):
         self.input_queue_name = os.getenv('INPUT_QUEUE', 'year_filtered_q4')
         self.total_groupby_nodes = int(os.getenv('TOTAL_GROUPBY_NODES', '3'))
         self.topk_node_id = int(os.getenv('TOPK_NODE_ID', '1'))
-        self.checkpoint_dir = os.getenv('CHECKPOINT_DIR', f'/app/server/logs/groupby_top_customers_{self.topk_node_id}/checkpoints')
         self.eof_count_by_client: Dict[str, int] = defaultdict(int)
         logger.info(f"TopCustomerConfigurator inicializado:")
         logger.info(f"  Input Queue: {self.input_queue_name}")
@@ -101,6 +100,5 @@ class TopCustomerConfigurator(GroupByConfigurator):
     def get_strategy_config(self) -> dict:
         return {
             'input_queue_name': self.input_queue_name,
-            'checkpoint_dir': self.checkpoint_dir,
         }
 

@@ -909,7 +909,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - PYTHONUNBUFFERED=1
-      - KILL_INTERVAL=300  # Segundos entre caídas
+      - KILL_INTERVAL=120  # Segundos entre caídas
     depends_on:
       gateway:
         condition: service_started

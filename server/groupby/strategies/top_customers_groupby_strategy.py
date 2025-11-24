@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 
 
 class TopCustomersGroupByStrategy(GroupByStrategy):
-    def __init__(self, input_queue_name: str,checkpoint_dir: str = None):
-        super().__init__(checkpoint_dir=checkpoint_dir)
+    def __init__(self, input_queue_name: str):
+        super().__init__()
         self.input_queue_name = input_queue_name
         self.store_user_purchases_by_client: Dict[str, Dict[str, Dict[str, UserPurchaseCount]]] = defaultdict(
             lambda: defaultdict(lambda: defaultdict(UserPurchaseCount))

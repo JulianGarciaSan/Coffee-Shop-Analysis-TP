@@ -8,6 +8,7 @@ from logger_monitor.logger_monitor import LoggerMonitor
 from dtos.dto import BatchType, TransactionBatchDTO
 from common.graceful_shutdown import GracefulShutdown
 from healthchecker.healthchecker import HealthChecker
+from checkpoint_handler.checkpoint_handler import CheckpointHandler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,12 +22,13 @@ class GroupByNode:
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.groupby_mode = os.getenv('GROUPBY_MODE', 'tpv')
         self.output_exchange = os.getenv('OUTPUT_EXCHANGE', 'join.exchange')
-        
+        self.checkpoint_dir = os.getenv('CHECKPOINT_DIR', f'/app/server/logs/groupby_top_customers/checkpoints')
+
         logger.info(f"GroupByNode inicializado en modo {self.groupby_mode}")
         
         self.transactions_logger = LoggerMonitor('/app/logs.txt')
         self.client_logger = LoggerMonitor('/app/client_logs.txt')
-        self.eof_logger = LoggerMonitor('/app/eof_logs.txt')
+        # self.eof_logger = LoggerMonitor('/app/eof_logs.txt')
         self.is_first_message = True 
         
         self.configurator = GroupByConfiguratorFactory.create_configurator(
@@ -42,9 +44,14 @@ class GroupByNode:
             **strategy_config,
         )
         
-        self.configurator.set_loggers(self.transactions_logger, self.client_logger, self.eof_logger)
-        self.strategy.set_loggers(self.transactions_logger, self.client_logger, self.eof_logger)
+        self.configurator.set_loggers(self.transactions_logger, self.client_logger)
+        self.strategy.set_loggers(self.transactions_logger, self.client_logger)
         
+        self.checkpoint_handler = CheckpointHandler(
+            checkpoint_dir=self.checkpoint_dir,
+            node=self.strategy,
+            transactions_logger=self.transactions_logger
+        )
         self.input_middleware = self.configurator.create_input_middleware()
         if hasattr(self.input_middleware, 'shutdown'):
             self.input_middleware.shutdown = self.shutdown
@@ -82,7 +89,7 @@ class GroupByNode:
 
             self.configurator.handle_eof(dto, self.output_middlewares, self.strategy, client_id, message_id)
 
-            self.strategy.save_eof_checkpoint(client_id, message_id)
+            self.checkpoint_handler.save_eof_checkpoint(client_id, message_id)
             
             # self.eof_logger.write_with_timestamp(f"EOF_COMPLETED:{client_id}")
             return (False, True) 
@@ -91,7 +98,7 @@ class GroupByNode:
             
             self.process_csv_line(dto.data, client_id)
             
-            self.strategy.save_message_checkpoint(client_id, message_id)
+            self.checkpoint_handler.save_message_checkpoint(client_id, message_id)
             
             return (False, True)
         return (False, False) 
@@ -106,20 +113,20 @@ class GroupByNode:
             self.is_first_message = False
             
             last_line_client = self.client_logger._get_last_line()
-            last_line_eof = self.eof_logger._get_last_line()
+            # last_line_eof = self.eof_logger._get_last_line()
             
             logger.info("=" * 80)
             logger.info("ANALYZE FIRST MESSAGE")
             logger.info(f"   Mensaje actual: {client_id}:{message_id}")
             logger.info(f"   Último del client_log: '{last_line_client}'")
-            logger.info(f"   Último del eof_log: '{last_line_eof}'")
+            # logger.info(f"   Último del eof_log: '{last_line_eof}'")
             logger.info("=" * 80)
             
             try:
-                self.strategy.recover_from_checkpoint()
-                
-                if client_id in self.strategy.message_trackers:
-                    tracker = self.strategy.message_trackers[client_id]
+                self.checkpoint_handler.recover_from_checkpoint()
+
+                if client_id in self.checkpoint_handler.message_trackers:
+                    tracker = self.checkpoint_handler.message_trackers[client_id]
                     logger.info(f"Tracker recuperado para cliente {client_id}:")
                     logger.info(f"   Rangos: {tracker.ranges}")
                     
@@ -133,7 +140,7 @@ class GroupByNode:
             except Exception as e:
                 logger.error(f"Error recuperando checkpoint: {e}")
             
-            if self._eof_already_processed(client_id, last_line_eof):
+            if self._eof_already_processed(client_id):
                 logger.info(f"EOF ya procesado - SKIPPING")
                 ch.basic_ack(delivery_tag=method.delivery_tag)
                 return True
@@ -169,7 +176,7 @@ class GroupByNode:
         """
         Verifica si el mensaje específico fue procesado usando rangos.
         """
-        if client_id not in self.strategy.message_trackers:
+        if client_id not in self.checkpoint_handler.message_trackers:
             return False
         
         try:
@@ -178,7 +185,7 @@ class GroupByNode:
             except ValueError:
                 msg_id_int = int(message_id.split('_')[-1])
             
-            is_processed = self.strategy.message_trackers[client_id].contains(msg_id_int)
+            is_processed = self.checkpoint_handler.message_trackers[client_id].contains(msg_id_int)
             
             if is_processed:
                 logger.debug(f"Mensaje {client_id}:{message_id} encontrado en rangos procesados")
@@ -189,15 +196,15 @@ class GroupByNode:
             logger.warning(f"Error verificando mensaje en rangos: {e}")
             return False
 
-    def _eof_already_processed(self, client_id: str, last_line_eof=None) -> bool:
+    def _eof_already_processed(self, client_id: str) -> bool:
         """
         Verifica si el EOF de un cliente ya fue procesado completamente.
         """
-        if client_id not in self.strategy.message_trackers:
+        if client_id not in self.checkpoint_handler.message_trackers:
             return False
         
         checkpoint_path = os.path.join(
-            self.strategy.checkpoint_dir, 
+            self.checkpoint_handler.checkpoint_dir,
             f"client_{client_id}.checkpoint"
         )
         

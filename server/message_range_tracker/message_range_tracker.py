@@ -1,22 +1,10 @@
-# En base_strategy.py o un nuevo archivo utils/range_tracker.py
-
-class MessageRangeTracker:
-    """
-    Mantiene rangos disjuntos de message_ids procesados.
-    Asume que message_ids son numéricos o pueden convertirse a int.
-    """
-    
+class MessageRangeTracker: 
     def __init__(self):
         self.ranges = []  
     
     def add_message_id(self, message_id: int):
         """
         Agrega un message_id y fusiona rangos adyacentes.
-        
-        Ejemplos:
-        - ranges=[(1,3), (7,10)], add(5) → [(1,3), (5,5), (7,10)]
-        - ranges=[(1,3), (5,5), (7,10)], add(4) → [(1,5), (7,10)]
-        - ranges=[(1,3), (5,10)], add(4) → [(1,10)]
         """
         if not self.ranges:
             self.ranges = [(message_id, message_id)]
@@ -27,21 +15,16 @@ class MessageRangeTracker:
         
         for start, end in self.ranges:
             if message_id < start - 1:
-                # message_id va antes de este rango, sin superposición
                 if not inserted:
                     new_ranges.append((message_id, message_id))
                     inserted = True
                 new_ranges.append((start, end))
             elif message_id > end + 1:
-                # message_id va después de este rango, sin superposición
                 new_ranges.append((start, end))
             elif start - 1 <= message_id <= end + 1:
-                # message_id está adyacente o dentro del rango
-                # Fusionar rangos
                 new_start = min(start, message_id)
                 new_end = max(end, message_id)
                 
-                # Continuar fusionando con rangos siguientes si es necesario
                 while new_ranges and new_ranges[-1][1] >= new_start - 1:
                     prev_start, prev_end = new_ranges.pop()
                     new_start = min(prev_start, new_start)
@@ -58,9 +41,7 @@ class MessageRangeTracker:
     def contains(self, message_id: int) -> bool:
         """
         Verifica si un message_id está en alguno de los rangos.
-        Complejidad: O(log n) con búsqueda binaria.
         """
-        # Búsqueda binaria
         left, right = 0, len(self.ranges) - 1
         
         while left <= right:

@@ -8,8 +8,8 @@ logger = logging.getLogger(__name__)
 
 
 class TPVGroupByStrategy(GroupByStrategy):
-    def __init__(self, semester: str,checkpoint_dir: str = None):
-        super().__init__(checkpoint_dir=checkpoint_dir)
+    def __init__(self, semester: str):
+        super().__init__()
         self.semester = semester
         self.tpv_aggregations_by_client: Dict[str, Dict[Tuple[str, str], TPVAggregation]] = defaultdict(
             lambda: defaultdict(TPVAggregation)
