@@ -1,5 +1,4 @@
-import gc
-import json
+
 import logging
 import os
 import sys
@@ -7,7 +6,6 @@ from typing import Dict, List
 from dataclasses import dataclass, field
 from enum import Enum
 from collections import defaultdict
-import threading
 
 from common.graceful_shutdown import GracefulShutdown
 from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
@@ -19,7 +17,9 @@ from menu_item_processor import MenuItemProcessor
 from store_processor import StoreProcessor
 from user_processor import UserProcessor
 from client_routing.client_routing import ClientRouter
-from peer_dto import PeerUserRequest, PeerUserResponse
+from logger_monitor.logger_monitor import LoggerMonitor
+
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -34,52 +34,24 @@ class DataSourceType(Enum):
     BEST_SELLING = "q2_best_selling"
     MOST_PROFIT = "q2_most_profit"
 
-@dataclass
-class PeerCleanupSignal:
-    """Señal para coordinar limpieza entre nodos."""
-    sending_node_id: int
-    client_id: str
-    
-    def to_bytes(self) -> bytes:
-        data = {
-            'sending_node_id': self.sending_node_id,
-            'client_id': self.client_id
-        }
-        return json.dumps(data).encode('utf-8')
-    
-    @classmethod
-    def from_bytes(cls, data: bytes) -> 'PeerCleanupSignal':
-        obj = json.loads(data.decode('utf-8'))
-        return cls(
-            sending_node_id=obj['sending_node_id'],
-            client_id=obj['client_id']
-        )
-        
+
 @dataclass
 class ClientProcessingState:
     stores_loaded: bool = False
     users_loaded: bool = False
     menu_items_loaded: bool = False
-    top_customers_eof_count: int = 0
+    top_customers_loaded: bool = False
     best_selling_loaded: bool = False
     most_profit_loaded: bool = False
     groupby_eof_count: int = 0
     expected_groupby_nodes: int = 2
     expected_top_customers_aggregators: int = 2
+    top_customers_eof_count: int = 0
     
     q3_results_sent: bool = False
     q4_results_sent: bool = False
     best_selling_sent: bool = False
     most_profit_sent: bool = False
-    
-    pending_top_customers: List[Dict] = field(default_factory=list)
-    requested_users: set = field(default_factory=set)
-    received_peer_users: Dict[str, Dict] = field(default_factory=dict)
-    peer_requests_pending: int = 0
-    top_customers_processed: bool = False 
-    
-    nodes_ready_to_cleanup: set = field(default_factory=set)
-    cleanup_broadcasted: bool = False
     
     def is_q3_ready(self) -> bool:
         return (self.stores_loaded and 
@@ -89,9 +61,8 @@ class ClientProcessingState:
     def is_q4_ready(self) -> bool:
         return (self.stores_loaded and 
                 self.users_loaded and 
+                self.top_customers_loaded and
                 self.top_customers_eof_count >= self.expected_top_customers_aggregators and
-                self.top_customers_processed and  
-                self.peer_requests_pending == 0 and
                 not self.q4_results_sent)
     
     def is_best_selling_ready(self) -> bool:
@@ -104,11 +75,6 @@ class ClientProcessingState:
                 self.most_profit_loaded and 
                 not self.most_profit_sent)
 
-    def all_queries_completed(self) -> bool:
-        return (self.q3_results_sent and 
-                self.q4_results_sent and 
-                self.best_selling_sent and 
-                self.most_profit_sent)
 
 class JoinNode:    
     def __init__(self):
@@ -118,24 +84,12 @@ class JoinNode:
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.input_exchange = os.getenv('INPUT_EXCHANGE', 'join.exchange')
         self.output_exchange = os.getenv('OUTPUT_EXCHANGE', 'report.exchange')
-        self.peer_exchange = os.getenv('PEER_EXCHANGE', 'join.peer.exchange')
         
         self.node_id = int(os.getenv('JOIN_NODE_ID', '0'))
         self.total_join_nodes = int(os.getenv('TOTAL_JOIN_NODES', '3'))
-        self.total_topk_aggregators = int(os.getenv('TOTAL_TOPK_NODES', '2'))
-        self.total_groupby_semester_nodes = int(os.getenv('TOTAL_GROUPBY_SEMESTER_NODES', '2'))
         self.node_name = f"join_node_{self.node_id}"
-        self.cleanup_required_nodes = self.total_join_nodes
-
-
-        self.client_states: Dict[str, ClientProcessingState] = defaultdict(
-            lambda: ClientProcessingState(
-                expected_groupby_nodes=self.total_groupby_semester_nodes,
-                expected_top_customers_aggregators=self.total_topk_aggregators
-            )
-        )
         
-        self.peer_lock = threading.Lock()
+        self.client_states: Dict[str, ClientProcessingState] = defaultdict(ClientProcessingState)
         
         self.store_processors: Dict[str, StoreProcessor] = {}
         self.user_processors: Dict[str, UserProcessor] = {}
@@ -148,21 +102,17 @@ class JoinNode:
         self.q3_joined_data_by_client: Dict[str, List[Dict]] = {}
         
         self.join_engine = JoinEngine()
-        self.client_locks: Dict[str, threading.Lock] = defaultdict(threading.Lock)
-
+        self.client_logger = LoggerMonitor('/app/client_logs.txt')
+        
         self.router = MessageRouter()
         self._setup_message_routes()
         
         self._setup_middleware()
-        self._setup_peer_middleware()
         
-        logger.info("JoinNode inicializado con peer-to-peer communication")
-        logger.info(f"  Node ID: {self.node_id}")
-        logger.info(f"  Total Join Nodes: {self.total_join_nodes}")
+        logger.info("JoinNode inicializado con soporte multi-cliente")
         logger.info(f"  RabbitMQ Host: {self.rabbitmq_host}")
         logger.info(f"  Input Exchange: {self.input_exchange}")
         logger.info(f"  Output Exchange: {self.output_exchange}")
-        logger.info(f"  Peer Exchange: {self.peer_exchange}")
         
         self.client_router = ClientRouter(
             total_join_nodes=self.total_join_nodes,
@@ -209,10 +159,6 @@ class JoinNode:
             'top_customers.eof': self._handle_top_customers_message,
             'q2_best_selling.data': self._handle_best_selling_message,
             'q2_most_profit.data': self._handle_most_profit_message,
-            
-            'user_request': self._handle_peer_user_request,
-            'user_response': self._handle_peer_user_response,
-            'cleanup_signal': self._handle_peer_cleanup_signal,
         }
         
         for routing_key, handler in routes.items():
@@ -228,74 +174,45 @@ class JoinNode:
             'tpv.data',
             'top_customers.data', 'top_customers.eof',
             'q2_best_selling.data',
-            'q2_most_profit.data'
+            'q2_most_profit.data', 'q2_most_profit.eof'
         ]
         
         routing_keys = [f"{self.node_name}.{key}" for key in base_keys]
         
         logger.info(f"Configurando {len(routing_keys)} routing keys para {self.node_name}")
+        logger.info(f"Ejemplos: {routing_keys[:3]}")
         
         self.input_middleware = MessageMiddlewareQueue(
             host=self.rabbitmq_host,
-            queue_name=f'join_input_queue_{self.node_name}',
+            queue_name=f'join_input_queue_{self.node_name}',  
             exchange_name=self.input_exchange,
             routing_keys=routing_keys
         )
+
         
         if hasattr(self.input_middleware, 'shutdown'):
             self.input_middleware.shutdown = self.shutdown
         
         self.output_middleware = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
-            exchange_name=self.output_exchange,
-            route_keys=['q3.data', 'q3.eof', 'q4.data', 'q4.eof', 
-                       'q2_best_selling.data', 'q2_best_selling.eof',
-                       'q2_most_profit.data', 'q2_most_profit.eof']
+            #exchange_name=self.output_exchange,
+            exchange_name='reports_exchange',
+            route_keys=['q3.data',
+                        'q4.data',
+                        'client.*.q3',
+                        'client.*.q4', 
+                        'q2_best_selling.data',
+                        'q2_most_profit.data']
         )
         
         if hasattr(self.output_middleware, 'shutdown'):
             self.output_middleware.shutdown = self.shutdown
     
-    def _setup_peer_middleware(self):        
-        self.peer_input_middleware = MessageMiddlewareQueue(
-            host=self.rabbitmq_host,
-            queue_name=f'join_node_{self.node_id}_peer_queue',
-            exchange_name=self.peer_exchange,
-            routing_keys=[
-                f'join_node_{self.node_id}.user_request',
-                f'join_node_{self.node_id}.user_response',
-                f'join_node_{self.node_id}.cleanup_signal',
-            ]
-        )
-        route_keys = []
-        for i in range(self.total_join_nodes):
-            route_keys.append(f'join_node_{i}.user_request')
-            route_keys.append(f'join_node_{i}.user_response')
-            route_keys.append(f'join_node_{i}.cleanup_signal') 
-        
-        self.peer_output_middleware_main = MessageMiddlewareExchange(
-            host=self.rabbitmq_host,
-            exchange_name=self.peer_exchange,
-            route_keys=route_keys
-        )
-        
-        self.peer_output_middleware_peer = MessageMiddlewareExchange(
-            host=self.rabbitmq_host,
-            exchange_name=self.peer_exchange,
-            route_keys=route_keys
-        )
-        
-        if hasattr(self.peer_input_middleware, 'shutdown'):
-            self.peer_input_middleware.shutdown = self.shutdown
-        if hasattr(self.peer_output_middleware_main, 'shutdown'):
-            self.peer_output_middleware_main.shutdown = self.shutdown
-        if hasattr(self.peer_output_middleware_peer, 'shutdown'):
-            self.peer_output_middleware_peer.shutdown = self.shutdown
-    
     def _extract_client_id(self, headers: dict) -> str:
         client_id = 'default_client'
         if headers and 'client_id' in headers:
             original_value = headers['client_id']
+            original_type = type(original_value).__name__
             client_id = original_value
             if isinstance(client_id, bytes):
                 client_id = client_id.decode('utf-8')
@@ -331,7 +248,6 @@ class JoinNode:
             self.client_states[client_id].users_loaded = True
             users_count = len(self.user_processors[client_id].get_data())
             logger.info(f"EOF recibido de users para cliente '{client_id}': {users_count} users cargados")
-            
             self._check_and_execute_joins(client_id)
             return False
         
@@ -347,9 +263,10 @@ class JoinNode:
         dto = MenuItemBatchDTO.from_bytes_fast(message)
         
         if dto.batch_type == BatchType.EOF:
+            state_id = id(self.client_states[client_id])
             self.client_states[client_id].menu_items_loaded = True
             menu_items_count = len(self.menu_item_processors[client_id].get_data())
-            logger.info(f"EOF recibido de menu_items para cliente '{client_id}': {menu_items_count} items cargados")
+            logger.info(f"EOF recibido de menu_items para cliente '{client_id}' (State ID: {state_id}): {menu_items_count} items cargados")
             self._check_and_execute_joins(client_id)
             return False
         
@@ -391,189 +308,15 @@ class JoinNode:
             
             if self.client_states[client_id].top_customers_eof_count >= \
             self.client_states[client_id].expected_top_customers_aggregators:
-                logger.info(f"✓ Todos los EOF de top_customers recibidos para cliente '{client_id}'")
+                self.client_states[client_id].top_customers_loaded = True
+                logger.info(f"Todos los EOF de top_customers recibidos para cliente '{client_id}'")
                 
                 self._check_and_execute_joins(client_id)
             
             return False
-        
         if dto.batch_type == BatchType.RAW_CSV:
-            lines = dto.data.split('\n')
-            
-            for line in lines:
-                if not line.strip() or line.startswith('store_id'):
-                    continue
-                
-                parsed = self._parse_top_customers_line(line)
-                if parsed:
-                    self.client_states[client_id].pending_top_customers.append(parsed)
-            
-            logger.debug(f"Top customers acumulados para cliente '{client_id}': "
-                        f"{len(self.client_states[client_id].pending_top_customers)}")
-        
+            self.top_customers_processors[client_id].process_batch(dto.data, self._parse_top_customers_line)
         return False
-    
-    def _process_pending_top_customers(self, client_id: str):
-        
-        state = self.client_states[client_id]
-        users_dict = self.user_processors[client_id].get_data()
-        
-        missing_users_by_node = {i: set() for i in range(self.total_join_nodes)}
-        
-        logger.info(f"Procesando {len(state.pending_top_customers)} top_customers para cliente '{client_id}'")
-        
-        for top_customer in state.pending_top_customers:
-            user_id = top_customer['user_id']
-            
-            if user_id in users_dict:
-                self.top_customers_processors[client_id].get_data().append(top_customer)
-                logger.debug(f"✓ user_id={user_id} disponible localmente")
-            
-            elif user_id in state.received_peer_users:
-                self.top_customers_processors[client_id].get_data().append(top_customer)
-                logger.debug(f"✓ user_id={user_id} recibido de peer")
-            
-            else:
-                normalized_user_id = user_id.split('.')[0] if '.' in user_id else user_id
-                target_node = hash(normalized_user_id) % self.total_join_nodes
-                
-                if target_node == self.node_id:
-                    logger.warning(f"⚠ user_id={user_id} debería estar aquí pero falta")
-                else:
-                    if user_id not in state.requested_users:
-                        missing_users_by_node[target_node].add(user_id)
-                        state.requested_users.add(user_id)
-                        logger.debug(f"→ user_id={user_id} será solicitado a join_node_{target_node}")
-        
-        with self.peer_lock:
-            for target_node, user_ids in missing_users_by_node.items():
-                if user_ids and target_node != self.node_id:
-                    self._request_users_from_peer(target_node, client_id, list(user_ids))
-                    state.peer_requests_pending += 1
-
-        
-        logger.info(f"Cliente '{client_id}': {state.peer_requests_pending} peer requests enviadas, "
-                   f"{len(self.top_customers_processors[client_id].get_data())} top_customers procesados inmediatamente")
-    
-    def _request_users_from_peer(self, target_node_id: int, client_id: str, user_ids: list):
-        
-        request = PeerUserRequest(
-            requesting_node_id=self.node_id,
-            client_id=client_id,
-            user_ids=user_ids
-        )
-        
-        routing_key = f'join_node_{target_node_id}.user_request'
-        
-        self.peer_output_middleware_main.send(
-            request.to_bytes(),
-            routing_key=routing_key,
-            headers={'client_id': client_id}
-        )
-        
-        logger.info(f"Solicitud enviada a join_node_{target_node_id}: {len(user_ids)} users para cliente '{client_id}'")
-
-    def _handle_peer_user_request(self, message: bytes, headers: dict = None) -> bool:
-        
-        request = PeerUserRequest.from_bytes(message)
-        client_id = request.client_id
-        requesting_node = request.requesting_node_id
-        
-        logger.info(f"Recibida solicitud de join_node_{requesting_node} para cliente '{client_id}': "
-                f"{len(request.user_ids)} users")
-        
-        self._get_or_create_processors(client_id)
-        users_dict = self.user_processors[client_id].get_data()
-        
-        found_users = {}
-        missing_users = []
-        
-        for user_id in request.user_ids:
-            if user_id in users_dict:
-                found_users[user_id] = users_dict[user_id]
-            else:
-                missing_users.append(user_id)
-        
-        if missing_users:
-            logger.warning(f"No se encontraron {len(missing_users)} users (primeros 5): {missing_users[:5]}")
-        
-        response = PeerUserResponse(
-            responding_node_id=self.node_id,
-            client_id=client_id,
-            users_data=found_users
-        )
-        
-        routing_key = f'join_node_{requesting_node}.user_response'
-        
-        self.peer_output_middleware_peer.send(
-            response.to_bytes(),
-            routing_key=routing_key,
-            headers={'client_id': client_id}
-        )
-        
-        logger.info(f"Respuesta enviada a join_node_{requesting_node}: {len(found_users)}/{len(request.user_ids)} users encontrados")
-        
-        return False
-    
-    
-    def _handle_peer_user_response(self, message: bytes, headers: dict = None) -> bool:
-        
-        response = PeerUserResponse.from_bytes(message)
-        client_id = response.client_id
-        responding_node = response.responding_node_id
-        
-        logger.info(f"Recibida respuesta de join_node_{responding_node} para cliente '{client_id}': "
-                   f"{len(response.users_data)} users")
-        
-        state = self.client_states[client_id]
-        
-        state.received_peer_users.update(response.users_data)
-        
-        with self.peer_lock:
-            state.peer_requests_pending -= 1
-        
-        logger.info(f"Cliente '{client_id}': requests pendientes = {state.peer_requests_pending}")
-        
-        self._process_top_customers_with_new_users(client_id, response.users_data.keys())
-        
-        self._check_and_execute_joins(client_id)
-        
-        return False
-    
-    def _handle_peer_cleanup_signal(self, message: bytes, headers: dict = None) -> bool:
-        """Maneja señales de cleanup."""
-        try:
-            signal = PeerCleanupSignal.from_bytes(message)
-            client_id = signal.client_id
-            
-            logger.info(f"Recibida señal de cleanup para cliente '{client_id}'")
-            
-            self._cleanup_client_data(client_id)
-            
-            return False
-            
-        except Exception as e:
-            logger.error(f"Error manejando cleanup signal: {e}", exc_info=True)
-            return False
-    
-    def _process_top_customers_with_new_users(self, client_id: str, new_user_ids: set):
-        
-        state = self.client_states[client_id]
-        users_dict = self.user_processors[client_id].get_data()
-        
-        all_users = {**users_dict, **state.received_peer_users}
-        
-        processed_count = 0
-        
-        for top_customer in state.pending_top_customers:
-            user_id = top_customer['user_id']
-            
-            if user_id in new_user_ids and user_id in all_users:
-                if top_customer not in self.top_customers_processors[client_id].get_data():
-                    self.top_customers_processors[client_id].get_data().append(top_customer)
-                    processed_count += 1
-        
-        logger.info(f"Procesados {processed_count} top_customers adicionales con nuevos users")
     
     def _handle_best_selling_message(self, message: bytes, headers: dict = None) -> bool:
         client_id = self._extract_client_id(headers)
@@ -582,13 +325,22 @@ class JoinNode:
         dto = TransactionItemBatchDTO.from_bytes_fast(message)
         
         if dto.batch_type == BatchType.EOF:
+            # Verificar si el estado existe antes de accederlo
+            if client_id not in self.client_states:
+                logger.warning(f"[DEBUG] Estado no existe para cliente '{client_id}', creando nuevo estado")
+                self.client_states[client_id] = ClientProcessingState()
+            
+            state_id = id(self.client_states[client_id])
+            
             self.client_states[client_id].best_selling_loaded = True
-            logger.info(f"EOF recibido de best_selling para cliente '{client_id}'")
+            logger.info(f"EOF recibido de best_selling para cliente '{client_id}' (State ID: {state_id})")
             self._check_and_execute_joins(client_id)
             return False
         
         if dto.batch_type == BatchType.RAW_CSV:
             self.best_selling_processors[client_id].process_batch(dto.data, self._parse_best_selling_line)
+            current_count = len(self.best_selling_processors[client_id].get_data())
+            logger.info(f"Total datos best_selling para cliente '{client_id}': {current_count} registros")
         return False
     
     def _handle_most_profit_message(self, message: bytes, headers: dict = None) -> bool:
@@ -605,6 +357,8 @@ class JoinNode:
         
         if dto.batch_type == BatchType.RAW_CSV:
             self.most_profit_processors[client_id].process_batch(dto.data, self._parse_most_profit_line)
+            current_count = len(self.most_profit_processors[client_id].get_data())
+            logger.info(f"Total datos most_profit para cliente '{client_id}': {current_count} registros")
         return False
     
     def _parse_tpv_line(self, line: str) -> Dict:
@@ -626,7 +380,7 @@ class JoinNode:
         parts = line.split(',')
         if len(parts) >= 3:
             raw_user_id = parts[1]
-            user_id = raw_user_id.split('.')[0] if '.' in raw_user_id else raw_user_id
+            user_id = raw_user_id[:-2] if '.' in raw_user_id and raw_user_id.endswith('.0') else raw_user_id
             return {
                 'store_id': parts[0],
                 'user_id': user_id,
@@ -659,98 +413,55 @@ class JoinNode:
         return None
     
     def _check_and_execute_joins(self, client_id: str):
-        with self.client_locks[client_id]:
-            state = self.client_states[client_id]
+        state = self.client_states[client_id]
         
-            if (not state.top_customers_processed and 
-                state.users_loaded and 
-                state.top_customers_eof_count >= state.expected_top_customers_aggregators):
-                
-                if state.pending_top_customers:
-                    logger.info(f"Users disponibles, procesando {len(state.pending_top_customers)} top_customers para cliente '{client_id}'")
-                    self._process_pending_top_customers(client_id)
-                else:
-                    logger.info(f"No hay top_customers para cliente '{client_id}' en este nodo (sharding) - marcando como procesado")
-                
-                state.top_customers_processed = True
-            
-            logger.debug(f"[Q4 CHECK] Cliente '{client_id}':")
-            logger.debug(f"  stores_loaded: {state.stores_loaded}")
-            logger.debug(f"  users_loaded: {state.users_loaded}")
-            logger.debug(f"  top_customers_eof_count: {state.top_customers_eof_count}/{state.expected_top_customers_aggregators}")
-            logger.debug(f"  top_customers_processed: {state.top_customers_processed}")
-            logger.debug(f"  peer_requests_pending: {state.peer_requests_pending}")
-            logger.debug(f"  q4_results_sent: {state.q4_results_sent}")
-            
-            # Q3: TPV + Stores
-            if state.is_q3_ready():
-                logger.info(f"Condiciones listas para JOIN Q3 de cliente '{client_id}'")
-                joined_data = self.join_engine.join_tpv_stores(
-                    self.tpv_processors[client_id].get_data(),
-                    self.store_processors[client_id].get_data()
-                )
-                self.q3_joined_data_by_client[client_id] = joined_data
-                self._send_q3_results(client_id, joined_data)
-                state.q3_results_sent = True
-            
-            # Q4: Top Customers + Stores + Users (con peer users)
-            if state.is_q4_ready():
-                logger.info(f" Condiciones listas para JOIN Q4 de cliente '{client_id}'")
-                logger.info(f"  Top customers procesados: {len(self.top_customers_processors[client_id].get_data())}")
-                logger.info(f"  Users locales: {len(self.user_processors[client_id].get_data())}")
-                logger.info(f"  Users de peers: {len(state.received_peer_users)}")
-                
-                joined_data = self.join_engine.join_top_customers(
-                    self.top_customers_processors[client_id].get_data(),
-                    self.store_processors[client_id].get_data(),
-                    self.user_processors[client_id].get_data(),
-                    state.received_peer_users
-                )
-                self._send_q4_results(client_id, joined_data)
-                state.q4_results_sent = True
-            else:
-                if not state.q4_results_sent:
-                    reasons = []
-                    if not state.stores_loaded:
-                        reasons.append("stores not loaded")
-                    if not state.users_loaded:
-                        reasons.append("users not loaded")
-                    if state.top_customers_eof_count < state.expected_top_customers_aggregators:
-                        reasons.append(f"EOF pending ({state.top_customers_eof_count}/{state.expected_top_customers_aggregators})")
-                    if not state.top_customers_processed:
-                        reasons.append("top_customers not processed yet")
-                    if state.peer_requests_pending > 0:
-                        reasons.append(f"peer requests pending ({state.peer_requests_pending})")
-                    
-                    logger.debug(f"Q4 no listo para cliente '{client_id}': {', '.join(reasons)}")
-            
-            # Q2 Best Selling 
-            if state.is_best_selling_ready():
-                logger.info(f"Condiciones listas para JOIN Q2 Best Selling de cliente '{client_id}'")
-                joined_data = self.join_engine.join_with_menu_items(
-                    self.best_selling_processors[client_id].get_data(),
-                    self.menu_item_processors[client_id].get_data(),
-                    'sellings_qty'
-                )
-                self._send_best_selling_results(client_id, joined_data)
-                state.best_selling_sent = True
-            
-            # Q2 Most Profit 
-            if state.is_most_profit_ready():
-                logger.info(f"Condiciones listas para JOIN Q2 Most Profit de cliente '{client_id}'")
-                joined_data = self.join_engine.join_with_menu_items(
-                    self.most_profit_processors[client_id].get_data(),
-                    self.menu_item_processors[client_id].get_data(),
-                    'profit_sum'
-                )
-                self._send_most_profit_results(client_id, joined_data)
-                state.most_profit_sent = True
-                
-            if state.all_queries_completed():
-                if not state.cleanup_broadcasted:
-                    self._broadcast_cleanup_signal(client_id)
-                    state.cleanup_broadcasted = True
-                    state.nodes_ready_to_cleanup.add(self.node_id)
+        # Q3: TPV + Stores
+        if state.is_q3_ready():
+            logger.info(f"Condiciones listas para JOIN Q3 de cliente '{client_id}'")
+            joined_data = self.join_engine.join_tpv_stores(
+                self.tpv_processors[client_id].get_data(),
+                self.store_processors[client_id].get_data()
+            )
+            self.q3_joined_data_by_client[client_id] = joined_data
+            self._send_q3_results(client_id, joined_data)
+            state.q3_results_sent = True
+        
+        # Q4: Top Customers + Stores + Users
+        if state.is_q4_ready():
+            logger.info(f"Condiciones listas para JOIN Q4 de cliente '{client_id}'")
+            joined_data = self.join_engine.join_top_customers(
+                self.top_customers_processors[client_id].get_data(),
+                self.store_processors[client_id].get_data(),
+                self.user_processors[client_id].get_data()
+            )
+            self._send_q4_results(client_id, joined_data)
+            state.q4_results_sent = True
+        
+        # Q2 Best Selling
+        if state.is_best_selling_ready():
+            logger.info(f"Condiciones listas para JOIN Q2 Best Selling de cliente '{client_id}'")
+            joined_data = self.join_engine.join_with_menu_items(
+                self.best_selling_processors[client_id].get_data(),
+                self.menu_item_processors[client_id].get_data(),
+                'sellings_qty'
+            )
+            self._send_best_selling_results(client_id, joined_data)
+            state.best_selling_sent = True
+        else:
+            logger.info(f"Q2 Best Selling NO listo - menu_items: {state.menu_items_loaded}, best_selling: {state.best_selling_loaded}, ya_enviado: {state.best_selling_sent}")
+        
+        # Q2 Most Profit
+        if state.is_most_profit_ready():
+            logger.info(f"Condiciones listas para JOIN Q2 Most Profit de cliente '{client_id}'")
+            joined_data = self.join_engine.join_with_menu_items(
+                self.most_profit_processors[client_id].get_data(),
+                self.menu_item_processors[client_id].get_data(),
+                'profit_sum'
+            )
+            self._send_most_profit_results(client_id, joined_data)
+            state.most_profit_sent = True
+        else:
+            logger.info(f"Q2 Most Profit NO listo - menu_items: {state.menu_items_loaded}, most_profit: {state.most_profit_loaded}, ya_enviado: {state.most_profit_sent}")
     
     def _send_q3_results(self, client_id: str, joined_data: List[Dict]):
         try:
@@ -760,11 +471,17 @@ class JoinNode:
             
             sorted_data = sorted(joined_data, 
                                key=lambda x: (x['year_half_created_at'], int(x['store_id'])))
+            print(f"\n=== RESULTADOS Q3 PARA CLIENTE '{client_id}' ===")
+            print("year_half_created_at,store_name,tpv")
+            for record in sorted_data:
+                store_name = str(record['store_name']).replace(',', '_')
+                print(f"{record['year_half_created_at']},{store_name},{record['tpv']:.1f}")
+            print(f"=== FIN RESULTADOS Q3 PARA CLIENTE '{client_id}' ===\n")
             
             BATCH_SIZE = 150
             header = "year_half_created_at,store_name,tpv"
             
-            logger.info(f"Enviando Q3 para cliente '{client_id}': {len(sorted_data)} registros")
+            logger.info(f"Enviando Q3 para cliente '{client_id}': {len(sorted_data)} registros en {(len(sorted_data) + BATCH_SIZE - 1) // BATCH_SIZE} batches")
             
             for i in range(0, len(sorted_data), BATCH_SIZE):
                 batch = sorted_data[i:i + BATCH_SIZE]
@@ -776,23 +493,25 @@ class JoinNode:
                 
                 results_csv = '\n'.join(csv_lines)
                 
+                logger.info(f"Tamaño del batch {i//BATCH_SIZE + 1}: {len(results_csv)} bytes")
+                
                 result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
                 self.output_middleware.send(
                     result_dto.to_bytes_fast(), 
-                    routing_key='q3.data',
+                    routing_key=f'client.{client_id}.q3',
                     headers={'client_id': int(client_id)}
                 )
                 
-                logger.info(f"Batch Q3 enviado para cliente '{client_id}': {len(batch)} registros")
+                logger.info(f"Batch Q3 enviado para cliente '{client_id}': {len(batch)} registros ({i+1}-{i+len(batch)}/{len(sorted_data)})")
             
             eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
             self.output_middleware.send(
                 eof_dto.to_bytes_fast(), 
-                routing_key='q3.data',
+                routing_key=f'client.{client_id}.q3',
                 headers={'client_id': int(client_id)}
             )
             
-            logger.info(f"Resultados Q3 completados para cliente '{client_id}'")
+            logger.info(f"Resultados Q3 completados para cliente '{client_id}': {len(joined_data)} registros en total")
             
         except Exception as e:
             logger.error(f"Error enviando resultados Q3 para cliente '{client_id}': {e}", exc_info=True)
@@ -802,6 +521,13 @@ class JoinNode:
             if not joined_data:
                 logger.warning(f"No hay datos para Q4 de cliente '{client_id}'")
                 return
+            
+            print(f"\n=== RESULTADOS Q4 PARA CLIENTE {client_id} ===")
+            print(f"Total registros: {len(joined_data)}")
+            print("store_name,birthdate")
+            for record in joined_data:
+                print(f"{record['store_name']},{record['birthdate']}")
+            print(f"=== FIN RESULTADOS Q4 CLIENTE {client_id} ===\n")
             
             sorted_data = sorted(joined_data, key=lambda x: int(x['store_id']))
             
@@ -820,20 +546,20 @@ class JoinNode:
                 result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
                 self.output_middleware.send(
                     result_dto.to_bytes_fast(), 
-                    routing_key='q4.data',
+                    routing_key=f'client.{client_id}.q4',
                     headers={'client_id': int(client_id)}
                 )
                 
-                logger.info(f"Batch Q4 enviado para cliente '{client_id}': {len(batch)} registros")
+                logger.info(f"Batch Q4 enviado para cliente '{client_id}': {len(batch)} registros ({i+1}-{i+len(batch)}/{len(sorted_data)})")
             
             eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
             self.output_middleware.send(
                 eof_dto.to_bytes_fast(), 
-                routing_key='q4.data',
+                routing_key=f'client.{client_id}.q4',
                 headers={'client_id': int(client_id)}
             )
             
-            logger.info(f"Resultados Q4 completados para cliente '{client_id}': {len(joined_data)} registros")
+            logger.info(f"Resultados Q4 completados para cliente '{client_id}': {len(joined_data)} registros en total")
             
         except Exception as e:
             logger.error(f"Error enviando resultados Q4 para cliente '{client_id}': {e}", exc_info=True)
@@ -846,6 +572,12 @@ class JoinNode:
             
             sorted_data = sorted(joined_data, key=lambda x: x['year_month_created_at'])
             
+            print(f"\n=== RESULTADOS Q2 BEST SELLING PARA CLIENTE '{client_id}' ===")
+            print("year_month_created_at,item_name,sellings_qty")
+            for record in sorted_data:
+                print(f"{record['year_month_created_at']},{record['item_name']},{record['sellings_qty']}")
+            print(f"=== FIN RESULTADOS Q2 BEST SELLING PARA CLIENTE '{client_id}' ===\n")
+        
             BATCH_SIZE = 1000
             header = "year_month_created_at,item_name,sellings_qty"
             
@@ -865,7 +597,7 @@ class JoinNode:
                     headers={'client_id': int(client_id)}
                 )
                 
-                logger.info(f"Batch Q2 best_selling enviado para cliente '{client_id}': {len(batch)} registros")
+                logger.info(f"Batch Q2 best_selling enviado para cliente '{client_id}': {len(batch)} registros ({i+1}-{i+len(batch)}/{len(sorted_data)})")
             
             eof_dto = TransactionItemBatchDTO(f"EOF:{client_id}", BatchType.EOF)
             self.output_middleware.send(
@@ -874,7 +606,7 @@ class JoinNode:
                 headers={'client_id': int(client_id)}
             )
             
-            logger.info(f"Resultados Q2 best_selling completados para cliente '{client_id}'")
+            logger.info(f"Resultados Q2 best_selling completados para cliente '{client_id}': {len(joined_data)} registros en total")
             
         except Exception as e:
             logger.error(f"Error enviando resultados Q2 best_selling para cliente '{client_id}': {e}", exc_info=True)
@@ -886,6 +618,12 @@ class JoinNode:
                 return
             
             sorted_data = sorted(joined_data, key=lambda x: x['year_month_created_at'])
+            
+            print(f"\n=== RESULTADOS Q2 MOST PROFIT PARA CLIENTE '{client_id}' ===")
+            print("year_month_created_at,item_name,profit_sum")
+            for record in sorted_data:
+                print(f"{record['year_month_created_at']},{record['item_name']},{record['profit_sum']:.1f}")
+            print(f"=== FIN RESULTADOS Q2 MOST PROFIT PARA CLIENTE '{client_id}' ===\n")
             
             BATCH_SIZE = 1000
             header = "year_month_created_at,item_name,profit_sum"
@@ -906,7 +644,7 @@ class JoinNode:
                     headers={'client_id': int(client_id)}
                 )
                 
-                logger.info(f"Batch Q2 most_profit enviado para cliente '{client_id}': {len(batch)} registros")
+                logger.info(f"Batch Q2 most_profit enviado para cliente '{client_id}': {len(batch)} registros ({i+1}-{i+len(batch)}/{len(sorted_data)})")
             
             eof_dto = TransactionItemBatchDTO(f"EOF:{client_id}", BatchType.EOF)
             self.output_middleware.send(
@@ -915,7 +653,7 @@ class JoinNode:
                 headers={'client_id': int(client_id)}
             )
             
-            logger.info(f"Resultados Q2 most_profit completados para cliente '{client_id}'")
+            logger.info(f"Resultados Q2 most_profit completados para cliente '{client_id}': {len(joined_data)} registros en total")
             
         except Exception as e:
             logger.error(f"Error enviando resultados Q2 most_profit para cliente '{client_id}': {e}", exc_info=True)
@@ -935,8 +673,32 @@ class JoinNode:
         logger.info("Señal de shutdown recibida en JoinNode")
         if self.input_middleware:
             self.input_middleware.stop_consuming()
-        if self.peer_input_middleware:
-            self.peer_input_middleware.stop_consuming()
+            
+            
+    def parse_message_headers(self, properties):
+        client_id = None
+        message_id = None
+        if properties and properties.headers:
+            client_id = properties.headers.get('client_id')
+            message_id = properties.headers.get('message_id')
+        return str(client_id), str(message_id)
+    
+    def analyze_message(self, client_id: str, message_id: str, ch, method, body) -> bool:
+        
+        # if self.is_first_message:
+        #     self.is_first_message = False
+            
+        last_line_client = self.client_logger._get_last_line()
+        if last_line_client and last_line_client.strip() and ';' in last_line_client:    
+            client_id_client_log, message_id_client_log = last_line_client.split(';')
+            if client_id_client_log == client_id and message_id_client_log == message_id:
+                logger.info(f"Estado ya consistente con cliente {client_id} y mensaje {message_id}")
+                return True
+        try:
+            pass
+        except Exception as e:
+            logger.error(f"Error recuperando estado: {e}")
+        return False
     
     def on_message_callback(self, ch, method, properties, body):
         try:
@@ -944,17 +706,21 @@ class JoinNode:
                 logger.warning("Shutdown solicitado, deteniendo")
                 ch.stop_consuming()
                 return
-            
-            routing_key = method.routing_key
-            headers = properties.headers if properties and hasattr(properties, 'headers') else None
-            
+            routing_key = method.routing_key                
             if '.' in routing_key:
-                parts = routing_key.split('.', 1)
+                parts = routing_key.split('.', 1) 
                 base_routing_key = parts[1] if len(parts) > 1 else routing_key
             else:
                 base_routing_key = routing_key
+                
+            client_id, message_id = self.parse_message_headers(properties)
+            if message_id is None:
+                print(f"BODY: {body.decode('utf-8')}")
+            if self.analyze_message(client_id, message_id, ch, method, body):
+                return
             
-            should_stop = self.process_message(body, base_routing_key, headers)
+            self.client_logger.write(f"{client_id};{message_id}")
+            should_stop = self.process_message(body, base_routing_key, properties.headers)
 
             if should_stop:
                 logger.info("Procesamiento completado - deteniendo consuming")
@@ -963,42 +729,9 @@ class JoinNode:
         except Exception as e:
             logger.error(f"Error en callback: {e}", exc_info=True)
     
-    def on_peer_message_callback(self, ch, method, properties, body):
-        try:
-            if self.shutdown.is_shutting_down():
-                ch.stop_consuming()
-                return
-            
-            routing_key = method.routing_key
-            headers = properties.headers if properties and hasattr(properties, 'headers') else None
-            
-            parts = routing_key.split('.', 1)
-            message_type = parts[1] if len(parts) > 1 else routing_key
-            
-            self.process_message(body, message_type, headers)
-            
-        except Exception as e:
-            logger.error(f"Error en peer callback: {e}", exc_info=True)
-    
     def start(self):
         try:
-            main_thread = threading.Thread(
-                target=self._consume_main_exchange,
-                daemon=False
-            )
-            
-            peer_thread = threading.Thread(
-                target=self._consume_peer_exchange,
-                daemon=False
-            )
-            
-            main_thread.start()
-            peer_thread.start()
-            
-            logger.info("JoinNode consumiendo de main y peer exchanges")
-            
-            main_thread.join()
-            peer_thread.join()
+            self.input_middleware.start_consuming(self.on_message_callback)
             
         except KeyboardInterrupt:
             logger.info("JoinNode detenido manualmente")
@@ -1008,133 +741,21 @@ class JoinNode:
         finally:
             self._cleanup()
     
-    def _consume_main_exchange(self):
-        try:
-            logger.info("Iniciando consumo de main exchange")
-            self.input_middleware.start_consuming(self.on_message_callback)
-        except Exception as e:
-            logger.error(f"Error en main exchange: {e}")
-    
-    def _consume_peer_exchange(self):
-        try:
-            logger.info("Iniciando consumo de peer exchange")
-            self.peer_input_middleware.start_consuming(self.on_peer_message_callback)
-        except Exception as e:
-            logger.error(f"Error en peer exchange: {e}")
-    
     def _cleanup(self):
         try:
             if hasattr(self, 'input_middleware') and self.input_middleware:
                 self.input_middleware.close()
                 
-            if hasattr(self, 'peer_input_middleware') and self.peer_input_middleware:
-                self.peer_input_middleware.close()
-                
             if hasattr(self, 'output_middleware') and self.output_middleware:
                 self.output_middleware.close()
-                
-            if hasattr(self, 'peer_output_middleware_main') and self.peer_output_middleware_main:
-                self.peer_output_middleware_main.close()
-                
-            if hasattr(self, 'peer_output_middleware_peer') and self.peer_output_middleware_peer:
-                self.peer_output_middleware_peer.close()
                 
             logger.info("Conexiones cerradas exitosamente")
             
         except Exception as e:
             logger.error(f"Error durante cleanup: {e}", exc_info=True)
 
-    def _cleanup_client_data(self, client_id: str):
-        """
-        Limpia todos los datos acumulados de un cliente específico.
-        Se llama después de enviar todos los EOFs.
-        """
-        try:
-            logger.info(f"Iniciando limpieza de datos para cliente '{client_id}'")
-            
-            if client_id in self.store_processors:
-                self.store_processors[client_id].get_data().clear()
-                del self.store_processors[client_id]
-                logger.debug(f"Store processor eliminado")
-            
-            if client_id in self.user_processors:
-                self.user_processors[client_id].get_data().clear()
-                del self.user_processors[client_id]
-                logger.debug(f"User processor eliminado")
-            
-            if client_id in self.menu_item_processors:
-                self.menu_item_processors[client_id].get_data().clear()
-                del self.menu_item_processors[client_id]
-                logger.debug(f"Menu item processor eliminado")
-            
-            if client_id in self.tpv_processors:
-                self.tpv_processors[client_id].get_data().clear()
-                del self.tpv_processors[client_id]
-                logger.debug(f"TPV processor eliminado")
-            
-            if client_id in self.top_customers_processors:
-                self.top_customers_processors[client_id].get_data().clear()
-                del self.top_customers_processors[client_id]
-                logger.debug(f"Top customers processor eliminado")
-            
-            if client_id in self.best_selling_processors:
-                self.best_selling_processors[client_id].get_data().clear()
-                del self.best_selling_processors[client_id]
-                logger.debug(f"Best selling processor eliminado")
-            
-            if client_id in self.most_profit_processors:
-                self.most_profit_processors[client_id].get_data().clear()
-                del self.most_profit_processors[client_id]
-                logger.debug(f"Most profit processor eliminado")
-            
-            if client_id in self.q3_joined_data_by_client:
-                del self.q3_joined_data_by_client[client_id]
-                logger.debug(f"Q3 joined data eliminado")
-            
-            if client_id in self.client_states:
-                state = self.client_states[client_id]
-                state.pending_top_customers.clear()
-                state.requested_users.clear()
-                state.received_peer_users.clear()
-                del self.client_states[client_id]
-                logger.debug(f"Client state eliminado")
-                    
-            if client_id in self.client_locks:
-                del self.client_locks[client_id]
-                logger.debug(f"Client lock eliminado")
-            
-            collected = gc.collect()
-            
-            logger.info(f"Limpieza completada para cliente '{client_id}'")
-            
-        except Exception as e:
-            logger.error(f"Error limpiando datos del cliente '{client_id}': {e}", exc_info=True)
-    
-    def _broadcast_cleanup_signal(self, client_id: str):
-        """Broadcast a todos los nodos que pueden limpiar este cliente."""
-        try:
-            signal = PeerCleanupSignal(
-                sending_node_id=self.node_id,  
-                client_id=client_id
-            )            
-            for target_node in range(self.total_join_nodes):
-                routing_key = f'join_node_{target_node}.cleanup_signal'
-                
-                with self.peer_lock:
-                    self.peer_output_middleware_main.send(
-                        signal.to_bytes(),
-                        routing_key=routing_key,
-                        headers={'client_id': client_id}
-                    )
-            
-            logger.info(f"✓ Cleanup signal enviado a {self.total_join_nodes} nodos para cliente '{client_id}'")
-            
-        except Exception as e:
-            logger.error(f"Error broadcasting cleanup signal: {e}", exc_info=True)
-    
 
 if __name__ == "__main__":
-    
     try:
         node = JoinNode()
         node.start()

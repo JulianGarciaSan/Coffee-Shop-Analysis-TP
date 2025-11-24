@@ -22,7 +22,7 @@ class Client:
         self.client_socket = None
         self.protocol = None  
         self.processor = None
-        self.expected_reports = 1
+        self.expected_reports = 6
         
         self.report_files = {} 
         self.report_headers = {
@@ -70,12 +70,12 @@ class Client:
     def process_and_send_files_from_volumes(self):
         mounted_folders = {
             #"D": "/data/transactions",
-            "D": "/data/transactions_test",
+            #"D": "/data/transactions_test",
             #"I": "/data/transaction_items",
-            # "I": "/data/transactions_items_test",
-            # "U": "/data/users",
+             "I": "/data/transactions_items_test",
+            "U": "/data/users",
             "S": "/data/stores",
-            # "M": "/data/menu_items",
+            "M": "/data/menu_items",
             #"payment_methods": "/data/payment_methods",
             #"vouchers": "/data/vouchers"
         }

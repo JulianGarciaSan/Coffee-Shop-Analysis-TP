@@ -11,6 +11,8 @@ COPY ./server/aggregator /app/
 COPY ./server/dtos/ ./dtos/
 COPY ./server/client_routing/ ./client_routing/
 COPY ./server/coordinator/ ./coordinator/
+COPY ./server/logger_monitor/ ./logger_monitor/
+COPY ./server/healthchecker/ ./healthchecker/
 
 
 CMD ["python", "main.py"]

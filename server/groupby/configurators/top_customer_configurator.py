@@ -14,10 +14,14 @@ class TopCustomerConfigurator(GroupByConfigurator):
         super().__init__(rabbitmq_host, output_exchange)
         self.input_queue_name = os.getenv('INPUT_QUEUE', 'year_filtered_q4')
         self.total_groupby_nodes = int(os.getenv('TOTAL_GROUPBY_NODES', '3'))
+        self.topk_node_id = int(os.getenv('TOPK_NODE_ID', '1'))
+        self.checkpoint_dir = os.getenv('CHECKPOINT_DIR', f'/app/server/logs/groupby_top_customers_{self.topk_node_id}/checkpoints')
         self.eof_count_by_client: Dict[str, int] = defaultdict(int)
         logger.info(f"TopCustomerConfigurator inicializado:")
         logger.info(f"  Input Queue: {self.input_queue_name}")
         logger.info(f"  Total nodos: {self.total_groupby_nodes}")
+        
+        self.message_id = 0
 
 
     def create_input_middleware(self):
@@ -29,38 +33,33 @@ class TopCustomerConfigurator(GroupByConfigurator):
         return middleware
 
     def create_output_middlewares(self) -> Dict[str, Any]:
-        output_middleware = MessageMiddlewareExchangeManual(
+        output_middleware = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
             exchange_name=self.output_exchange,
-            route_keys=['store.*']
+            route_keys=['store.*'],
+            #queue_name=f'groupby.top_customers.node.{self.topk_node_id}'
         )
         logger.info(f"  Output exchange: {self.output_exchange}")
         logger.info(f"  Routing pattern: store.* (por store_id)")
-        return {"output": output_middleware}
+        return {"output": output_middleware}  
 
-    def process_message(self, body: bytes, headers: dict = None) -> tuple:
-        dto = TransactionBatchDTO.from_bytes_fast(body)
-        client_id = 'default_client'
-        if headers and 'client_id' in headers:
-            client_id = headers['client_id']
-            if isinstance(client_id, bytes):
-                client_id = client_id.decode('utf-8')
-        dto.client_id = client_id
-        is_eof = (dto.batch_type == BatchType.EOF)
-        should_stop = False
-        return (should_stop, dto, is_eof)
-
-    def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict, strategy) -> bool:
-        client_id = getattr(dto, 'client_id', 'default_client')
+    def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict, strategy, client_id: str, message_id: str) -> bool:
         logger.info(f"EOF recibido de cliente '{client_id}'")
         
-        self._send_data_by_store_for_client(middlewares["output"], strategy, client_id)
-        self._send_eof_by_store_for_client(middlewares["output"], strategy, client_id)
-
+        try:            
+            self._send_data_by_store_for_client(middlewares["output"], strategy, client_id, message_id)
+            
+            self._send_eof_by_store_for_client(middlewares["output"], strategy, client_id, message_id)           
+        except Exception as e:
+            logger.error(f"Error procesando EOF para cliente {client_id}: {e}")
+            raise        
         return False
+    
+    
+    def _generate_next_message_id(self, client_id: str) -> str:
+        return f"{client_id}_{self.message_id}:TC:{self.topk_node_id}"
 
-    def _send_data_by_store_for_client(self, output_middleware, strategy, client_id):
-        
+    def _send_data_by_store_for_client(self, output_middleware, strategy, client_id, message_id):
         store_user_purchases_by_client = getattr(strategy, 'store_user_purchases_by_client', {})
         client_data = store_user_purchases_by_client.get(client_id, {})
         if not client_data:
@@ -69,6 +68,8 @@ class TopCustomerConfigurator(GroupByConfigurator):
         total_stores = len(client_data)
         logger.info(f"Enviando datos de {total_stores} stores para client_id={client_id}")
         for store_id in sorted(client_data.keys()):
+            self.message_id += 1
+            message_id = self._generate_next_message_id(client_id)
             store_csv_lines = ["store_id,user_id,purchases_qty"]
             user_purchases = client_data[store_id]
             for user_purchase in user_purchases.values():
@@ -76,11 +77,10 @@ class TopCustomerConfigurator(GroupByConfigurator):
             store_csv = '\n'.join(store_csv_lines)
             routing_key = f"store.{store_id}"
             result_dto = TransactionBatchDTO(store_csv, BatchType.RAW_CSV)
-            output_middleware.send(result_dto.to_bytes_fast(), routing_key, headers={'client_id': client_id})
+            output_middleware.send(result_dto.to_bytes_fast(), routing_key, headers={'client_id': client_id, 'message_id': message_id})
             logger.info(f"Store {store_id}: {len(store_csv_lines)-1} users '{routing_key}' para client_id={client_id}")
 
-    def _send_eof_by_store_for_client(self, output_middleware, strategy, client_id):
-        
+    def _send_eof_by_store_for_client(self, output_middleware, strategy, client_id, message_id):
         store_user_purchases_by_client = getattr(strategy, 'store_user_purchases_by_client', {})
         client_data = store_user_purchases_by_client.get(client_id, {})
         if not client_data:
@@ -91,13 +91,16 @@ class TopCustomerConfigurator(GroupByConfigurator):
         logger.info(f"Enviando EOF de {total_stores} stores para client_id={client_id}")
         
         for store_id in sorted(client_data.keys()):
+            self.message_id += 1
+            message_id = self._generate_next_message_id(client_id)
             routing_key = f"store.{store_id}"
             eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
-            output_middleware.send(eof_dto.to_bytes_fast(), routing_key, headers={'client_id': client_id})
+            output_middleware.send(eof_dto.to_bytes_fast(), routing_key, headers={'client_id': client_id, 'message_id': message_id})
             logger.info(f"EOF enviado para store {store_id} con routing key '{routing_key}' para client_id={client_id}")
 
     def get_strategy_config(self) -> dict:
         return {
-            'input_queue_name': self.input_queue_name
+            'input_queue_name': self.input_queue_name,
+            'checkpoint_dir': self.checkpoint_dir,
         }
 

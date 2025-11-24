@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - [CHAOS] - %(messag
 logger = logging.getLogger(__name__)
 
 class ChaosMonkey:
-    def __init__(self, kill_interval: int = 1, excluded_containers: Set[str] = None,
+    def __init__(self, kill_interval: int = 300, excluded_containers: Set[str] = None,
                  min_kills: int = 1, max_kills: int = 3):
         """
         Args:
@@ -38,8 +38,9 @@ class ChaosMonkey:
                 continue
             
             if any(keyword in container.name.lower() for keyword in [
-                'filter_year',
-                'groupby', 'join_node', 'aggregator'
+                'groupby_top_customers',
+                'groupby_semester_1',
+                'groupby_best_selling'
             ]):
                 killable.append(container)
         
@@ -50,7 +51,7 @@ class ChaosMonkey:
         killable = self.get_killable_containers()
         
         if not killable:
-            logger.warning("⚠️  No hay contenedores disponibles para matar")
+            logger.warning("No hay contenedores disponibles para matar")
             return 0
         
         # Decidir cuántos matar (aleatorio entre min y max)
@@ -62,16 +63,16 @@ class ChaosMonkey:
         victims = random.sample(killable, num_to_kill)
         
         killed_count = 0
-        logger.info(f"🎯 Seleccionando {num_to_kill} contenedor(es) para matar...")
+        logger.info(f"Seleccionando {num_to_kill} contenedor(es) para matar...")
         
         for victim in victims:
             try:
-                logger.info(f"   🔥 Matando: {victim.name}")
+                logger.info(f"Matando: {victim.name}")
                 victim.kill()
                 killed_count += 1
                 self.total_kills += 1
             except Exception as e:
-                logger.error(f"   ❌ Error matando {victim.name}: {e}")
+                logger.error(f" Error matando {victim.name}: {e}")
         
         logger.info(f"💀 Ronda completada: {killed_count}/{num_to_kill} contenedores caídos (Total: {self.total_kills})")
         return killed_count

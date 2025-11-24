@@ -8,8 +8,8 @@ logger = logging.getLogger(__name__)
 
 
 class TPVGroupByStrategy(GroupByStrategy):
-    def __init__(self, semester: str):
-        super().__init__()
+    def __init__(self, semester: str,checkpoint_dir: str = None):
+        super().__init__(checkpoint_dir=checkpoint_dir)
         self.semester = semester
         self.tpv_aggregations_by_client: Dict[str, Dict[Tuple[str, str], TPVAggregation]] = defaultdict(
             lambda: defaultdict(TPVAggregation)
@@ -53,3 +53,63 @@ class TPVGroupByStrategy(GroupByStrategy):
         
         logger.info(f"Resultados TPV generados para cliente '{client_id}': {len(client_aggregations)} grupos")
         return '\n'.join(csv_lines)
+    
+    
+    def _serialize_client_data(self, client_id: str) -> Dict:
+        """
+        Serializa el estado de TPV a un diccionario.
+        
+        Estructura:
+        {
+            "2024-H1|store1": {
+                "total_payment_value": 1500.50,
+                "transaction_count": 25
+            },
+            "2024-H1|store2": {
+                "total_payment_value": 3200.75,
+                "transaction_count": 45
+            }
+        }
+        
+        Nota: Las tuplas (year_half, store_id) se convierten a strings "year_half|store_id"
+        porque JSON no soporta tuplas como keys.
+        """
+        client_aggregations = self.tpv_aggregations_by_client.get(client_id, {})
+        serialized = {}
+        
+        for (year_half, store_id), aggregation in client_aggregations.items():
+            # Convertir tupla a string para JSON
+            key = f"{year_half}|{store_id}"
+            serialized[key] = {
+                "total_payment_value": aggregation.total_payment_value,
+                "transaction_count": aggregation.transaction_count
+            }
+        
+        return serialized
+    
+    def _deserialize_client_data(self, client_id: str, data: Dict):
+        """
+        Reconstruye el estado de TPV desde un diccionario.
+        
+        Args:
+            client_id: ID del cliente
+            data: Diccionario con estructura {"year_half|store_id": {"total_payment_value": ..., "transaction_count": ...}}
+        """
+        for key, aggregation_data in data.items():
+            # Parsear key "year_half|store_id" de vuelta a tupla
+            try:
+                year_half, store_id = key.split('|', 1)
+            except ValueError:
+                logger.warning(f"Key inválido en checkpoint TPV: {key}")
+                continue
+            
+            tuple_key = (year_half, store_id)
+            
+            # Crear objeto TPVAggregation si no existe
+            if tuple_key not in self.tpv_aggregations_by_client[client_id]:
+                self.tpv_aggregations_by_client[client_id][tuple_key] = TPVAggregation()
+            
+            # Restaurar valores
+            aggregation = self.tpv_aggregations_by_client[client_id][tuple_key]
+            aggregation.total_payment_value = aggregation_data.get('total_payment_value', 0.0)
+            aggregation.transaction_count = aggregation_data.get('transaction_count', 0)

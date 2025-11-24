@@ -578,7 +578,7 @@ class MessageMiddlewareQueueManual(MessageMiddleware):
             
             
 class MessageMiddlewareExchangeManual(MessageMiddleware):
-    def __init__(self, host: str, exchange_name: str, route_keys: list):
+    def __init__(self, host: str, exchange_name: str, route_keys: list,queue_name: str = None):
         self.host = host
         self.exchange_name = exchange_name
         self.route_keys = route_keys if isinstance(route_keys, list) else [route_keys]
@@ -587,6 +587,7 @@ class MessageMiddlewareExchangeManual(MessageMiddleware):
         self.consumer_queue = None  
         self.shutdown = None    
         self._closing = False
+        self.queue_name = queue_name
 
         self._connect()
 
@@ -634,18 +635,26 @@ class MessageMiddlewareExchangeManual(MessageMiddleware):
     def start_consuming(self, on_message_callback):
         """
         Inicia el consumo de mensajes con ACK manual.
-        
-        El callback debe manejar el ACK/NACK manualmente usando:
-        - channel.basic_ack(delivery_tag) para confirmar
-        - channel.basic_nack(delivery_tag, requeue=True/False) para rechazar
         """
         try:
             if not self.channel:
                 raise MessageMiddlewareDisconnectedError("No hay conexión activa con RabbitMQ")
             
-            result = self.channel.queue_declare(queue='', exclusive=True)
-            self.consumer_queue = result.method.queue
+            # ✅ CAMBIO AQUÍ: Usar cola durable si se provee queue_name
+            if self.queue_name:
+                # Cola durable con nombre fijo
+                self.channel.queue_declare(
+                    queue=self.queue_name,
+                    durable=True,
+                    exclusive=False
+                )
+                self.consumer_queue = self.queue_name
+            else:
+                # Cola temporal exclusiva (para casos donde no importa persistencia)
+                result = self.channel.queue_declare(queue='', exclusive=True)
+                self.consumer_queue = result.method.queue
             
+            # Bind a routing keys
             for route_key in self.route_keys:
                 self.channel.queue_bind(
                     exchange=self.exchange_name,
@@ -655,12 +664,13 @@ class MessageMiddlewareExchangeManual(MessageMiddleware):
             
             self.channel.basic_qos(prefetch_count=1)
             
-            logger.info(f"Esperando mensajes en exchange {self.exchange_name} con routing keys {self.route_keys}...")
+            logger.info(f"Esperando mensajes en exchange {self.exchange_name} "
+                       f"(cola: {self.consumer_queue}, routing keys: {self.route_keys})...")
             
             for method_frame, properties, body in self.channel.consume(
                 self.consumer_queue,
-                auto_ack=False,  # ACK MANUAL
-                inactivity_timeout=5  
+                auto_ack=False,
+                inactivity_timeout=5
             ):
                 if self.shutdown and self.shutdown.is_shutting_down():
                     logger.info("Shutdown detectado en exchange middleware, dejando de consumir")
@@ -673,7 +683,6 @@ class MessageMiddlewareExchangeManual(MessageMiddleware):
                     logger.info("Canal cerrado durante consumo, saliendo del loop")
                     break
                 
-                # El callback ahora es responsable de hacer ACK/NACK
                 on_message_callback(self.channel, method_frame, properties, body)
                     
         except pika.exceptions.AMQPConnectionError as e:

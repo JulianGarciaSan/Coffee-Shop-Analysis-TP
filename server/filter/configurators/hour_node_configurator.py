@@ -4,7 +4,7 @@ import logging
 import os
 import threading
 from typing import Optional, Dict, Any
-from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange, MessageMiddlewareQueueManual
+from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchangeManual, MessageMiddlewareQueueManual
 from dtos.dto import TransactionBatchDTO, BatchType, CoordinationMessageDTO
 from .base_configurator import NodeConfigurator
 from coordinator.coordinator import PeerCoordinator 
@@ -19,6 +19,8 @@ class HourNodeConfigurator(NodeConfigurator):
         self.total_nodes = int(os.getenv('TOTAL_HOUR_FILTERS', '1'))
         all_node_ids_str = os.getenv('ALL_NODE_IDS', self.node_id)
         all_node_ids = [nid.strip() for nid in all_node_ids_str.split(',')]
+        
+        self.sent_to_q3 = 0
         
         self.leader_id = os.getenv('LEADER_ID', None)
         self.node_addresses_str = os.getenv('NODE_ADDRESSES', '')
@@ -143,10 +145,11 @@ class HourNodeConfigurator(NodeConfigurator):
             logger.info(f"  Output Q1 Queue: {output_q1}")
         
         if output_q3:
-            middlewares['q3'] = MessageMiddlewareExchange(
+            middlewares['q3'] = MessageMiddlewareExchangeManual(
                 host=self.rabbitmq_host,
                 exchange_name=output_q3,
-                route_keys=['semester.1', 'semester.2', 'eof.all']
+                route_keys=['semester.1', 'semester.2', 'eof.all'],
+                queue_name=f'filter.hour.node.{self.node_id}.ouputq3'
             )
             logger.info(f"  Output Q3 Exchange: {output_q3}")
         
@@ -234,7 +237,6 @@ class HourNodeConfigurator(NodeConfigurator):
         headers = self.create_headers(client_id,message_id)
         semester_1_lines = []
         semester_2_lines = []
-        
         for line in csv_data.split('\n'):
             if not line.strip():
                 continue
@@ -250,7 +252,7 @@ class HourNodeConfigurator(NodeConfigurator):
             csv_s1 = '\n'.join(semester_1_lines)
             dto_s1 = TransactionBatchDTO(csv_s1, batch_type=BatchType.RAW_CSV)
             exchange_middleware.send(dto_s1.to_bytes_fast(), routing_key='semester.1', headers=headers)
-        
+
         if semester_2_lines:
             csv_s2 = '\n'.join(semester_2_lines)
             dto_s2 = TransactionBatchDTO(csv_s2, batch_type=BatchType.RAW_CSV)

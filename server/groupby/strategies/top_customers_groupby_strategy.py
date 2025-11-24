@@ -1,66 +1,23 @@
+import json
 import logging
 from collections import defaultdict
 from typing import Dict
 from .base_strategy import GroupByStrategy
 from .user_purchase_count import UserPurchaseCount
+import tempfile
+import os
 
 logger = logging.getLogger(__name__)
 
 
 class TopCustomersGroupByStrategy(GroupByStrategy):
-    def __init__(self, input_queue_name: str):
-        super().__init__()
+    def __init__(self, input_queue_name: str,checkpoint_dir: str = None):
+        super().__init__(checkpoint_dir=checkpoint_dir)
         self.input_queue_name = input_queue_name
         self.store_user_purchases_by_client: Dict[str, Dict[str, Dict[str, UserPurchaseCount]]] = defaultdict(
             lambda: defaultdict(lambda: defaultdict(UserPurchaseCount))
         )
         logger.info(f"TopCustomersGroupByStrategy inicializada para queue {input_queue_name}")
-
-    def save_checkpoint(self, client_id: str, store_id: str, user_id: str, purchases_qty: int):
-        """Guarda un checkpoint de un user específico"""
-        if not self.logger:
-            return
-        
-        checkpoint_line = f"{client_id}|{store_id}|{user_id}|{purchases_qty}"
-        self.logger.write(checkpoint_line)
-
-    def recover_from_checkpoint(self):
-        """Recuperar estado completo desde el checkpoint"""
-        if not self.logger:
-            logger.warning("No hay checkpoint logger configurado")
-            return
-        
-        last_line = self.logger.get_last_line()
-        if not last_line:
-            logger.info("No hay checkpoint previo, iniciando desde cero")
-            return
-        
-        logger.info("Recuperando estado desde checkpoint...")
-        
-        with open(self.logger.logger.log_path, 'r') as f:
-            line_count = 0
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                
-                try:
-                    parts = line.split('|')
-                    if len(parts) != 4:
-                        continue
-                    
-                    client_id, store_id, user_id, count = parts
-                    
-                    if user_id not in self.store_user_purchases_by_client[client_id][store_id]:
-                        self.store_user_purchases_by_client[client_id][store_id][user_id] = UserPurchaseCount(user_id)
-                    
-                    self.store_user_purchases_by_client[client_id][store_id][user_id].purchases_qty = int(count)
-                    line_count += 1
-                    
-                except Exception as e:
-                    logger.warning(f"Error recuperando línea de checkpoint: {e}")
-        
-        logger.info(f"Estado recuperado: {line_count} registros desde checkpoint")
 
     def process_csv_line(self, csv_line: str, client_id: str = 'default_client'):
         try:
@@ -73,11 +30,6 @@ class TopCustomersGroupByStrategy(GroupByStrategy):
                 self.store_user_purchases_by_client[client_id][store_id][user_id] = UserPurchaseCount(user_id)
             
             self.store_user_purchases_by_client[client_id][store_id][user_id].add_purchase()
-            
-            # Guardar checkpoint después de cada actualización
-            user_purchase = self.store_user_purchases_by_client[client_id][store_id][user_id]
-            self.save_checkpoint(client_id, store_id, user_id, user_purchase.purchases_qty)
-            self.logger.write_with_timestamp(f"Informo que procese la linea para el cliente {client_id}, tienda {store_id}, usuario {user_id}")
             
         except (ValueError, IndexError) as e:
             logger.warning(f"Error procesando línea: {e}")
@@ -93,3 +45,45 @@ class TopCustomersGroupByStrategy(GroupByStrategy):
                 store_csv_lines.append(user_purchase.to_csv_line(store_id))
             csv_lines.extend(store_csv_lines)
         return '\n'.join(csv_lines)
+    
+    def _serialize_client_data(self, client_id: str) -> Dict:
+        """
+        Serializa el estado de TopCustomers a un diccionario.
+        
+        Estructura:
+        {
+            "store1": {
+                "user_1": 10,
+                "user_2": 5
+            },
+            "store2": {
+                "user_3": 2
+            }
+        }
+        """
+        client_data = self.store_user_purchases_by_client.get(client_id, {})
+        serialized = {}
+        
+        for store_id, users in client_data.items():
+            serialized[store_id] = {}
+            for user_id, user_purchase in users.items():
+                serialized[store_id][user_id] = user_purchase.purchases_qty
+        
+        return serialized
+    
+    def _deserialize_client_data(self, client_id: str, data: Dict):
+        """
+        Reconstruye el estado de TopCustomers desde un diccionario.
+        
+        Args:
+            client_id: ID del cliente
+            data: Diccionario con estructura {store_id: {user_id: count}}
+        """
+        for store_id, users in data.items():
+            for user_id, count in users.items():
+                # Crear objeto UserPurchaseCount si no existe
+                if user_id not in self.store_user_purchases_by_client[client_id][store_id]:
+                    self.store_user_purchases_by_client[client_id][store_id][user_id] = UserPurchaseCount(user_id)
+                
+                # Restaurar el contador
+                self.store_user_purchases_by_client[client_id][store_id][user_id].purchases_qty = count
