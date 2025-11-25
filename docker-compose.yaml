@@ -131,6 +131,28 @@ services:
     volumes:
       - ./server/config.ini:/app/config.ini
 
+  dedup_q1:
+    build:
+      context: .
+      dockerfile: ./server/duplicate/Dockerfile
+    container_name: dedup_q1
+    restart: on-failure
+    ports:
+      - "20000:9999"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - INPUT_QUEUE=amount_filtered
+    volumes:
+      - ./server/config.ini:/app/config.ini
+      # - ./server/logs/filter_amount_1/logs.txt:/app/logs.txt
+      # - ./server/logs/filter_amount_1/client_logs.txt:/app/client_logs.txt
+      # - ./server/logs/filter_amount_1/eof_logs.txt:/app/eof_logs.txt
+      # - ./server/logs/filter_amount_1/message_logs.txt:/app/message_logs.txt
+
   filter_year_1:
     build:
       context: .
@@ -585,6 +607,10 @@ services:
         condition: service_started
       filter_amount_1:
         condition: service_started
+      filter_amount_2:
+        condition: service_started
+      filter_amount_3:
+        condition: service_started 
       client_1:
         condition: service_started
 

@@ -161,11 +161,6 @@ class HourNodeConfigurator(NodeConfigurator):
         return filtered_csv
 
     def process_message(self, body: bytes, routing_key: str = None, client_id: Optional[int] = None, message_id: Optional[int] = None) -> tuple:
-        if(self.consensus_node.is_duplicate(client_id, message_id)):
-            logger.info(f"NODO: {self.node_id} detecto duplicado: {message_id}")
-            dto = TransactionBatchDTO('', BatchType.RAW_CSV)
-            return (False, 'transactions', dto, False, True)
-
         decoded_data = body.decode('utf-8').strip()
         
         client_id_str = str(client_id) if client_id is not None else "default"

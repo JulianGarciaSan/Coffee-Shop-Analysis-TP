@@ -121,7 +121,7 @@ class AmountNodeConfigurator(NodeConfigurator):
             middlewares['q1'] = MessageMiddlewareExchange(
                 host=self.rabbitmq_host,
                 #exchange_name=output_q1,
-                exchange_name='reports_exchange',
+                exchange_name='dedup_exchange',
                 route_keys=['q1.data']
             )
             logger.info(f"  Output Q1 Exchange: {output_q1}")
@@ -133,12 +133,7 @@ class AmountNodeConfigurator(NodeConfigurator):
     def process_filtered_data(self, filtered_csv: str) -> str:
         return self._extract_q1_columns(filtered_csv)
     
-    def process_message(self, body: bytes, routing_key: str = None, client_id: Optional[int] = None,message_id: Optional[int] = None) -> tuple:
-        if(self.consensus_node.is_duplicate(client_id, message_id)):
-            logger.info(f"NODO: {self.node_id} detecto duplicado: {message_id}")
-            dto = TransactionBatchDTO('', BatchType.RAW_CSV)
-            return (False, 'transactions', dto, False, True)
-        
+    def process_message(self, body: bytes, routing_key: str = None, client_id: Optional[int] = None,message_id: Optional[int] = None) -> tuple:   
         decoded_data = body.decode('utf-8').strip()
         
         client_id_str = str(client_id) if client_id is not None else "default"

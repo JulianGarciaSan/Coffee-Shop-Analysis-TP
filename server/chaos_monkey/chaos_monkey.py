@@ -41,7 +41,9 @@ class ChaosMonkey:
             
             if any(keyword in container.name.lower() for keyword in [
                 # 'filter_year',
-                'filter_hour_2','filter_hour_3',
+                'filter_year_1','filter_year_2','filter_year_3',
+                'filter_amount_1','filter_amount_2','filter_amount_3',
+                'filter_hour_1','filter_hour_2','filter_hour_3',
                 'groupby', 'join_node', 'aggregator'
             ]):
                 killable.append(container)
@@ -149,7 +151,6 @@ def main():
         "client_1",
         "client_2",
         "client_3",
-        "filter_hour_1",
         "gateway",
         "rabbitmq",
         "watchdog",
@@ -157,7 +158,7 @@ def main():
     
     kill_interval = int(os.getenv("KILL_INTERVAL", "1"))
     min_kills = int(os.getenv("MIN_KILLS", "1"))
-    max_kills = int(os.getenv("MAX_KILLS", "3"))
+    max_kills = int(os.getenv("MAX_KILLS", "9"))
     max_total_kills = int(os.getenv("MAX_TOTAL_KILLS", "60"))
     
     chaos = ChaosMonkey(
@@ -172,7 +173,7 @@ def main():
         chaos.chaos_loop()
     except KeyboardInterrupt:
         chaos.stop()
-        logger.info("🏁 Chaos Monkey finalizado")
+        logger.info("Chaos Monkey finalizado")
 
 if __name__ == "__main__":
     main()
