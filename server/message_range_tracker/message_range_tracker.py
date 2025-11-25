@@ -72,3 +72,4 @@ class MessageRangeTracker:
     def total_messages(self) -> int:
         """Cuenta total de message_ids cubiertos por los rangos"""
         return sum(end - start + 1 for start, end in self.ranges)
+    

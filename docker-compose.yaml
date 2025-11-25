@@ -32,7 +32,7 @@ services:
       - MAX_FAILURES=3
       - PING_TIMEOUT=2.0
       - STARTUP_DELAY=15
-      - MONITORED_NODES=filter_year_1:9999,filter_year_2:9999,filter_year_3:9999,filter_hour_1:9999,filter_hour_2:9999,filter_hour_3:9999,filter_amount_1:9999,filter_amount_2:9999,filter_amount_3:9999,groupby_top_customers:9999, groupby_semester_1:9999,groupby_semester_2:9999,groupby_best_selling_2025_3:9999,groupby_best_selling_2025_2:9999,groupby_best_selling_2025_1:9999,groupby_best_selling_2025_0:9999,groupby_best_selling_2024_3:9999,groupby_best_selling_2024_2:9999,groupby_best_selling_2024_1:9999,groupby_best_selling_2024_0:9999
+      - MONITORED_NODES=filter_year_1:9999,filter_year_2:9999,filter_year_3:9999,filter_hour_1:9999,filter_hour_2:9999,filter_hour_3:9999,filter_amount_1:9999,filter_amount_2:9999,filter_amount_3:9999,groupby_top_customers:9999, groupby_semester_1:9999,groupby_semester_2:9999,groupby_best_selling_2025_3:9999,groupby_best_selling_2025_2:9999,groupby_best_selling_2025_1:9999,groupby_best_selling_2025_0:9999,groupby_best_selling_2024_3:9999,groupby_best_selling_2024_2:9999,groupby_best_selling_2024_1:9999,groupby_best_selling_2024_0:9999, top_consumers_aggregator_1:9999,top_consumers_aggregator_2:9999
     depends_on:
       gateway:
         condition: service_started
@@ -547,9 +547,7 @@ services:
 
     volumes:
       - ./server/config.ini:/app/config.ini
-      - ./server/logs/groupby_semester_1/logs.txt:/app/logs.txt
       - ./server/logs/groupby_semester_1/client_logs.txt:/app/client_logs.txt
-      - ./server/logs/groupby_semester_1/eof_logs.txt:/app/eof_logs.txt
       - ./server/logs/groupby_semester_1/checkpoints:/app/server/logs/groupby_semester_1/checkpoints
 
   groupby_semester_2:
@@ -576,9 +574,7 @@ services:
       - CHECKPOINT_DIR=/app/server/logs/groupby_semester_2/checkpoints
     volumes:
       - ./server/config.ini:/app/config.ini
-      - ./server/logs/groupby_semester_2/logs.txt:/app/logs.txt
       - ./server/logs/groupby_semester_2/client_logs.txt:/app/client_logs.txt
-      - ./server/logs/groupby_semester_2/eof_logs.txt:/app/eof_logs.txt
       - ./server/logs/groupby_semester_2/checkpoints:/app/server/logs/groupby_semester_2/checkpoints
   
   ##NODOS Q4 TOP CONSUMERS
@@ -588,6 +584,8 @@ services:
       dockerfile: ./server/aggregator/Dockerfile
     container_name: top_consumers_aggregator_1
     restart: on-failure
+    ports:
+      - "2012:9999"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -602,9 +600,13 @@ services:
       - AGGREGATOR_TYPE=top_consumers_intermediate
       - ALL_NODE_IDS=1,2
       - TOTAL_JOIN_NODES=2 
+      - CHECKPOINT_DIR=/app/server/logs/top_customers_aggregator_1/checkpoints
+
     volumes:
       - ./server/config.ini:/app/config.ini
       - ./server/logs/top_customers_aggregator_1/client_logs.txt:/app/client_logs.txt
+      - ./server/logs/top_customers_aggregator_1/checkpoints:/app/server/logs/top_customers_aggregator_1/checkpoints
+
 
 
 
@@ -614,6 +616,8 @@ services:
       dockerfile: ./server/aggregator/Dockerfile
     container_name: top_consumers_aggregator_2
     restart: on-failure
+    ports:
+      - "2011:9999"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -628,9 +632,12 @@ services:
       - AGGREGATOR_TYPE=top_consumers_intermediate
       - ALL_NODE_IDS=1,2
       - TOTAL_JOIN_NODES=2 
+      - CHECKPOINT_DIR=/app/server/logs/top_customers_aggregator_2/checkpoints
     volumes:
       - ./server/config.ini:/app/config.ini
       - ./server/logs/top_customers_aggregator_2/client_logs.txt:/app/client_logs.txt
+      - ./server/logs/top_customers_aggregator_2/checkpoints:/app/server/logs/top_customers_aggregator_2/checkpoints
+
 
   groupby_top_customers:
     build:
@@ -651,12 +658,9 @@ services:
       - OUTPUT_EXCHANGE=aggregated.exchange
       - TOTAL_GROUPBY_NODES=1
       - CHECKPOINT_DIR=/app/server/logs/groupby_top_customers/checkpoints
-
     volumes:
       - ./server/config.ini:/app/config.ini
-      - ./server/logs/groupby_top_customers/logs.txt:/app/logs.txt
       - ./server/logs/groupby_top_customers/client_logs.txt:/app/client_logs.txt
-      - ./server/logs/groupby_top_customers/eof_logs.txt:/app/eof_logs.txt
       - ./server/logs/groupby_top_customers/checkpoints:/app/server/logs/groupby_top_customers/checkpoints
 
   ## NODOS Q2 BEST SELLING ITEMS PER YEAR
@@ -909,7 +913,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - PYTHONUNBUFFERED=1
-      - KILL_INTERVAL=120  # Segundos entre caídas
+      - KILL_INTERVAL=10  # Segundos entre caídas
     depends_on:
       gateway:
         condition: service_started
@@ -948,6 +952,10 @@ services:
       groupby_best_selling_2024_2:
         condition: service_started
       groupby_best_selling_2024_1:
+        condition: service_started
+      top_consumers_aggregator_1:
+        condition: service_started
+      top_consumers_aggregator_2:
         condition: service_started
 
 

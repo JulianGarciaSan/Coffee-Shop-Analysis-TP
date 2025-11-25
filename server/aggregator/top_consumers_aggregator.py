@@ -1,12 +1,15 @@
 import logging
 import os
 import sys
+import time
 from typing import Dict
 from collections import defaultdict
-from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
+from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueueManual
 from dtos.dto import TransactionBatchDTO, BatchType
 from common.graceful_shutdown import GracefulShutdown
 from logger_monitor.logger_monitor import LoggerMonitor
+from healthchecker.healthchecker import HealthChecker
+from checkpoint_handler.checkpoint_handler import CheckpointHandler
 
 
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +24,8 @@ class TopCustomersAggregatorNode:
         self.node_id = os.getenv('TOPK_NODE_ID', '1')
         self.total_nodes = int(os.getenv('TOTAL_TOPK_NODES', '2'))
         self.total_join_nodes = int(os.getenv('TOTAL_JOIN_NODES', '2'))
+        self.checkpoint_dir = os.getenv('CHECKPOINT_DIR', f'/app/server/logs/groupby_top_customers/checkpoints')
+
         
         total_stores = 10
         stores_per_node = total_stores // self.total_nodes
@@ -47,6 +52,15 @@ class TopCustomersAggregatorNode:
         )
         self.eof_count_by_client: Dict[str, int] = defaultdict(int)
         
+        health_port = int(os.getenv('HEALTH_PORT', '9999'))
+        self.health_server = HealthChecker(port=health_port)
+        self.health_server.start()
+        
+        self.checkpoint_handler = CheckpointHandler(
+            checkpoint_dir=self.checkpoint_dir,
+            strategy=self,
+        )
+        
         self._setup_input_middleware(start_store, end_store)
         self._setup_output_middleware()
         
@@ -66,7 +80,7 @@ class TopCustomersAggregatorNode:
         
         routing_keys = [f"store.{i}" for i in range(start_store + 1, end_store + 1)]
         
-        self.input_middleware = MessageMiddlewareQueue(
+        self.input_middleware = MessageMiddlewareQueueManual(
             host=self.rabbitmq_host,
             queue_name=queue_name,
             exchange_name=input_exchange,
@@ -137,18 +151,6 @@ class TopCustomersAggregatorNode:
         return top_3_by_store
     
     def send_sharded_to_join_nodes(self, top_35_by_store: Dict[str, list], client_id: str):
-        self.message_id += 1
-        print(f"\n=== TOP 3 CUSTOMERS PARA CLIENTE {client_id} ===")
-        total_records = 0
-        for store_id in sorted(top_35_by_store.keys()):
-            top_users = top_35_by_store[store_id]
-            print(f"Store {store_id}:")
-            for rank, (user_id, purchases_qty) in enumerate(top_users, 1):
-                print(f"  {rank}. User {user_id}: {purchases_qty} compras")
-                total_records += 1
-        print(f"Total registros Top 3: {total_records}")
-        print(f"=== FIN TOP 3 CLIENTE {client_id} ===\n")
-        
         batches_by_node = {i: [] for i in range(self.total_join_nodes)}
         
         for store_id, top_users in top_35_by_store.items():
@@ -163,7 +165,6 @@ class TopCustomersAggregatorNode:
                 })
         
         for node_id, batch in batches_by_node.items():
-            new_message_id = self._generate_next_message_id(client_id)
             if not batch:
                 continue
             
@@ -172,33 +173,38 @@ class TopCustomersAggregatorNode:
                 csv_lines.append(f"{record['store_id']},{record['user_id']},{record['purchases_qty']}")
             
             csv_data = '\n'.join(csv_lines)
-            
-            result_dto = TransactionBatchDTO(csv_data, BatchType.RAW_CSV)
-            routing_key = f"join_node_{node_id}.top_customers.data"
-            
-            self.output_middleware.send(
-                result_dto.to_bytes_fast(),
-                routing_key=routing_key,
-                headers={'client_id': client_id, 'message_id': new_message_id}
-            )
-            
-            logger.info(f"Cliente {client_id} → join_node_{node_id}: {len(batch)} top_customers")
-        
+            self.send_data_to_join_node(csv_data, client_id, node_id)
+                    
         for node_id in range(self.total_join_nodes):
-            new_message_id = self._generate_next_message_id(client_id)
-            eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
-            routing_key = f"join_node_{node_id}.top_customers.data"
-            
-            self.output_middleware.send(
-                eof_dto.to_bytes_fast(),
-                routing_key=routing_key,
-                headers={'client_id': client_id, 'message_id': new_message_id}
-            )
+            self.send_eof_to_join_node(client_id, node_id)
         
         logger.info(f"EOF enviado a {self.total_join_nodes} join nodes para cliente {client_id}")
 
-    def handle_eof(self, dto: TransactionBatchDTO, routing_key: str = None) -> bool:
-        client_id = getattr(dto, 'client_id', 'default_client')
+    def send_data_to_join_node(self, csv_data: str, client_id: str, node_id: int):
+        print("///////////// ENVIANDO DATA A JOIN NODE /////////////")
+        time.sleep(10)
+        new_message_id = self._generate_next_message_id(client_id)
+        result_dto = TransactionBatchDTO(csv_data, BatchType.RAW_CSV)
+        routing_key = f"join_node_{node_id}.top_customers.data"
+        
+        self.output_middleware.send(
+            result_dto.to_bytes_fast(),
+            routing_key=routing_key,
+            headers={'client_id': client_id, 'message_id': new_message_id}
+        )
+    def send_eof_to_join_node(self, client_id: str, node_id: int):
+        print("///////////// ENVIANDO EOF A JOIN NODE /////////////")
+        time.sleep(10)
+        new_message_id = self._generate_next_message_id(client_id)
+        eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
+        routing_key = f"join_node_{node_id}.top_customers.data"
+        
+        self.output_middleware.send(
+            eof_dto.to_bytes_fast(),
+            routing_key=routing_key,
+            headers={'client_id': client_id, 'message_id': new_message_id}
+        )
+    def handle_eof(self, dto: TransactionBatchDTO, client_id: str) -> bool:
         
         self.eof_count_by_client[client_id] += 1
         logger.info(f"EOF {self.eof_count_by_client[client_id]}/{self.expected_eof_per_client} "
@@ -218,24 +224,35 @@ class TopCustomersAggregatorNode:
         
         return False
 
-    def process_message(self, message: bytes, routing_key: str = None, client_id: str = None, message_id: str = None) -> bool:
+    def process_message(self, message: bytes,client_id: str = None, message_id: str = None) -> bool:
         try:
             if self.shutdown.is_shutting_down():
-                return True
+                return (True, False)
             
             dto = TransactionBatchDTO.from_bytes_fast(message)
-        
-            dto.client_id = client_id
-            
+                    
             if dto.batch_type == BatchType.EOF:
-                return self.handle_eof(dto, routing_key)
+                self.handle_eof(dto, client_id)
+                self.checkpoint_handler.save_eof_checkpoint(client_id, message_id)
+                return (False, True) 
+                # return self.handle_eof(dto, routing_key)
             
             if dto.batch_type == BatchType.RAW_CSV:
-                for line in dto.data.split('\n'):
-                    if line.strip():
-                        self.process_csv_line(line.strip(), client_id)
-            
-            return False
+                lines = [line.strip() for line in dto.data.split('\n') if line.strip()]
+                
+                for i, line in enumerate(lines):
+                    try:
+                        self.process_csv_line(line, client_id)
+                    except Exception as e:
+                        logger.warning(f"Línea {i} inválida en mensaje {message_id}: {e}")
+                
+                self.checkpoint_handler.save_message_checkpoint(
+                    client_id=client_id,
+                    message_id=message_id,
+                    csv_lines=lines
+                )
+                
+                return (False, True)
             
         except Exception as e:
             logger.error(f"Error procesando mensaje: {e}")
@@ -249,22 +266,6 @@ class TopCustomersAggregatorNode:
             message_id = properties.headers.get('message_id')
         return str(client_id), str(message_id)
     
-    def analyze_first_message(self, client_id: str, message_id: str, ch, method, body) -> bool:
-        
-        # if self.is_first_message:
-        #     self.is_first_message = False
-            
-        last_line_client = self.client_logger._get_last_line()
-        if last_line_client and last_line_client.strip() and ';' in last_line_client:    
-            client_id_client_log, message_id_client_log = last_line_client.split(';')
-            if client_id_client_log == client_id and message_id_client_log == message_id:
-                logger.info(f"Estado ya consistente con cliente {client_id} y mensaje {message_id}")
-                return True
-        try:
-            pass
-        except Exception as e:
-            logger.error(f"Error recuperando estado: {e}")
-        return False
     
     def on_message_callback(self, ch, method, properties, body):
         try:
@@ -273,15 +274,20 @@ class TopCustomersAggregatorNode:
                 return
  
             routing_key = getattr(method, 'routing_key', None)
-            # headers = properties.headers if hasattr(properties, 'headers') else None
             client_id, message_id = self.parse_message_headers(properties)
             
-            if self.analyze_first_message(client_id, message_id, ch, method, body):
+            if self.checkpoint_handler.analyze_first_message(client_id, message_id, ch, method, body):
                 return
             
-            self.client_logger.write(f"{client_id};{message_id}")
-            self.process_message(body, routing_key, client_id,message_id)
-            
+            self.checkpoint_handler.register_incoming_message(client_id, message_id)
+            should_stop, should_ack = self.process_message(body, client_id, message_id)
+
+            if should_ack:
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+                
+            if should_stop:
+                logger.info("Shutdown solicitado - deteniendo consuming")
+                ch.stop_consuming()
         except Exception as e:
             logger.error(f"Error en callback: {e}")
     
@@ -305,8 +311,155 @@ class TopCustomersAggregatorNode:
                 self.output_middleware.close()
             logger.info("Conexiones cerradas")
         except Exception as e:
-            logger.error(f"Error en cleanup: {e}")
+            logger.error(f"Error en cleanup: {e}")   
+            
+    def serialize_operation(self, client_id: str, csv_line: str) -> str:
+        """
+        Serializa una operación TopCustomersAggregator para el WAL.
+        
+        Formato: client_id,store_id,user_id,purchases_qty
+        Ejemplo: 0,store_1,user_123,5
+        """
+        try:
+            parts = csv_line.split(',')
+            
+            if len(parts) < 3 or parts[0] == 'store_id':
+                return None
+            
+            store_id = parts[0]
+            user_id = parts[1]
+            purchases_qty = parts[2]
+            
+            if not all([store_id, user_id, purchases_qty]):
+                logger.warning(f"Línea con datos incompletos, saltando")
+                return None
+            
+            return f"{client_id},{store_id},{user_id},{purchases_qty}"
+            
+        except Exception as e:
+            logger.error(f"Error serializando operación: {e}")
+            raise
 
+    def deserialize_operation(self, operation_str: str) -> dict:
+        """
+        Deserializa una operación desde el WAL.
+        
+        Input: "0,store_1,user_123,5"
+        Output: {
+            'client_id': '0',
+            'store_id': 'store_1',
+            'user_id': 'user_123',
+            'purchases_qty': 5
+        }
+        """
+        try:
+            parts = operation_str.split(',')
+            
+            if len(parts) != 4:
+                raise ValueError(f"Formato inválido, esperaba 4 campos, encontró {len(parts)}: {operation_str}")
+            
+            client_id, store_id, user_id, purchases_qty_str = parts
+            
+            return {
+                'client_id': client_id,
+                'store_id': store_id,
+                'user_id': user_id,
+                'purchases_qty': int(purchases_qty_str)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error deserializando operación: {e}")
+            raise
+
+    def apply_operation(self, operation: dict):
+        """
+        Aplica una operación al estado en memoria.
+        Similar a process_csv_line pero desde dict ya parseado.
+        """
+        try:
+            client_id = operation['client_id']
+            store_id = operation['store_id']
+            user_id = operation['user_id']
+            purchases_qty = operation['purchases_qty']
+            
+            self.store_user_purchases_by_client[client_id][store_id][user_id] += purchases_qty
+            
+        except Exception as e:
+            logger.error(f"Error aplicando operación: {e}")
+            raise
+
+    def _serialize_client_data(self, client_id: str) -> Dict:
+        """
+        Serializa el estado completo del cliente para checkpoint.
+        
+        Estructura:
+        {
+            "stores": {
+                "store_1": {
+                    "user_123": 10,
+                    "user_456": 5
+                },
+                "store_2": {
+                    "user_789": 3
+                }
+            },
+            "eof_count": 2,
+            "message_counter": 42
+        }
+        """
+        client_data = self.store_user_purchases_by_client.get(client_id, {})
+        
+        serialized = {
+            "stores": {},
+            "eof_count": self.eof_count_by_client.get(client_id, 0)
+        }
+        
+        for store_id, users in client_data.items():
+            serialized["stores"][store_id] = dict(users)
+        
+        if hasattr(self, '_message_counter') and client_id in self._message_counter:
+            serialized["message_counter"] = self._message_counter[client_id]
+        
+        return serialized
+
+    def _deserialize_client_data(self, client_id: str, data: Dict):
+        """
+        Reconstruye el estado desde un checkpoint.
+        
+        Args:
+            client_id: ID del cliente
+            data: Diccionario con estructura {stores: {...}, eof_count: N}
+        """
+        self.store_user_purchases_by_client[client_id] = defaultdict(lambda: defaultdict(int))
+        
+        stores_data = data.get("stores", {})
+        for store_id, users in stores_data.items():
+            for user_id, count in users.items():
+                self.store_user_purchases_by_client[client_id][store_id][user_id] = count
+        
+        self.eof_count_by_client[client_id] = data.get("eof_count", 0)
+        
+        if "message_counter" in data:
+            if not hasattr(self, '_message_counter'):
+                self._message_counter = {}
+            self._message_counter[client_id] = data["message_counter"]
+            
+    def _message_id_to_int(self, message_id: str) -> int:
+        """
+        Convierte message_id compuesto a entero único.
+
+        """
+        try:
+            parts = message_id.split('_')
+            if len(parts) == 2:
+                node_id = int(parts[0])
+                counter = int(parts[1])
+                return node_id * 1000000 + counter
+            else:
+                return int(message_id)
+        except Exception as e:
+            logger.warning(f"Error parseando message_id {message_id}: {e}")
+            return int(message_id.split('_')[-1])
 
 if __name__ == "__main__":
     try:

@@ -15,6 +15,7 @@ class TopCustomerConfigurator(GroupByConfigurator):
         self.input_queue_name = os.getenv('INPUT_QUEUE', 'year_filtered_q4')
         self.total_groupby_nodes = int(os.getenv('TOTAL_GROUPBY_NODES', '3'))
         self.topk_node_id = int(os.getenv('TOPK_NODE_ID', '1'))
+        self._message_counter: Dict[str, int] = {}
         self.eof_count_by_client: Dict[str, int] = defaultdict(int)
         logger.info(f"TopCustomerConfigurator inicializado:")
         logger.info(f"  Input Queue: {self.input_queue_name}")
@@ -32,11 +33,11 @@ class TopCustomerConfigurator(GroupByConfigurator):
         return middleware
 
     def create_output_middlewares(self) -> Dict[str, Any]:
-        output_middleware = MessageMiddlewareExchange(
+        output_middleware = MessageMiddlewareExchangeManual(
             host=self.rabbitmq_host,
             exchange_name=self.output_exchange,
             route_keys=['store.*'],
-            #queue_name=f'groupby.top_customers.node.{self.topk_node_id}'
+            queue_name=f'groupby.top_customers.node.{self.topk_node_id}'
         )
         logger.info(f"  Output exchange: {self.output_exchange}")
         logger.info(f"  Routing pattern: store.* (por store_id)")
@@ -56,7 +57,16 @@ class TopCustomerConfigurator(GroupByConfigurator):
     
     
     def _generate_next_message_id(self, client_id: str) -> str:
-        return f"{client_id}_{self.message_id}:TC:{self.topk_node_id}"
+        """
+        Genera message_id único incluyendo el node_id.
+        """
+        if client_id not in self._message_counter:
+            self._message_counter[client_id] = 0
+        
+        self._message_counter[client_id] += 1
+        
+        # Formato: node_counter
+        return f"{self.topk_node_id}_{self._message_counter[client_id]}"
 
     def _send_data_by_store_for_client(self, output_middleware, strategy, client_id, message_id):
         store_user_purchases_by_client = getattr(strategy, 'store_user_purchases_by_client', {})

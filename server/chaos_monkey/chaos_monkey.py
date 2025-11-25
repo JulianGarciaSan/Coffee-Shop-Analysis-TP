@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - [CHAOS] - %(messag
 logger = logging.getLogger(__name__)
 
 class ChaosMonkey:
-    def __init__(self, kill_interval: int = 120, excluded_containers: Set[str] = None,
+    def __init__(self, kill_interval: int = 10, excluded_containers: Set[str] = None,
                  min_kills: int = 1, max_kills: int = 3):
         """
         Args:
@@ -39,8 +39,10 @@ class ChaosMonkey:
             
             if any(keyword in container.name.lower() for keyword in [
                 'groupby_top_customers',
-                'groupby_semester',
-                'groupby_best_selling'
+                'top_consumers_aggregator',
+                # 'groupby_semester',
+                # 'groupby_best_selling_2024_1',
+                # 'groupby_best_selling_2024_2'
             ]):
                 killable.append(container)
         

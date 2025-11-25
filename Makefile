@@ -36,6 +36,8 @@ stop:
 	sudo rm -rf ./server/logs/groupby_best_selling_2024_2/checkpoints/*
 	sudo rm -rf ./server/logs/groupby_best_selling_2024_1/checkpoints/*
 	sudo rm -rf ./server/logs/groupby_best_selling_2024_0/checkpoints/*
+	sudo rm -rf ./server/logs/top_customers_aggregator_2/checkpoints/*
+	sudo rm -rf ./server/logs/top_customers_aggregator_1/checkpoints/*
 
 	sudo rm -rf report*
 
@@ -95,131 +97,62 @@ stop:
 	echo -n > server/logs/filter_hour_3/logs.txt
 	echo -n > server/logs/filter_hour_3/eof_logs.txt
 
-
-	# Backup de logs de groupby_top_customers
-	sudo cp server/logs/groupby_top_customers/client_logs.txt server/logs/groupby_top_customers/client_logs_backup.txt || true
-	sudo cp server/logs/groupby_top_customers/logs.txt server/logs/groupby_top_customers/logs_backup.txt || true
-	sudo cp server/logs/groupby_top_customers/eof_logs.txt server/logs/groupby_top_customers/eof_logs_backup.txt || true
 	# Limpiar logs de groupby_top_customers
 	echo -n > server/logs/groupby_top_customers/client_logs.txt
-	echo -n > server/logs/groupby_top_customers/logs.txt
-	echo -n > server/logs/groupby_top_customers/eof_logs.txt
 
-	# Backup de logs de groupby_semester_2
-	sudo cp server/logs/groupby_semester_2/client_logs.txt server/logs/groupby_semester_2/client_logs_backup.txt || true
-	sudo cp server/logs/groupby_semester_2/logs.txt server/logs/groupby_semester_2/logs_backup.txt || true
-	sudo cp server/logs/groupby_semester_2/eof_logs.txt server/logs/groupby_semester_2/eof_logs_backup.txt || true
 	# Limpiar logs de groupby_semester_2
 	echo -n > server/logs/groupby_semester_2/client_logs.txt
-	echo -n > server/logs/groupby_semester_2/logs.txt
-	echo -n > server/logs/groupby_semester_2/eof_logs.txt
 
-	# Backup de logs de groupby_semester_1
-	sudo cp server/logs/groupby_semester_1/client_logs.txt server/logs/groupby_semester_1/client_logs_backup.txt || true
-	sudo cp server/logs/groupby_semester_1/logs.txt server/logs/groupby_semester_1/logs_backup.txt || true
-	sudo cp server/logs/groupby_semester_1/eof_logs.txt server/logs/groupby_semester_1/eof_logs_backup.txt || true
 	# Limpiar logs de groupby_semester_1
-	echo -n > server/logs/groupby_semester_1/client_logs.txt
-	echo -n > server/logs/groupby_semester_1/logs.txt
-	echo -n > server/logs/groupby_semester_1/eof_logs.txt
+	> server/logs/groupby_semester_1/client_logs.txt
 
 	# Backup de logs de top_customers_aggregator_1
 	sudo cp server/logs/top_customers_aggregator_1/client_logs.txt server/logs/top_customers_aggregator_1/client_logs_backup.txt || true
-# 	sudo cp server/logs/top_customers_aggregator_1/logs.txt server/logs/top_customers_aggregator_1/logs_backup.txt || true
-# 	sudo cp server/logs/top_customers_aggregator_1/eof_logs.txt server/logs/top_customers_aggregator_1/eof_logs_backup.txt || true
-	
+
 	# Limpiar logs de top_customers_aggregator_1
 	echo -n > server/logs/top_customers_aggregator_1/client_logs.txt
-# 	echo -n > server/logs/top_customers_aggregator_1/logs.txt
-# 	echo -n > server/logs/top_customers_aggregator_1/eof_logs.txt
 
-	# Backup de logs de top_customers_aggregator_2
-	sudo cp server/logs/top_customers_aggregator_2/client_logs.txt server/logs/top_customers_aggregator_2/client_logs_backup.txt || true
-# 	sudo cp server/logs/top_customers_aggregator_2/logs.txt server/logs/top_customers_aggregator_2/logs_backup.txt || true
-# 	sudo cp server/logs/top_customers_aggregator_2/eof_logs.txt server/logs/top_customers_aggregator_2/eof_logs_backup.txt || true
-	
 	# Limpiar logs de top_customers_aggregator_2
 	echo -n > server/logs/top_customers_aggregator_2/client_logs.txt
-# 	echo -n > server/logs/top_customers_aggregator_2/logs.txt
-# 	echo -n > server/logs/top_customers_aggregator_2/eof_logs.txt
 
-	# Backup de logs de join_node_1
-	sudo cp server/logs/join_node_1/client_logs.txt server/logs/join_node_1/client_logs_backup.txt || true
-# 	sudo cp server/logs/join_node_1/logs.txt server/logs/join_node_1/logs_backup.txt || true
-# 	sudo cp server/logs/join_node_1/eof_logs.txt server/logs/join_node_1/eof_logs_backup.txt || true
-	
 	# Limpiar logs de join_node_1
 	echo -n > server/logs/join_node_1/client_logs.txt
-# 	echo -n > server/logs/join_node_1/logs.txt
-# 	echo -n > server/logs/join_node_1/eof_logs.txt
-
-	# Backup de logs de join_node_0
-	sudo cp server/logs/join_node_0/client_logs.txt server/logs/join_node_0/client_logs_backup.txt || true
-# 	sudo cp server/logs/join_node_0/logs.txt server/logs/join_node_0/logs_backup.txt || true
-# 	sudo cp server/logs/join_node_0/eof_logs.txt server/logs/join_node_0/eof_logs_backup.txt || true
 	
 	# Limpiar logs de join_node_0
 	echo -n > server/logs/join_node_0/client_logs.txt
-# 	echo -n > server/logs/join_node_0/logs.txt
-# 	echo -n > server/logs/join_node_0/eof_logs.txt
-
-	# Backup de logs de groupby_best_selling_2025_3
-	sudo cp server/logs/groupby_best_selling_2025_3/client_logs.txt server/logs/groupby_best_selling_2025_3/client_logs_backup.txt || true
 
 	# Limpiar logs de groupby_best_selling_2025_3
 	echo -n > server/logs/groupby_best_selling_2025_3/client_logs.txt
 
-	# Backup de logs de groupby_best_selling_2025_2
-	sudo cp server/logs/groupby_best_selling_2025_2/client_logs.txt server/logs/groupby_best_selling_2025_2/client_logs_backup.txt || true
-
 	# Limpiar logs de groupby_best_selling_2025_2
 	echo -n > server/logs/groupby_best_selling_2025_2/client_logs.txt
-
-	# Backup de logs de groupby_best_selling_2025_1
-	sudo cp server/logs/groupby_best_selling_2025_1/client_logs.txt server/logs/groupby_best_selling_2025_1/client_logs_backup.txt || true
 
 	# Limpiar logs de groupby_best_selling_2025_1
 	echo -n > server/logs/groupby_best_selling_2025_1/client_logs.txt
 
-	# Backup de logs de groupby_best_selling_2025_0
-	sudo cp server/logs/groupby_best_selling_2025_0/client_logs.txt server/logs/groupby_best_selling_2025_0/client_logs_backup.txt || true
-
 	# Limpiar logs de groupby_best_selling_2025_0
 	echo -n > server/logs/groupby_best_selling_2025_0/client_logs.txt
-
-	# Backup de logs de groupby_best_selling_2024_1
-	sudo cp server/logs/groupby_best_selling_2024_1/client_logs.txt server/logs/groupby_best_selling_2024_1/client_logs_backup.txt || true
 
 	# Limpiar logs de groupby_best_selling_2024_1
 	echo -n > server/logs/groupby_best_selling_2024_1/client_logs.txt
 
-	
-	# Backup de logs de groupby_best_selling_2024_2
-	sudo cp server/logs/groupby_best_selling_2024_2/client_logs.txt server/logs/groupby_best_selling_2024_2/client_logs_backup.txt || true
-
 	# Limpiar logs de groupby_best_selling_2024_2
 	echo -n > server/logs/groupby_best_selling_2024_2/client_logs.txt
-
-	# Backup de logs de groupby_best_selling_2024_3
-	sudo cp server/logs/groupby_best_selling_2024_3/client_logs.txt server/logs/groupby_best_selling_2024_3/client_logs_backup.txt || true
 
 	# Limpiar logs de groupby_best_selling_2024_3
 	echo -n > server/logs/groupby_best_selling_2024_3/client_logs.txt
 
-
-	# Backup de logs de groupby_best_selling_2024_0
-	sudo cp server/logs/groupby_best_selling_2024_0/client_logs.txt server/logs/groupby_best_selling_2024_0/client_logs_backup.txt || true
-
 	# Limpiar logs de groupby_best_selling_2024_0
 	echo -n > server/logs/groupby_best_selling_2024_0/client_logs.txt
 
-
-
-	# Backup de logs de aggregator_best_selling_final
-	sudo cp server/logs/aggregator_best_selling_final/client_logs.txt server/logs/aggregator_best_selling_final/client_logs_backup.txt || true
-
 	# Limpiar logs de aggregator_best_selling_final
 	echo -n > server/logs/aggregator_best_selling_final/client_logs.txt
+
+	# Limpiar logs de top_customers_aggregator_2
+	echo -n > server/logs/top_customers_aggregator_2/client_logs.txt
+
+	# Limpiar logs de top_customers_aggregator_1
+	echo -n > server/logs/top_customers_aggregator_1/client_logs.txt
 
 .PHONY: stop
 

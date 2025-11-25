@@ -46,6 +46,78 @@ class TopCustomersGroupByStrategy(GroupByStrategy):
             csv_lines.extend(store_csv_lines)
         return '\n'.join(csv_lines)
     
+ 
+    def serialize_operation(self, client_id: str, csv_line: str) -> str:
+        """
+        Serializa una operación TopCustomers para el WAL.
+        
+        Formato: client_id,store_id,user_id
+        Ejemplo: 0,store_1,user_123
+        """
+        try:
+            store_id = self.dto_helper.get_column_value(csv_line, 'store_id')
+            user_id = self.dto_helper.get_column_value(csv_line, 'user_id')
+            
+            if not store_id or not user_id or user_id.strip() == '':
+                return None
+            
+            return f"{client_id},{store_id},{user_id}"
+            
+        except Exception as e:
+            logger.error(f"Error serializando operación TopCustomers: {e}")
+            raise
+
+    def deserialize_operation(self, operation_str: str) -> dict:
+        """
+        Deserializa una operación TopCustomers desde el WAL.
+        
+        Input: "0,store_1,user_123"
+        Output: {
+            'client_id': '0',
+            'store_id': 'store_1',
+            'user_id': 'user_123'
+        }
+        """
+        try:
+            parts = operation_str.split(',')
+            
+            if len(parts) != 3:
+                raise ValueError(f"Formato inválido, esperaba 3 campos, encontró {len(parts)}: {operation_str}")
+            
+            client_id, store_id, user_id = parts
+            
+            return {
+                'client_id': client_id,
+                'store_id': store_id,
+                'user_id': user_id
+            }
+            
+        except Exception as e:
+            logger.error(f"Error deserializando operación TopCustomers: {e}")
+            raise
+
+    def apply_operation(self, operation: dict):
+        """
+        Aplica una operación TopCustomers al estado en memoria.
+        Similar a process_csv_line pero desde dict ya parseado.
+        """
+        try:
+            client_id = operation['client_id']
+            store_id = operation['store_id']
+            user_id = operation['user_id']
+            
+            if not user_id or user_id.strip() == '':
+                return
+            
+            if user_id not in self.store_user_purchases_by_client[client_id][store_id]:
+                self.store_user_purchases_by_client[client_id][store_id][user_id] = UserPurchaseCount(user_id)
+            
+            self.store_user_purchases_by_client[client_id][store_id][user_id].add_purchase()
+            
+        except Exception as e:
+            logger.error(f"Error aplicando operación TopCustomers: {e}")
+            raise
+    
     def _serialize_client_data(self, client_id: str) -> Dict:
         """
         Serializa el estado de TopCustomers a un diccionario.
@@ -79,11 +151,10 @@ class TopCustomersGroupByStrategy(GroupByStrategy):
             client_id: ID del cliente
             data: Diccionario con estructura {store_id: {user_id: count}}
         """
+        self.store_user_purchases_by_client[client_id] = defaultdict(lambda: defaultdict(UserPurchaseCount))
+        
         for store_id, users in data.items():
             for user_id, count in users.items():
-                # Crear objeto UserPurchaseCount si no existe
-                if user_id not in self.store_user_purchases_by_client[client_id][store_id]:
-                    self.store_user_purchases_by_client[client_id][store_id][user_id] = UserPurchaseCount(user_id)
+                self.store_user_purchases_by_client[client_id][store_id][user_id] = UserPurchaseCount(user_id)
                 
-                # Restaurar el contador
                 self.store_user_purchases_by_client[client_id][store_id][user_id].purchases_qty = count

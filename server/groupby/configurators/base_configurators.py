@@ -46,8 +46,7 @@ class GroupByConfigurator(ABC):
     def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict, strategy, client_id: str, message_id: str) -> bool:
         pass
     
-    def set_loggers(self, logger, logger_client):
-        self.logger = logger
+    def set_loggers(self, logger_client):
         self.logger_client = logger_client
         
     def create_headers(self, client_id: Optional[int], message_id: Optional[int]) -> Dict[str, Any]:

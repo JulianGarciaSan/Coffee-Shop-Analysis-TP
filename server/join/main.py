@@ -447,9 +447,7 @@ class JoinNode:
             )
             self._send_best_selling_results(client_id, joined_data)
             state.best_selling_sent = True
-        else:
-            logger.info(f"Q2 Best Selling NO listo - menu_items: {state.menu_items_loaded}, best_selling: {state.best_selling_loaded}, ya_enviado: {state.best_selling_sent}")
-        
+
         # Q2 Most Profit
         if state.is_most_profit_ready():
             logger.info(f"Condiciones listas para JOIN Q2 Most Profit de cliente '{client_id}'")
@@ -460,9 +458,7 @@ class JoinNode:
             )
             self._send_most_profit_results(client_id, joined_data)
             state.most_profit_sent = True
-        else:
-            logger.info(f"Q2 Most Profit NO listo - menu_items: {state.menu_items_loaded}, most_profit: {state.most_profit_loaded}, ya_enviado: {state.most_profit_sent}")
-    
+
     def _send_q3_results(self, client_id: str, joined_data: List[Dict]):
         try:
             if not joined_data:

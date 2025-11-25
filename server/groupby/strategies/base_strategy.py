@@ -15,7 +15,7 @@ class GroupByStrategy(ABC):
     
     def __init__(self):
         self.client_logger = None
-        self.eof_logger = None
+        # self.eof_logger = None
         self.dto_helper = TransactionBatchDTO("", BatchType.RAW_CSV)
         
         self.message_trackers: Dict[str, MessageRangeTracker] = {}
@@ -28,8 +28,7 @@ class GroupByStrategy(ABC):
         # os.makedirs(self.checkpoint_dir, exist_ok=True)
         # logger.info(f"Sistema de checkpoints inicializado en {self.checkpoint_dir}")
     
-    def set_loggers(self, transactions_logger, client_logger):
-        self.transactions_logger = transactions_logger
+    def set_loggers(self, client_logger):
         self.client_logger = client_logger
     
     @abstractmethod

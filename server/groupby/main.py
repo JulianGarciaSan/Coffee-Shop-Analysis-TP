@@ -4,7 +4,6 @@ import os
 import sys
 from configurators import GroupByConfiguratorFactory
 from strategies.groupby_strategy import GroupByStrategyFactory
-from logger_monitor.logger_monitor import LoggerMonitor
 from dtos.dto import BatchType, TransactionBatchDTO
 from common.graceful_shutdown import GracefulShutdown
 from healthchecker.healthchecker import HealthChecker
@@ -26,8 +25,7 @@ class GroupByNode:
 
         logger.info(f"GroupByNode inicializado en modo {self.groupby_mode}")
         
-        self.transactions_logger = LoggerMonitor('/app/logs.txt')
-        self.client_logger = LoggerMonitor('/app/client_logs.txt')
+        # self.transactions_logger = LoggerMonitor('/app/logs.txt')
         # self.eof_logger = LoggerMonitor('/app/eof_logs.txt')
         self.is_first_message = True 
         
@@ -44,13 +42,9 @@ class GroupByNode:
             **strategy_config,
         )
         
-        self.configurator.set_loggers(self.transactions_logger, self.client_logger)
-        self.strategy.set_loggers(self.transactions_logger, self.client_logger)
-        
         self.checkpoint_handler = CheckpointHandler(
             checkpoint_dir=self.checkpoint_dir,
-            node=self.strategy,
-            transactions_logger=self.transactions_logger
+            strategy=self.strategy,
         )
         self.input_middleware = self.configurator.create_input_middleware()
         if hasattr(self.input_middleware, 'shutdown'):
@@ -75,161 +69,35 @@ class GroupByNode:
     
     def process_message(self, message: bytes, client_id: str = None, message_id: str = None) -> bool:
         if self.shutdown.is_shutting_down():
-            logger.warning("Shutdown en progreso, ignorando mensaje")
             return (True, False)
         
         dto = TransactionBatchDTO.from_bytes_fast(message)
 
         if dto.batch_type == BatchType.EOF:
-            # client_id_str = str(client_id)
-            
-            # self.eof_logger.write_with_timestamp(
-            #     f"EOF_START:{client_id}:{message_id}"
-            # )
-
             self.configurator.handle_eof(dto, self.output_middlewares, self.strategy, client_id, message_id)
-
             self.checkpoint_handler.save_eof_checkpoint(client_id, message_id)
-            
-            # self.eof_logger.write_with_timestamp(f"EOF_COMPLETED:{client_id}")
             return (False, True) 
 
-        if dto.batch_type == BatchType.RAW_CSV:
+        if dto.batch_type == BatchType.RAW_CSV:            
+            lines = [line.strip() for line in dto.data.split('\n') if line.strip()]
             
-            self.process_csv_line(dto.data, client_id)
+            for i, line in enumerate(lines):
+                try:
+                    self.strategy.process_csv_line(line, client_id)
+                except Exception as e:
+                    logger.warning(f"Línea {i} inválida en mensaje {message_id}: {e}")
             
-            self.checkpoint_handler.save_message_checkpoint(client_id, message_id)
+            self.checkpoint_handler.save_message_checkpoint(
+                client_id=client_id,
+                message_id=message_id,
+                csv_lines=lines
+            )
             
             return (False, True)
-        return (False, False) 
         
-    def process_csv_line(self, csv_line: str, client_id: str = 'default_client'):
-        for line in csv_line.split('\n'):
-                if line.strip():
-                    self.strategy.process_csv_line(line.strip(), client_id)
-    
-    def analyze_first_message(self, client_id: str, message_id: str, ch, method, body) -> bool:
-        if self.is_first_message:
-            self.is_first_message = False
-            
-            last_line_client = self.client_logger._get_last_line()
-            # last_line_eof = self.eof_logger._get_last_line()
-            
-            logger.info("=" * 80)
-            logger.info("ANALYZE FIRST MESSAGE")
-            logger.info(f"   Mensaje actual: {client_id}:{message_id}")
-            logger.info(f"   Último del client_log: '{last_line_client}'")
-            # logger.info(f"   Último del eof_log: '{last_line_eof}'")
-            logger.info("=" * 80)
-            
-            try:
-                self.checkpoint_handler.recover_from_checkpoint()
+        return (False, False)
+        
 
-                if client_id in self.checkpoint_handler.message_trackers:
-                    tracker = self.checkpoint_handler.message_trackers[client_id]
-                    logger.info(f"Tracker recuperado para cliente {client_id}:")
-                    logger.info(f"   Rangos: {tracker.ranges}")
-                    
-                    try:
-                        msg_id_int = int(message_id)
-                        in_checkpoint = tracker.contains(msg_id_int)
-                        logger.info(f"   ¿Mensaje {msg_id_int} en checkpoint? {in_checkpoint}")
-                    except Exception as e:
-                        logger.error(f"Error verificando primer mensaje: {e}")
-                
-            except Exception as e:
-                logger.error(f"Error recuperando checkpoint: {e}")
-            
-            if self._eof_already_processed(client_id):
-                logger.info(f"EOF ya procesado - SKIPPING")
-                ch.basic_ack(delivery_tag=method.delivery_tag)
-                return True
-            
-            logger.info(f"Verificando si mensaje {client_id}:{message_id} está en checkpoint...")
-            
-            if last_line_client and last_line_client.strip() and ';' in last_line_client:    
-                client_id_client_log, message_id_client_log = last_line_client.split(';')
-                
-                logger.info(f"   Del log: {client_id_client_log}:{message_id_client_log}")
-                logger.info(f"   Actual:  {client_id}:{message_id}")
-                
-                if client_id == client_id_client_log and message_id == message_id_client_log:
-                    logger.info(f"COINCIDEN - Verificando checkpoint...")
-                    
-                    if self._message_in_checkpoint(client_id, message_id):
-                        logger.info(f"YA EN CHECKPOINT - SKIPPING y ACK")
-                        ch.basic_ack(delivery_tag=method.delivery_tag)
-                        return True
-                    else:
-                        logger.warning(f"NO en checkpoint - REPROCESANDO")
-                        return False
-                else:
-                    logger.warning(f"NO COINCIDEN - Mensaje es diferente")
-                    return False
-            else:
-                logger.warning(f"No hay último mensaje válido en log")
-                return False
-        
-        return False
-
-    def _message_in_checkpoint(self, client_id: str, message_id: str) -> bool:
-        """
-        Verifica si el mensaje específico fue procesado usando rangos.
-        """
-        if client_id not in self.checkpoint_handler.message_trackers:
-            return False
-        
-        try:
-            try:
-                msg_id_int = int(message_id)
-            except ValueError:
-                msg_id_int = int(message_id.split('_')[-1])
-            
-            is_processed = self.checkpoint_handler.message_trackers[client_id].contains(msg_id_int)
-            
-            if is_processed:
-                logger.debug(f"Mensaje {client_id}:{message_id} encontrado en rangos procesados")
-            
-            return is_processed
-            
-        except Exception as e:
-            logger.warning(f"Error verificando mensaje en rangos: {e}")
-            return False
-
-    def _eof_already_processed(self, client_id: str) -> bool:
-        """
-        Verifica si el EOF de un cliente ya fue procesado completamente.
-        """
-        if client_id not in self.checkpoint_handler.message_trackers:
-            return False
-        
-        checkpoint_path = os.path.join(
-            self.checkpoint_handler.checkpoint_dir,
-            f"client_{client_id}.checkpoint"
-        )
-        
-        if not os.path.exists(checkpoint_path):
-            return False
-        
-        try:
-            with open(checkpoint_path, 'r') as f:
-                checkpoint_data = json.load(f)
-            
-            eof_processed = checkpoint_data.get('eof_processed', False)
-            
-            if eof_processed:
-                logger.info(f"EOF de cliente {client_id} ya procesado según checkpoint")
-                return True
-            
-        except Exception as e:
-            logger.warning(f"Error leyendo checkpoint para verificar EOF: {e}")
-        
-        # if last_line_eof and f"EOF_COMPLETED:{client_id}" in last_line_eof:
-        #     logger.info(f"EOF de cliente {client_id} ya procesado según log")
-        #     return True
-        
-        return False
-    
         
     def parse_message_headers(self, properties):
         client_id = None
@@ -247,11 +115,11 @@ class GroupByNode:
                 return
             client_id, message_id = self.parse_message_headers(properties)
 
-            if self.analyze_first_message(client_id, message_id, ch, method, body):
+            if self.checkpoint_handler.analyze_first_message(client_id, message_id, ch, method, body):
                 return
-            
-            self.client_logger.write(f"{client_id};{message_id}")
-            
+
+            self.checkpoint_handler.register_incoming_message(client_id, message_id)
+
             should_stop, should_ack = self.process_message(body, client_id, message_id)
         
             if should_ack:
