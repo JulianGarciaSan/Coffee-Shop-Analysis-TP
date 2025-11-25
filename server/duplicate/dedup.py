@@ -21,7 +21,6 @@ class FilterDuplicateNode:
         
         logger.info(f"FilterDuplicateNode inicializado:")
         logger.info(f"  Input queue: {self.input_queue}")
-        logger.info(f"  Output queue: {self.output_queue}")
         
         self.processed_messages: Set[Tuple[int, int]] = set()
         

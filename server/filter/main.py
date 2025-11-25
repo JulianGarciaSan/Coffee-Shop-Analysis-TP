@@ -165,11 +165,11 @@ class FilterNode:
                 return True
                         
             processed_data = self.node_configurator.process_filtered_data(filtered_csv)
-            self.logger.write_with_timestamp(f"Informo que Filtre el mensaje")
+            self.logger.write_filter()
             self.node_configurator.send_data(processed_data, self.middlewares, batch_type, client_id=client_id,message_id=message_id)
-            self.logger.write_with_timestamp(f"Informo que encole el mensaje")
+            self.logger.write_enqueue()
             # time.sleep(30)
-            self.logger.write_with_timestamp(f"Termine la iteracion")
+            self.logger.write_termination()
             return False
 
         except Exception as e:
@@ -201,13 +201,12 @@ class FilterNode:
                 if self.analize_log(last_log, client_id, message_id):
                     logger.info("Mensaje ya procesado, haciendo ACK y continuando")
                     ch.basic_ack(delivery_tag=method.delivery_tag)
-                    self.logger.write_with_timestamp(f"Termine la iteracion")
+                    self.logger.write_termination()
                     return
 
-            self.client_logger.write(f"{client_id};{message_id}")
+            self.client_logger.write(f"{client_id}:{message_id}")
             logging.info("Mensaje recibido en FilterNode")
             should_stop = self.process_message(body, routing_key, client_id,message_id)
-            #time.sleep(30)
             ch.basic_ack(delivery_tag=method.delivery_tag)
 
             
@@ -224,7 +223,7 @@ class FilterNode:
         last_line = self.eof_logger._get_last_line()
         logger.info(f"Ultima linea del eof log: {last_line}")
         
-        if not last_line or ':' not in last_line:
+        if not last_line or ';' not in last_line:
             logger.warning("No hay logs EOF previos válidos")
             return True
         
@@ -260,7 +259,7 @@ class FilterNode:
         message_id_client_log = None
         if last_line_client and ';' in last_line_client:
             try:
-                client_id_client_log, message_id_client_log = last_line_client.split(';')
+                client_id_client_log, message_id_client_log = last_line_client.split(':')
             except ValueError:
                 logger.warning(f"Error parseando client log: {last_line_client}")
         
@@ -268,7 +267,7 @@ class FilterNode:
         eof_eof_log = None
         client_id_eof_log = None
         batch_type_eof_log = None
-        if last_line_eof and ':' in last_line_eof:
+        if last_line_eof and ';' in last_line_eof:
             try:
                 parts = last_line_eof.split(':')
                 if len(parts) >= 3:
@@ -322,13 +321,13 @@ class FilterNode:
         
             return False
 
-        if "Informo que encole el mensaje" in log:
+        if "E" in log:
             if client_id_client_log == client_id and message_id_client_log == message_id:
                 logger.info(f"FilterNode: Mensaje encolado para client_id {client_id}")
                 return True
             logger.info(f"FilterNode: Mensaje no corresponde a client_id {client_id}, client_id log: {client_id_client_log}, message_id log: {message_id_client_log}, message_id: {message_id}")
 
-        if "Informo que Filtre" in log:
+        if "F" in log:
             logger.info(f"FilterNode: Reintento filtrar y enviar el mensaje")
             return False
         
