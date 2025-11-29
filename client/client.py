@@ -157,6 +157,8 @@ class Client:
             # total_lines_received = 0
             
             for message in self.protocol.receive_reports():
+                # logger.info(f"Mensaje recibido: acción={message.action}, tipo_archivo={message.file_type}")
+                
                 if self.shutdown.is_shutting_down():
                     logger.info("Shutdown detectado, deteniendo recepción")
                     break
@@ -171,7 +173,7 @@ class Client:
                 elif message.action == "EXIT":
                     logger.info("EXIT recibido, cerrando archivos de reportes")
                     #logger.info(f"TOTAL RECIBIDO: {total_messages_received} mensajes, {total_lines_received} líneas")
-                    self._close_all_report_files()
+                    self._sort_and_close_reports()
                     break
                 
                 else:
@@ -233,6 +235,39 @@ class Client:
             
         except Exception as e:
             logger.error(f"Error cerrando archivos de reportes: {e}")
+            
+    def _sort_and_close_reports(self):
+        """Cierra archivos, ordena Q1 y reescribe."""
+        try:
+            logger.info("Cerrando archivos de reportes antes de ordenar Q1...")
+            for query_name, file_handle in self.report_files.items():
+                file_handle.close()
+            
+            report_dir = f"/app/report_{self.client_id}"
+            q1_file = f"{report_dir}/report_q1.csv"
+            
+            if os.path.exists(q1_file):
+                logger.info("Ordenando Q1 por transaction_id...")
+                
+                with open(q1_file, 'r') as f:
+                    lines = f.readlines()
+                
+                header = lines[0]
+                data_lines = lines[1:]
+                
+                # Ordenar por transaction_id (primera columna)
+                data_lines.sort(key=lambda line: line.split(',')[0])
+                
+                with open(q1_file, 'w') as f:
+                    f.write(header)
+                    f.writelines(data_lines)
+                
+                logger.info(f"Q1 ordenado: {len(data_lines)} registros")
+            
+            self.report_files.clear()
+            
+        except Exception as e:
+            logger.error(f"Error ordenando reportes: {e}")
 
         
     def _cleanup(self):
@@ -254,61 +289,3 @@ class Client:
         #     logger.error(f"Error esperando el hilo receptor: {e}") 
             
         logger.info("Cliente cerrado completamente")
-        
-        
-        
-    # def receive_reports(self):
-    #     """Recibe reportes del servidor hasta que se envíe un mensaje de salida."""
-    #     try:
-    #         if not self.protocol:
-    #             logger.error("Protocolo no inicializado. No se pueden recibir reportes.")
-    #             return
-            
-    #         logger.info("Esperando reportes del servidor...")
-            
-    #         # Esperamos recibir 3 reportes: Q1, Q3, Q4
-    #         reports_received = 0
-            
-    #         while self.keep_running and reports_received < self.expected_reports:
-    #             if self.shutdown.is_shutting_down():
-    #                 logger.info("Shutdown detectado, deteniendo recepción de reportes")
-    #                 break
-                
-    #             logger.info(f"Esperando reporte {reports_received + 1} de {self.expected_reports}...")
-                
-    #             report = self.protocol.receive_report()  # ← Retorna dict
-                
-    #             if report is None:
-    #                 logger.info("No se recibieron más reportes o conexión cerrada.")
-    #                 break
-                
-    #             reports_received += 1
-                
-    #             # Extraer datos del dict
-    #             query_id = report['query_id']
-    #             content = report['content']
-                
-    #             logger.info(f"Reporte Q{query_id} recibido: {len(content)} bytes")
-                
-    #             # Guardar reporte en archivo usando el content (str)
-    #             self._save_report_to_file(f"Q{query_id}", content)
-            
-    #         logger.info(f"Recepción completada. {reports_received} reportes recibidos.")
-            
-    #     except Exception as e:
-    #         logger.error(f"Error recibiendo reportes: {e}")
-    #         raise
-    
-    # def _save_report_to_file(self, report_type, content):
-    #     try:
-    #         # Crear directorio report_<client_id> si no existe
-    #         report_dir = f"/app/report_{self.client_id}"
-    #         os.makedirs(report_dir, exist_ok=True)
-            
-    #         # Guardar en la carpeta mapeada
-    #         filename = f"{report_dir}/report_{report_type.lower()}.csv"
-    #         with open(filename, 'w') as f:
-    #             f.write(content)
-    #         logger.info(f"Reporte {report_type} guardado en {filename}")
-    #     except Exception as e:
-    #         logger.error(f"Error guardando reporte {report_type}: {e}")

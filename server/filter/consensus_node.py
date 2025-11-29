@@ -139,11 +139,11 @@ class ConsensusNode:
             
             print(f"{self.node_id}: NUEVO mensaje - {entry} (total: {len(self.log)})")
         
-        threading.Thread(
-            target=self._replicate_to_followers,
-            args=([entry], requester),  # Pasar el requester
-            daemon=True
-        ).start()
+            threading.Thread(
+                target=self._replicate_to_followers,
+                args=([entry], requester),  # Pasar el requester
+                daemon=True
+            ).start()
         
         return {
             'duplicate': False,
@@ -260,13 +260,13 @@ class ConsensusNode:
                 for idx, log_entry in enumerate(self.log, 1):
                     print(f"  [{idx}] {log_entry}")
             
-            # Replicar a followers
-            threading.Thread(
-                target=self._replicate_to_followers,
-                args=([entry],),
-                daemon=True
-            ).start()
-            
+                # Replicar a followers
+                threading.Thread(
+                    target=self._replicate_to_followers,
+                    args=([entry],),
+                    daemon=True
+                ).start()
+                
             return False
         
         else:
