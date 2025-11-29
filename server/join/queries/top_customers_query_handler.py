@@ -44,7 +44,7 @@ class TopCustomersQueryHandler:
                 result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
                 self.output_middleware.send(
                     result_dto.to_bytes_fast(), 
-                    routing_key=f'client.{client_id}.q4',
+                    routing_key=f'q4.data',
                     headers={'client_id': int(client_id)}
                 )
                 
@@ -53,7 +53,7 @@ class TopCustomersQueryHandler:
             eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
             self.output_middleware.send(
                 eof_dto.to_bytes_fast(), 
-                routing_key=f'client.{client_id}.q4',
+                routing_key=f'q4.data',
                 headers={'client_id': int(client_id)}
             )
             

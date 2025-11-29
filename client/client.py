@@ -29,7 +29,7 @@ class Client:
         'q1': 'transaction_id,final_amount',
         'q2_most_profit': 'year_month_created_at,item_name,profit_sum',
         'q2_best_selling': 'year_month_created_at,item_name,sellings_qty',
-        'q3': 'year_half,store_name,tpv',
+        'q3': 'year_half_created_at,store_name,tpv',
         'q4': 'store_name,birthdate'
         }
         
