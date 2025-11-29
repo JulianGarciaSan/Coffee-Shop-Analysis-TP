@@ -2,79 +2,27 @@
 import logging
 import os
 import sys
-from typing import Dict, List
-from dataclasses import dataclass, field
-from enum import Enum
+from typing import Callable, Dict, List
 from collections import defaultdict
 
 from common.graceful_shutdown import GracefulShutdown
-from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
+from rabbitmq.middleware import MessageMiddlewareExchangeManual, MessageMiddlewareQueueManual
 from dtos.dto import BatchType, MenuItemBatchDTO, StoreBatchDTO, TransactionBatchDTO, TransactionItemBatchDTO, UserBatchDTO
-from aggregated_data_processor import AggregatedDataProcessor
+from processors.aggregated_data_processor import AggregatedDataProcessor
 from join_engine import JoinEngine
-from message_router import MessageRouter
-from menu_item_processor import MenuItemProcessor
-from store_processor import StoreProcessor
-from user_processor import UserProcessor
-from client_routing.client_routing import ClientRouter
-from logger_monitor.logger_monitor import LoggerMonitor
-
-
+from processors.menu_item_processor import MenuItemProcessor
+from processors.store_processor import StoreProcessor
+from processors.user_processor import UserProcessor
+from processors.processors_handler import ProcessorsHandler
+from client_processing_state import ClientProcessingState
+from queries.profit_and_selling_query_handler import ProfitAndSellingQueryHandler
+from queries.top_customers_query_handler import TopCustomersQueryHandler
+from queries.tpv_query_handler import TPVQueryHandler
+from checkpoint_handler.checkpoint_handler import CheckpointHandler
+from join_node_checkpoint_handler import JoinNodeCheckpointHandler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-class DataSourceType(Enum):
-    STORES = "stores"
-    USERS = "users"
-    MENU_ITEMS = "menu_items"
-    TPV = "tpv"
-    TOP_CUSTOMERS = "top_customers"
-    BEST_SELLING = "q2_best_selling"
-    MOST_PROFIT = "q2_most_profit"
-
-
-@dataclass
-class ClientProcessingState:
-    stores_loaded: bool = False
-    users_loaded: bool = False
-    menu_items_loaded: bool = False
-    top_customers_loaded: bool = False
-    best_selling_loaded: bool = False
-    most_profit_loaded: bool = False
-    groupby_eof_count: int = 0
-    expected_groupby_nodes: int = 2
-    expected_top_customers_aggregators: int = 2
-    top_customers_eof_count: int = 0
-    
-    q3_results_sent: bool = False
-    q4_results_sent: bool = False
-    best_selling_sent: bool = False
-    most_profit_sent: bool = False
-    
-    def is_q3_ready(self) -> bool:
-        return (self.stores_loaded and 
-                self.groupby_eof_count >= self.expected_groupby_nodes and 
-                not self.q3_results_sent)
-    
-    def is_q4_ready(self) -> bool:
-        return (self.stores_loaded and 
-                self.users_loaded and 
-                self.top_customers_loaded and
-                self.top_customers_eof_count >= self.expected_top_customers_aggregators and
-                not self.q4_results_sent)
-    
-    def is_best_selling_ready(self) -> bool:
-        return (self.menu_items_loaded and 
-                self.best_selling_loaded and 
-                not self.best_selling_sent)
-    
-    def is_most_profit_ready(self) -> bool:
-        return (self.menu_items_loaded and 
-                self.most_profit_loaded and 
-                not self.most_profit_sent)
-
 
 class JoinNode:    
     def __init__(self):
@@ -84,13 +32,34 @@ class JoinNode:
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.input_exchange = os.getenv('INPUT_EXCHANGE', 'join.exchange')
         self.output_exchange = os.getenv('OUTPUT_EXCHANGE', 'report.exchange')
+        self.checkpoint_dir = os.getenv('CHECKPOINT_DIR', f'/app/server/logs/join/checkpoints')
         
         self.node_id = int(os.getenv('JOIN_NODE_ID', '0'))
         self.total_join_nodes = int(os.getenv('TOTAL_JOIN_NODES', '3'))
         self.node_name = f"join_node_{self.node_id}"
         
         self.client_states: Dict[str, ClientProcessingState] = defaultdict(ClientProcessingState)
+        self.router: Dict[str, Callable] = {}
+        self.q3_joined_data_by_client: Dict[str, List[Dict]] = {}
         
+        self.join_engine = JoinEngine()
+        self.processor_handler = ProcessorsHandler(self)
+        
+        self.checkpoint_handler = JoinNodeCheckpointHandler(join_node=self)
+        self.checkpoint_handler = CheckpointHandler(checkpoint_dir=self.checkpoint_dir,strategy=self.checkpoint_handler)
+        self._setup_input_middleware()
+        self._setup_output_middleware()
+        
+        self.intialize_processors()
+        self.intialize_query_handlers()
+        
+        self._setup_message_routes()        
+        logger.info("JoinNode inicializado con soporte multi-cliente")
+        logger.info(f"  RabbitMQ Host: {self.rabbitmq_host}")
+        logger.info(f"  Input Exchange: {self.input_exchange}")
+        logger.info(f"  Output Exchange: {self.output_exchange}")
+    
+    def intialize_processors(self):
         self.store_processors: Dict[str, StoreProcessor] = {}
         self.user_processors: Dict[str, UserProcessor] = {}
         self.menu_item_processors: Dict[str, MenuItemProcessor] = {}
@@ -99,90 +68,69 @@ class JoinNode:
         self.best_selling_processors: Dict[str, AggregatedDataProcessor] = {}
         self.most_profit_processors: Dict[str, AggregatedDataProcessor] = {}
         
-        self.q3_joined_data_by_client: Dict[str, List[Dict]] = {}
-        
-        self.join_engine = JoinEngine()
-        self.client_logger = LoggerMonitor('/app/client_logs.txt')
-        
-        self.router = MessageRouter()
-        self._setup_message_routes()
-        
-        self._setup_middleware()
-        
-        logger.info("JoinNode inicializado con soporte multi-cliente")
-        logger.info(f"  RabbitMQ Host: {self.rabbitmq_host}")
-        logger.info(f"  Input Exchange: {self.input_exchange}")
-        logger.info(f"  Output Exchange: {self.output_exchange}")
-        
-        self.client_router = ClientRouter(
-            total_join_nodes=self.total_join_nodes,
-            node_prefix="join_node"
-        )
-    
+    def intialize_query_handlers(self):
+        self.tpv_query_handler = TPVQueryHandler(self.output_middleware, self)
+        self.top_customers_query_handler = TopCustomersQueryHandler(self.output_middleware, self)
+        self.profit_and_selling_query_handler = ProfitAndSellingQueryHandler(self.output_middleware, self)
+
     def _get_or_create_processors(self, client_id: str):
         if client_id not in self.store_processors:
             self.store_processors[client_id] = StoreProcessor(StoreBatchDTO("", BatchType.RAW_CSV))
-            logger.info(f"StoreProcessor creado para cliente '{client_id}'")
         
         if client_id not in self.user_processors:
             self.user_processors[client_id] = UserProcessor(UserBatchDTO("", BatchType.RAW_CSV))
-            logger.info(f"UserProcessor creado para cliente '{client_id}'")
         
         if client_id not in self.menu_item_processors:
             self.menu_item_processors[client_id] = MenuItemProcessor(MenuItemBatchDTO("", BatchType.RAW_CSV))
-            logger.info(f"MenuItemProcessor creado para cliente '{client_id}'")
         
         if client_id not in self.tpv_processors:
             self.tpv_processors[client_id] = AggregatedDataProcessor()
-            logger.info(f"TPV Processor creado para cliente '{client_id}'")
         
         if client_id not in self.top_customers_processors:
             self.top_customers_processors[client_id] = AggregatedDataProcessor()
-            logger.info(f"TopCustomers Processor creado para cliente '{client_id}'")
         
         if client_id not in self.best_selling_processors:
             self.best_selling_processors[client_id] = AggregatedDataProcessor()
-            logger.info(f"BestSelling Processor creado para cliente '{client_id}'")
         
         if client_id not in self.most_profit_processors:
             self.most_profit_processors[client_id] = AggregatedDataProcessor()
-            logger.info(f"MostProfit Processor creado para cliente '{client_id}'")
     
     def _setup_message_routes(self):
         routes = {
-            'stores.data': self._handle_stores_message,
-            'users.data': self._handle_users_message,
-            'menu_items.data': self._handle_menu_items_message,
-            'menu_items.eof': self._handle_menu_items_message,
-            'tpv.data': self._handle_tpv_message,
-            'top_customers.data': self._handle_top_customers_message,
-            'top_customers.eof': self._handle_top_customers_message,
-            'q2_best_selling.data': self._handle_best_selling_message,
-            'q2_most_profit.data': self._handle_most_profit_message,
+            'stores.data': self.processor_handler.handle_stores_message,
+            'users.data': self.processor_handler.handle_users_message,
+            'menu_items.data': self.processor_handler.handle_menu_items_message,
+            'menu_items.eof': self.processor_handler.handle_menu_items_message,
+            'tpv.data': self.tpv_query_handler.handle_tpv_message,
+            'top_customers.data': self.top_customers_query_handler.handle_top_customers_message,
+            'q2_best_selling.data': self.profit_and_selling_query_handler.handle_best_selling_message,
+            'q2_most_profit.data': self.profit_and_selling_query_handler.handle_most_profit_message,
         }
         
         for routing_key, handler in routes.items():
-            self.router.register(routing_key, handler)
+            self.router[routing_key] = handler
         
         logger.info(f"Registradas {len(routes)} rutas de mensajes")
     
-    def _setup_middleware(self):        
+    def _setup_input_middleware(self):        
         base_keys = [
             'stores.data',
             'users.data',
             'menu_items.data',
             'tpv.data',
-            'top_customers.data', 'top_customers.eof',
+            'top_customers.data',
             'q2_best_selling.data',
-            'q2_most_profit.data', 'q2_most_profit.eof'
+            'q2_most_profit.data'
         ]
         
         routing_keys = [f"{self.node_name}.{key}" for key in base_keys]
         
+        
+        
         logger.info(f"Configurando {len(routing_keys)} routing keys para {self.node_name}")
         logger.info(f"Ejemplos: {routing_keys[:3]}")
         
-        self.input_middleware = MessageMiddlewareQueue(
+        self.input_middleware = MessageMiddlewareQueueManual(
             host=self.rabbitmq_host,
             queue_name=f'join_input_queue_{self.node_name}',  
             exchange_name=self.input_exchange,
@@ -193,7 +141,9 @@ class JoinNode:
         if hasattr(self.input_middleware, 'shutdown'):
             self.input_middleware.shutdown = self.shutdown
         
-        self.output_middleware = MessageMiddlewareExchange(
+            
+    def _setup_output_middleware(self):
+        self.output_middleware = MessageMiddlewareExchangeManual(
             host=self.rabbitmq_host,
             #exchange_name=self.output_exchange,
             exchange_name='reports_exchange',
@@ -207,210 +157,7 @@ class JoinNode:
         
         if hasattr(self.output_middleware, 'shutdown'):
             self.output_middleware.shutdown = self.shutdown
-    
-    def _extract_client_id(self, headers: dict) -> str:
-        client_id = 'default_client'
-        if headers and 'client_id' in headers:
-            original_value = headers['client_id']
-            original_type = type(original_value).__name__
-            client_id = original_value
-            if isinstance(client_id, bytes):
-                client_id = client_id.decode('utf-8')
-            final_client_id = str(client_id)
-            return final_client_id
-        return client_id
-    
-    def _handle_stores_message(self, message: bytes, headers: dict = None) -> bool:
-        client_id = self._extract_client_id(headers)
-        self._get_or_create_processors(client_id)
-        
-        dto = StoreBatchDTO.from_bytes_fast(message)
-        
-        if dto.batch_type == BatchType.EOF:
-            self.client_states[client_id].stores_loaded = True
-            stores_count = len(self.store_processors[client_id].get_data())
-            logger.info(f"EOF recibido de stores para cliente '{client_id}': {stores_count} stores cargados")
-            self._check_and_execute_joins(client_id)
-            return False
-        
-        if dto.batch_type == BatchType.RAW_CSV:
-            self.store_processors[client_id].process_batch(dto.data)
-            logger.debug(f"Batch de stores procesado para cliente '{client_id}'")
-        return False
-    
-    def _handle_users_message(self, message: bytes, headers: dict = None) -> bool:
-        client_id = self._extract_client_id(headers)
-        self._get_or_create_processors(client_id)
-        
-        dto = UserBatchDTO.from_bytes_fast(message)
-        
-        if dto.batch_type == BatchType.EOF:
-            self.client_states[client_id].users_loaded = True
-            users_count = len(self.user_processors[client_id].get_data())
-            logger.info(f"EOF recibido de users para cliente '{client_id}': {users_count} users cargados")
-            self._check_and_execute_joins(client_id)
-            return False
-        
-        if dto.batch_type == BatchType.RAW_CSV:
-            self.user_processors[client_id].process_batch(dto.data)
-            logger.debug(f"Batch de users procesado para cliente '{client_id}'")
-        return False
-    
-    def _handle_menu_items_message(self, message: bytes, headers: dict = None) -> bool:
-        client_id = self._extract_client_id(headers)
-        self._get_or_create_processors(client_id)
-        
-        dto = MenuItemBatchDTO.from_bytes_fast(message)
-        
-        if dto.batch_type == BatchType.EOF:
-            state_id = id(self.client_states[client_id])
-            self.client_states[client_id].menu_items_loaded = True
-            menu_items_count = len(self.menu_item_processors[client_id].get_data())
-            logger.info(f"EOF recibido de menu_items para cliente '{client_id}' (State ID: {state_id}): {menu_items_count} items cargados")
-            self._check_and_execute_joins(client_id)
-            return False
-        
-        if dto.batch_type == BatchType.RAW_CSV:
-            self.menu_item_processors[client_id].process_batch(dto.data)
-            logger.debug(f"Batch de menu_items procesado para cliente '{client_id}'")
-        return False
-    
-    def _handle_tpv_message(self, message: bytes, headers: dict = None) -> bool:
-        client_id = self._extract_client_id(headers)
-        self._get_or_create_processors(client_id)
-        
-        dto = TransactionBatchDTO.from_bytes_fast(message)
-        
-        if dto.batch_type == BatchType.EOF:
-            self.client_states[client_id].groupby_eof_count += 1
-            logger.info(f"EOF TPV recibido para cliente '{client_id}': {self.client_states[client_id].groupby_eof_count}/{self.client_states[client_id].expected_groupby_nodes}")
-            self._check_and_execute_joins(client_id)
-            return False
-        
-        if dto.batch_type == BatchType.RAW_CSV:
-            self.tpv_processors[client_id].process_batch(dto.data, self._parse_tpv_line)
-        return False
-    
-    def _handle_top_customers_message(self, message: bytes, headers: dict = None) -> bool:
-        client_id = self._extract_client_id(headers)
-        self._get_or_create_processors(client_id)
-        
-        dto = TransactionBatchDTO.from_bytes_fast(message)
-        
-        if dto.batch_type == BatchType.EOF:
-            self.client_states[client_id].top_customers_eof_count += 1
             
-            logger.info(
-                f"EOF top_customers para cliente '{client_id}': "
-                f"{self.client_states[client_id].top_customers_eof_count}/"
-                f"{self.client_states[client_id].expected_top_customers_aggregators}"
-            )
-            
-            if self.client_states[client_id].top_customers_eof_count >= \
-            self.client_states[client_id].expected_top_customers_aggregators:
-                self.client_states[client_id].top_customers_loaded = True
-                logger.info(f"Todos los EOF de top_customers recibidos para cliente '{client_id}'")
-                
-                self._check_and_execute_joins(client_id)
-            
-            return False
-        if dto.batch_type == BatchType.RAW_CSV:
-            self.top_customers_processors[client_id].process_batch(dto.data, self._parse_top_customers_line)
-        return False
-    
-    def _handle_best_selling_message(self, message: bytes, headers: dict = None) -> bool:
-        client_id = self._extract_client_id(headers)
-        self._get_or_create_processors(client_id)
-        
-        dto = TransactionItemBatchDTO.from_bytes_fast(message)
-        
-        if dto.batch_type == BatchType.EOF:
-            # Verificar si el estado existe antes de accederlo
-            if client_id not in self.client_states:
-                logger.warning(f"[DEBUG] Estado no existe para cliente '{client_id}', creando nuevo estado")
-                self.client_states[client_id] = ClientProcessingState()
-            
-            state_id = id(self.client_states[client_id])
-            
-            self.client_states[client_id].best_selling_loaded = True
-            logger.info(f"EOF recibido de best_selling para cliente '{client_id}' (State ID: {state_id})")
-            self._check_and_execute_joins(client_id)
-            return False
-        
-        if dto.batch_type == BatchType.RAW_CSV:
-            self.best_selling_processors[client_id].process_batch(dto.data, self._parse_best_selling_line)
-            current_count = len(self.best_selling_processors[client_id].get_data())
-            logger.info(f"Total datos best_selling para cliente '{client_id}': {current_count} registros")
-        return False
-    
-    def _handle_most_profit_message(self, message: bytes, headers: dict = None) -> bool:
-        client_id = self._extract_client_id(headers)
-        self._get_or_create_processors(client_id)
-        
-        dto = TransactionItemBatchDTO.from_bytes_fast(message)
-        
-        if dto.batch_type == BatchType.EOF:
-            self.client_states[client_id].most_profit_loaded = True
-            logger.info(f"EOF recibido de most_profit para cliente '{client_id}'")
-            self._check_and_execute_joins(client_id)
-            return False
-        
-        if dto.batch_type == BatchType.RAW_CSV:
-            self.most_profit_processors[client_id].process_batch(dto.data, self._parse_most_profit_line)
-            current_count = len(self.most_profit_processors[client_id].get_data())
-            logger.info(f"Total datos most_profit para cliente '{client_id}': {current_count} registros")
-        return False
-    
-    def _parse_tpv_line(self, line: str) -> Dict:
-        if line.startswith('year_half_created_at'):
-            return None
-        parts = line.split(',')
-        if len(parts) >= 4:
-            return {
-                'year_half_created_at': parts[0],
-                'store_id': parts[1],
-                'total_payment_value': float(parts[2]),
-                'transaction_count': int(parts[3])
-            }
-        return None
-    
-    def _parse_top_customers_line(self, line: str) -> Dict:
-        if line.startswith('store_id,user_id,purchases_qty'):
-            return None
-        parts = line.split(',')
-        if len(parts) >= 3:
-            raw_user_id = parts[1]
-            user_id = raw_user_id[:-2] if '.' in raw_user_id and raw_user_id.endswith('.0') else raw_user_id
-            return {
-                'store_id': parts[0],
-                'user_id': user_id,
-                'purchases_qty': int(parts[2])
-            }
-        return None
-    
-    def _parse_best_selling_line(self, line: str) -> Dict:
-        if line.startswith('created_at'):
-            return None
-        parts = line.split(',')
-        if len(parts) >= 3:
-            return {
-                'year_month_created_at': parts[0],
-                'item_id': parts[1],
-                'sellings_qty': int(parts[2])
-            }
-        return None
-    
-    def _parse_most_profit_line(self, line: str) -> Dict:
-        if line.startswith('created_at'):
-            return None
-        parts = line.split(',')
-        if len(parts) >= 3:
-            return {
-                'year_month_created_at': parts[0],
-                'item_id': parts[1],
-                'profit_sum': float(parts[2])
-            }
-        return None
     
     def _check_and_execute_joins(self, client_id: str):
         state = self.client_states[client_id]
@@ -423,7 +170,7 @@ class JoinNode:
                 self.store_processors[client_id].get_data()
             )
             self.q3_joined_data_by_client[client_id] = joined_data
-            self._send_q3_results(client_id, joined_data)
+            self.tpv_query_handler.send_q3_results(client_id, joined_data)
             state.q3_results_sent = True
         
         # Q4: Top Customers + Stores + Users
@@ -434,7 +181,7 @@ class JoinNode:
                 self.store_processors[client_id].get_data(),
                 self.user_processors[client_id].get_data()
             )
-            self._send_q4_results(client_id, joined_data)
+            self.top_customers_query_handler.send_q4_results(client_id, joined_data)
             state.q4_results_sent = True
         
         # Q2 Best Selling
@@ -445,7 +192,7 @@ class JoinNode:
                 self.menu_item_processors[client_id].get_data(),
                 'sellings_qty'
             )
-            self._send_best_selling_results(client_id, joined_data)
+            self.profit_and_selling_query_handler.send_best_selling_results(client_id, joined_data)
             state.best_selling_sent = True
 
         # Q2 Most Profit
@@ -456,213 +203,19 @@ class JoinNode:
                 self.menu_item_processors[client_id].get_data(),
                 'profit_sum'
             )
-            self._send_most_profit_results(client_id, joined_data)
+            self.profit_and_selling_query_handler.send_most_profit_results(client_id, joined_data)
             state.most_profit_sent = True
-
-    def _send_q3_results(self, client_id: str, joined_data: List[Dict]):
-        try:
-            if not joined_data:
-                logger.warning(f"No hay datos para Q3 de cliente '{client_id}'")
-                return
-            
-            sorted_data = sorted(joined_data, 
-                               key=lambda x: (x['year_half_created_at'], int(x['store_id'])))
-            print(f"\n=== RESULTADOS Q3 PARA CLIENTE '{client_id}' ===")
-            print("year_half_created_at,store_name,tpv")
-            for record in sorted_data:
-                store_name = str(record['store_name']).replace(',', '_')
-                print(f"{record['year_half_created_at']},{store_name},{record['tpv']:.1f}")
-            print(f"=== FIN RESULTADOS Q3 PARA CLIENTE '{client_id}' ===\n")
-            
-            BATCH_SIZE = 150
-            header = "year_half_created_at,store_name,tpv"
-            
-            logger.info(f"Enviando Q3 para cliente '{client_id}': {len(sorted_data)} registros en {(len(sorted_data) + BATCH_SIZE - 1) // BATCH_SIZE} batches")
-            
-            for i in range(0, len(sorted_data), BATCH_SIZE):
-                batch = sorted_data[i:i + BATCH_SIZE]
-                csv_lines = [header]
-                
-                for record in batch:
-                    store_name = str(record['store_name']).replace(',', '_')
-                    csv_lines.append(f"{record['year_half_created_at']},{store_name},{record['tpv']:.1f}")
-                
-                results_csv = '\n'.join(csv_lines)
-                
-                logger.info(f"Tamaño del batch {i//BATCH_SIZE + 1}: {len(results_csv)} bytes")
-                
-                result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
-                self.output_middleware.send(
-                    result_dto.to_bytes_fast(), 
-                    routing_key=f'client.{client_id}.q3',
-                    headers={'client_id': int(client_id)}
-                )
-                
-                logger.info(f"Batch Q3 enviado para cliente '{client_id}': {len(batch)} registros ({i+1}-{i+len(batch)}/{len(sorted_data)})")
-            
-            eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
-            self.output_middleware.send(
-                eof_dto.to_bytes_fast(), 
-                routing_key=f'client.{client_id}.q3',
-                headers={'client_id': int(client_id)}
-            )
-            
-            logger.info(f"Resultados Q3 completados para cliente '{client_id}': {len(joined_data)} registros en total")
-            
-        except Exception as e:
-            logger.error(f"Error enviando resultados Q3 para cliente '{client_id}': {e}", exc_info=True)
     
-    def _send_q4_results(self, client_id: str, joined_data: List[Dict]):
+    def process_message(self, message: bytes, routing_key: str, client_id, message_id) -> bool:
         try:
-            if not joined_data:
-                logger.warning(f"No hay datos para Q4 de cliente '{client_id}'")
-                return
-            
-            print(f"\n=== RESULTADOS Q4 PARA CLIENTE {client_id} ===")
-            print(f"Total registros: {len(joined_data)}")
-            print("store_name,birthdate")
-            for record in joined_data:
-                print(f"{record['store_name']},{record['birthdate']}")
-            print(f"=== FIN RESULTADOS Q4 CLIENTE {client_id} ===\n")
-            
-            sorted_data = sorted(joined_data, key=lambda x: int(x['store_id']))
-            
-            BATCH_SIZE = 1000
-            header = "store_name,birthdate"
-            
-            for i in range(0, len(sorted_data), BATCH_SIZE):
-                batch = sorted_data[i:i + BATCH_SIZE]
-                csv_lines = [header]
-                
-                for record in batch:
-                    csv_lines.append(f"{record['store_name']},{record['birthdate']}")
-                
-                results_csv = '\n'.join(csv_lines)
-                
-                result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
-                self.output_middleware.send(
-                    result_dto.to_bytes_fast(), 
-                    routing_key=f'client.{client_id}.q4',
-                    headers={'client_id': int(client_id)}
-                )
-                
-                logger.info(f"Batch Q4 enviado para cliente '{client_id}': {len(batch)} registros ({i+1}-{i+len(batch)}/{len(sorted_data)})")
-            
-            eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
-            self.output_middleware.send(
-                eof_dto.to_bytes_fast(), 
-                routing_key=f'client.{client_id}.q4',
-                headers={'client_id': int(client_id)}
-            )
-            
-            logger.info(f"Resultados Q4 completados para cliente '{client_id}': {len(joined_data)} registros en total")
-            
+            handler = self.router.get(routing_key)
+            if handler:
+                return handler(message, client_id, message_id)
+            else:
+                logger.warning(f"No handler para routing key: {routing_key}")
+                return False
         except Exception as e:
-            logger.error(f"Error enviando resultados Q4 para cliente '{client_id}': {e}", exc_info=True)
-    
-    def _send_best_selling_results(self, client_id: str, joined_data: List[Dict]):
-        try:
-            if not joined_data:
-                logger.warning(f"No hay datos para Q2 best_selling de cliente '{client_id}'")
-                return
-            
-            sorted_data = sorted(joined_data, key=lambda x: x['year_month_created_at'])
-            
-            print(f"\n=== RESULTADOS Q2 BEST SELLING PARA CLIENTE '{client_id}' ===")
-            print("year_month_created_at,item_name,sellings_qty")
-            for record in sorted_data:
-                print(f"{record['year_month_created_at']},{record['item_name']},{record['sellings_qty']}")
-            print(f"=== FIN RESULTADOS Q2 BEST SELLING PARA CLIENTE '{client_id}' ===\n")
-        
-            BATCH_SIZE = 1000
-            header = "year_month_created_at,item_name,sellings_qty"
-            
-            for i in range(0, len(sorted_data), BATCH_SIZE):
-                batch = sorted_data[i:i + BATCH_SIZE]
-                csv_lines = [header]
-                
-                for record in batch:
-                    csv_lines.append(f"{record['year_month_created_at']},{record['item_name']},{record['sellings_qty']}")
-                
-                results_csv = '\n'.join(csv_lines)
-                
-                result_dto = TransactionItemBatchDTO(results_csv, BatchType.RAW_CSV)
-                self.output_middleware.send(
-                    result_dto.to_bytes_fast(), 
-                    routing_key='q2_best_selling.data',
-                    headers={'client_id': int(client_id)}
-                )
-                
-                logger.info(f"Batch Q2 best_selling enviado para cliente '{client_id}': {len(batch)} registros ({i+1}-{i+len(batch)}/{len(sorted_data)})")
-            
-            eof_dto = TransactionItemBatchDTO(f"EOF:{client_id}", BatchType.EOF)
-            self.output_middleware.send(
-                eof_dto.to_bytes_fast(), 
-                routing_key='q2_best_selling.data',
-                headers={'client_id': int(client_id)}
-            )
-            
-            logger.info(f"Resultados Q2 best_selling completados para cliente '{client_id}': {len(joined_data)} registros en total")
-            
-        except Exception as e:
-            logger.error(f"Error enviando resultados Q2 best_selling para cliente '{client_id}': {e}", exc_info=True)
-    
-    def _send_most_profit_results(self, client_id: str, joined_data: List[Dict]):
-        try:
-            if not joined_data:
-                logger.warning(f"No hay datos para Q2 most_profit de cliente '{client_id}'")
-                return
-            
-            sorted_data = sorted(joined_data, key=lambda x: x['year_month_created_at'])
-            
-            print(f"\n=== RESULTADOS Q2 MOST PROFIT PARA CLIENTE '{client_id}' ===")
-            print("year_month_created_at,item_name,profit_sum")
-            for record in sorted_data:
-                print(f"{record['year_month_created_at']},{record['item_name']},{record['profit_sum']:.1f}")
-            print(f"=== FIN RESULTADOS Q2 MOST PROFIT PARA CLIENTE '{client_id}' ===\n")
-            
-            BATCH_SIZE = 1000
-            header = "year_month_created_at,item_name,profit_sum"
-            
-            for i in range(0, len(sorted_data), BATCH_SIZE):
-                batch = sorted_data[i:i + BATCH_SIZE]
-                csv_lines = [header]
-                
-                for record in batch:
-                    csv_lines.append(f"{record['year_month_created_at']},{record['item_name']},{record['profit_sum']:.1f}")
-                
-                results_csv = '\n'.join(csv_lines)
-                
-                result_dto = TransactionItemBatchDTO(results_csv, BatchType.RAW_CSV)
-                self.output_middleware.send(
-                    result_dto.to_bytes_fast(), 
-                    routing_key='q2_most_profit.data',
-                    headers={'client_id': int(client_id)}
-                )
-                
-                logger.info(f"Batch Q2 most_profit enviado para cliente '{client_id}': {len(batch)} registros ({i+1}-{i+len(batch)}/{len(sorted_data)})")
-            
-            eof_dto = TransactionItemBatchDTO(f"EOF:{client_id}", BatchType.EOF)
-            self.output_middleware.send(
-                eof_dto.to_bytes_fast(), 
-                routing_key='q2_most_profit.data',
-                headers={'client_id': int(client_id)}
-            )
-            
-            logger.info(f"Resultados Q2 most_profit completados para cliente '{client_id}': {len(joined_data)} registros en total")
-            
-        except Exception as e:
-            logger.error(f"Error enviando resultados Q2 most_profit para cliente '{client_id}': {e}", exc_info=True)
-    
-    def process_message(self, message: bytes, routing_key: str, headers: dict = None) -> bool:
-        if self.shutdown.is_shutting_down():
-            logger.warning("Shutdown en progreso, ignorando mensaje")
-            return True
-        
-        try:
-            return self.router.route(routing_key, message, headers)
-        except Exception as e:
-            logger.error(f"Error procesando mensaje con routing key {routing_key}: {e}", exc_info=True)
+            logger.error(f"Error procesando mensaje: {e}", exc_info=True)
             return False
     
     def _on_shutdown_signal(self):
@@ -679,22 +232,15 @@ class JoinNode:
             message_id = properties.headers.get('message_id')
         return str(client_id), str(message_id)
     
-    def analyze_message(self, client_id: str, message_id: str, ch, method, body) -> bool:
-        
-        # if self.is_first_message:
-        #     self.is_first_message = False
-            
-        last_line_client = self.client_logger._get_last_line()
-        if last_line_client and last_line_client.strip() and ';' in last_line_client:    
-            client_id_client_log, message_id_client_log = last_line_client.split(';')
-            if client_id_client_log == client_id and message_id_client_log == message_id:
-                logger.info(f"Estado ya consistente con cliente {client_id} y mensaje {message_id}")
-                return True
-        try:
-            pass
-        except Exception as e:
-            logger.error(f"Error recuperando estado: {e}")
-        return False
+    def parse_routing_key(self, method) -> str:
+        routing_key = method.routing_key                
+
+        if '.' in routing_key:
+            parts = routing_key.split('.', 1) 
+            base_routing_key = parts[1] if len(parts) > 1 else routing_key
+        else:
+            base_routing_key = routing_key
+        return base_routing_key
     
     def on_message_callback(self, ch, method, properties, body):
         try:
@@ -702,22 +248,20 @@ class JoinNode:
                 logger.warning("Shutdown solicitado, deteniendo")
                 ch.stop_consuming()
                 return
-            routing_key = method.routing_key                
-            if '.' in routing_key:
-                parts = routing_key.split('.', 1) 
-                base_routing_key = parts[1] if len(parts) > 1 else routing_key
-            else:
-                base_routing_key = routing_key
+            
+            base_routing_key = self.parse_routing_key(method)
                 
             client_id, message_id = self.parse_message_headers(properties)
-            if message_id is None:
-                print(f"BODY: {body.decode('utf-8')}")
-            if self.analyze_message(client_id, message_id, ch, method, body):
-                return
             
-            self.client_logger.write(f"{client_id};{message_id}")
-            should_stop = self.process_message(body, base_routing_key, properties.headers)
+            if self.checkpoint_handler.analyze_first_message(client_id, message_id, ch, method, body):
+                return
 
+            self.checkpoint_handler.register_incoming_message(client_id, message_id)
+            
+            should_stop, should_ack = self.process_message(body, base_routing_key, client_id, message_id)
+
+            if should_ack:
+                ch.basic_ack(delivery_tag=method.delivery_tag)
             if should_stop:
                 logger.info("Procesamiento completado - deteniendo consuming")
                 ch.stop_consuming()

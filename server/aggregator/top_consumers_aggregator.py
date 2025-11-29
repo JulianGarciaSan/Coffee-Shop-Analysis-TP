@@ -11,6 +11,12 @@ from logger_monitor.logger_monitor import LoggerMonitor
 from healthchecker.healthchecker import HealthChecker
 from checkpoint_handler.checkpoint_handler import CheckpointHandler
 
+from enum import Enum
+
+class ClientState(Enum):
+    RECEIVING_DATA = "receiving_data"      # Recibiendo datos
+    DATA_SENT = "data_sent"                # Datos enviados (puede tener duplicados)
+    EOF_COMPLETED = "eof_completed"        # EOF procesado completamente
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,7 +32,9 @@ class TopCustomersAggregatorNode:
         self.total_join_nodes = int(os.getenv('TOTAL_JOIN_NODES', '2'))
         self.checkpoint_dir = os.getenv('CHECKPOINT_DIR', f'/app/server/logs/groupby_top_customers/checkpoints')
 
+        self.ClientState = ClientState
         
+        self.client_states: Dict[str, ClientState] = {}
         total_stores = 10
         stores_per_node = total_stores // self.total_nodes
         extra_stores = total_stores % self.total_nodes
@@ -50,7 +58,7 @@ class TopCustomersAggregatorNode:
         self.store_user_purchases_by_client: Dict[str, Dict[str, Dict[str, int]]] = defaultdict(
             lambda: defaultdict(lambda: defaultdict(int))
         )
-        self.eof_count_by_client: Dict[str, int] = defaultdict(int)
+        # self.eof_count_by_client: Dict[str, int] = defaultdict(int)
         
         health_port = int(os.getenv('HEALTH_PORT', '9999'))
         self.health_server = HealthChecker(port=health_port)
@@ -61,7 +69,8 @@ class TopCustomersAggregatorNode:
             strategy=self,
         )
         
-        self._setup_input_middleware(start_store, end_store)
+        #self._setup_input_middleware(start_store, end_store)
+        self._setup_input_middleware()
         self._setup_output_middleware()
         
         if hasattr(self.input_middleware, 'shutdown'):
@@ -74,22 +83,21 @@ class TopCustomersAggregatorNode:
         logger.info(f"  Espera {self.expected_eof_per_client} EOF por cliente")
         logger.info(f"  Enviará a {self.total_join_nodes} join nodes")
     
-    def _setup_input_middleware(self, start_store: int, end_store: int):
+    def _setup_input_middleware(self):
+        """Cada aggregator escucha su propia routing key."""
         input_exchange = os.getenv('INPUT_EXCHANGE', 'aggregated.exchange')
-        queue_name = os.getenv('INPUT_QUEUE', f'aggregated_data_{self.node_id}')
-        
-        routing_keys = [f"store.{i}" for i in range(start_store + 1, end_store + 1)]
+        routing_key = f'top_customers_aggregator_{self.node_id}'
+        queue_name = os.getenv('INPUT_QUEUE', f'top_customers_aggregator_{self.node_id}')
         
         self.input_middleware = MessageMiddlewareQueueManual(
             host=self.rabbitmq_host,
             queue_name=queue_name,
             exchange_name=input_exchange,
-            routing_keys=routing_keys
+            routing_keys=[routing_key]
         )
         
-        self.input_middleware.shutdown = self.shutdown
-        
-        logger.info(f"  Input: {input_exchange}, routing keys: {routing_keys}")
+        logger.info(f"  Input: {input_exchange}")
+        logger.info(f"  Routing key: {routing_key}")
     
     def _setup_output_middleware(self):
         output_exchange = os.getenv('OUTPUT_EXCHANGE', 'join.exchange')
@@ -150,7 +158,7 @@ class TopCustomersAggregatorNode:
         logger.info(f"Top 3 calculado para cliente {client_id}: {len(top_3_by_store)} stores")
         return top_3_by_store
     
-    def send_sharded_to_join_nodes(self, top_35_by_store: Dict[str, list], client_id: str):
+    def send_sharded_to_join_nodes(self, top_35_by_store: Dict[str, list], client_id: str, original_message_id: str):
         batches_by_node = {i: [] for i in range(self.total_join_nodes)}
         
         for store_id, top_users in top_35_by_store.items():
@@ -173,58 +181,80 @@ class TopCustomersAggregatorNode:
                 csv_lines.append(f"{record['store_id']},{record['user_id']},{record['purchases_qty']}")
             
             csv_data = '\n'.join(csv_lines)
-            self.send_data_to_join_node(csv_data, client_id, node_id)
+            self.send_data_to_join_node(csv_data, client_id, node_id, original_message_id)
                     
         for node_id in range(self.total_join_nodes):
-            self.send_eof_to_join_node(client_id, node_id)
+            self.send_eof_to_join_node(client_id, node_id, original_message_id)
         
         logger.info(f"EOF enviado a {self.total_join_nodes} join nodes para cliente {client_id}")
 
-    def send_data_to_join_node(self, csv_data: str, client_id: str, node_id: int):
+    def send_data_to_join_node(self, csv_data: str, client_id: str, node_id: int, original_message_id: str):
         print("///////////// ENVIANDO DATA A JOIN NODE /////////////")
         time.sleep(10)
-        new_message_id = self._generate_next_message_id(client_id)
+        outgoing_message_id = f"{original_message_id}:A{node_id}"
         result_dto = TransactionBatchDTO(csv_data, BatchType.RAW_CSV)
         routing_key = f"join_node_{node_id}.top_customers.data"
         
         self.output_middleware.send(
             result_dto.to_bytes_fast(),
             routing_key=routing_key,
-            headers={'client_id': client_id, 'message_id': new_message_id}
+            headers={'client_id': client_id, 'message_id': outgoing_message_id}
         )
-    def send_eof_to_join_node(self, client_id: str, node_id: int):
+    def send_eof_to_join_node(self, client_id: str, node_id: int, original_message_id: str):
         print("///////////// ENVIANDO EOF A JOIN NODE /////////////")
         time.sleep(10)
-        new_message_id = self._generate_next_message_id(client_id)
+        outgoing_message_id = f"{original_message_id}:EOF"
         eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
         routing_key = f"join_node_{node_id}.top_customers.data"
         
         self.output_middleware.send(
             eof_dto.to_bytes_fast(),
             routing_key=routing_key,
-            headers={'client_id': client_id, 'message_id': new_message_id}
+            headers={'client_id': client_id, 'message_id': outgoing_message_id}
         )
-    def handle_eof(self, dto: TransactionBatchDTO, client_id: str) -> bool:
         
-        self.eof_count_by_client[client_id] += 1
-        logger.info(f"EOF {self.eof_count_by_client[client_id]}/{self.expected_eof_per_client} "
-                   f"para cliente {client_id}")
-        
-        if self.eof_count_by_client[client_id] >= self.expected_eof_per_client:
-            logger.info(f"EOF completo para cliente {client_id} - calculando Top 3")
+    def handle_eof(self, dto: TransactionBatchDTO, client_id: str, message_id: str) -> bool:
+            """
+            Maneja EOF con estado del cliente.
+            """
             
-            top_3_results = self.generate_top3_by_store(client_id)
-            self.send_sharded_to_join_nodes(top_3_results, client_id)
+            current_state = self.client_states.get(client_id, self.ClientState.RECEIVING_DATA)
             
-            if client_id in self.store_user_purchases_by_client:
-                del self.store_user_purchases_by_client[client_id]
-            self.eof_count_by_client[client_id] = 0
+            logger.info(f"EOF recibido para cliente {client_id}, estado: {current_state.value}")
+ 
+            if current_state == self.ClientState.DATA_SENT:
+                logger.info(f"Datos ya enviados para {client_id} - ignorando EOF duplicado")
+                
+                if client_id in self.store_user_purchases_by_client:
+                    del self.store_user_purchases_by_client[client_id]
+                    logger.info(f"Memoria liberada para cliente {client_id}")
+                
+                return False
             
-            logger.info(f"Cliente {client_id} completado y limpiado")
-        
-        return False
+            logger.info(f"Procesando EOF para cliente {client_id}")
+            
+            try:
+                top_3_results = self.generate_top3_by_store(client_id)
+                logger.info(f"   Top 3 calculado: {len(top_3_results)} stores")
+                
+                self.send_sharded_to_join_nodes(top_3_results, client_id,message_id)
+                logger.info(f"   Datos enviados a join nodes")
+                
+                self.client_states[client_id] = self.ClientState.DATA_SENT
+                
+                
+                if client_id in self.store_user_purchases_by_client:
+                    del self.store_user_purchases_by_client[client_id]
+                
+                logger.info(f"Cliente {client_id} completado y limpiado")
+                
+            except Exception as e:
+                logger.error(f"Error procesando EOF para {client_id}: {e}")
+                raise
+            
+            return False
 
-    def process_message(self, message: bytes,client_id: str = None, message_id: str = None) -> bool:
+    def process_message(self, message: bytes, client_id: str = None, message_id: str = None) -> bool:
         try:
             if self.shutdown.is_shutting_down():
                 return (True, False)
@@ -232,10 +262,9 @@ class TopCustomersAggregatorNode:
             dto = TransactionBatchDTO.from_bytes_fast(message)
                     
             if dto.batch_type == BatchType.EOF:
-                self.handle_eof(dto, client_id)
+                self.handle_eof(dto, client_id, message_id)
                 self.checkpoint_handler.save_eof_checkpoint(client_id, message_id)
                 return (False, True) 
-                # return self.handle_eof(dto, routing_key)
             
             if dto.batch_type == BatchType.RAW_CSV:
                 lines = [line.strip() for line in dto.data.split('\n') if line.strip()]
@@ -244,7 +273,7 @@ class TopCustomersAggregatorNode:
                     try:
                         self.process_csv_line(line, client_id)
                     except Exception as e:
-                        logger.warning(f"Línea {i} inválida en mensaje {message_id}: {e}")
+                        logger.warning(f"Línea {i} inválida: {e}")
                 
                 self.checkpoint_handler.save_message_checkpoint(
                     client_id=client_id,
@@ -256,7 +285,7 @@ class TopCustomersAggregatorNode:
             
         except Exception as e:
             logger.error(f"Error procesando mensaje: {e}")
-            return False
+            return (False, False)
         
     def parse_message_headers(self, properties):
         client_id = None
@@ -390,45 +419,28 @@ class TopCustomersAggregatorNode:
 
     def _serialize_client_data(self, client_id: str) -> Dict:
         """
-        Serializa el estado completo del cliente para checkpoint.
-        
-        Estructura:
-        {
-            "stores": {
-                "store_1": {
-                    "user_123": 10,
-                    "user_456": 5
-                },
-                "store_2": {
-                    "user_789": 3
-                }
-            },
-            "eof_count": 2,
-            "message_counter": 42
-        }
+        Serializa estado completo incluyendo ClientState.
         """
         client_data = self.store_user_purchases_by_client.get(client_id, {})
         
         serialized = {
             "stores": {},
-            "eof_count": self.eof_count_by_client.get(client_id, 0)
+            "client_state": self.client_states.get(
+                client_id, 
+                self.ClientState.RECEIVING_DATA
+            ).value  # Guardar como string
         }
         
         for store_id, users in client_data.items():
-            serialized["stores"][store_id] = dict(users)
-        
-        if hasattr(self, '_message_counter') and client_id in self._message_counter:
-            serialized["message_counter"] = self._message_counter[client_id]
+            serialized["stores"][store_id] = {}
+            for user_id, count in users.items():
+                serialized["stores"][store_id][user_id] = count
         
         return serialized
 
     def _deserialize_client_data(self, client_id: str, data: Dict):
         """
-        Reconstruye el estado desde un checkpoint.
-        
-        Args:
-            client_id: ID del cliente
-            data: Diccionario con estructura {stores: {...}, eof_count: N}
+        Reconstruye estado incluyendo ClientState.
         """
         self.store_user_purchases_by_client[client_id] = defaultdict(lambda: defaultdict(int))
         
@@ -437,29 +449,15 @@ class TopCustomersAggregatorNode:
             for user_id, count in users.items():
                 self.store_user_purchases_by_client[client_id][store_id][user_id] = count
         
-        self.eof_count_by_client[client_id] = data.get("eof_count", 0)
-        
-        if "message_counter" in data:
-            if not hasattr(self, '_message_counter'):
-                self._message_counter = {}
-            self._message_counter[client_id] = data["message_counter"]
-            
-    def _message_id_to_int(self, message_id: str) -> int:
-        """
-        Convierte message_id compuesto a entero único.
-
-        """
+        # Restaurar estado del cliente
+        state_str = data.get("client_state", "receiving_data")
         try:
-            parts = message_id.split('_')
-            if len(parts) == 2:
-                node_id = int(parts[0])
-                counter = int(parts[1])
-                return node_id * 1000000 + counter
-            else:
-                return int(message_id)
-        except Exception as e:
-            logger.warning(f"Error parseando message_id {message_id}: {e}")
-            return int(message_id.split('_')[-1])
+            self.client_states[client_id] = self.ClientState(state_str)
+            logger.info(f"   Estado restaurado: {client_id} → {state_str}")
+        except ValueError:
+            logger.warning(f"   Estado desconocido '{state_str}', usando RECEIVING_DATA")
+            self.client_states[client_id] = self.ClientState.RECEIVING_DATA
+            
 
 if __name__ == "__main__":
     try:

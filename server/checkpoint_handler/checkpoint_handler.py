@@ -388,57 +388,44 @@ class CheckpointHandler:
         
        
     def analyze_first_message(self, client_id: str, message_id: str, ch, method, body) -> bool:
+        """
+        Versión mejorada: distingue recovery (primer mensaje) vs duplicación (nodo corriendo).
+        """
         if self.is_first_message:
+            logger.info(f"RECOVERY: {client_id}:{message_id}")
             self.is_first_message = False
-            
-            last_line_client = self.client_logger._get_last_line()
             
             try:
                 self.recover_from_checkpoint()
-
-                if client_id in self.message_trackers:
-                    tracker = self.message_trackers[client_id]
-                    logger.info(f"   Rangos recuperados para cliente {client_id}: {tracker.ranges}")
-                    
-                    try:
-                        msg_id_int = int(message_id)
-                        in_checkpoint = tracker.contains(msg_id_int)
-                        logger.info(f"   ¿Mensaje {msg_id_int} en checkpoint? {in_checkpoint}")
-                    except Exception as e:
-                        logger.error(f"Error verificando primer mensaje: {e}")
                 
+                if client_id in self.message_trackers:
+                    total = self.message_trackers[client_id].total_messages()
+                    logger.info(f"Recuperados {total} mensajes desde checkpoint+LOG")
+
             except Exception as e:
-                logger.error(f"Error recuperando checkpoint: {e}")
+                logger.error(f"Error en recovery: {e}")
             
+            if client_id in self.message_trackers:
+                tracker = self.message_trackers[client_id]
+                tracker = self.message_trackers[client_id]
+                logger.info(f"Actual:{client_id}:{message_id} ")
+                logger.info(f"Rango mensajes procesados {client_id}: {tracker.ranges}")
             if self._eof_already_processed(client_id):
-                logger.info(f"EOF ya procesado - SKIPPING")
+                logger.info(f"EOF COMPLETADO en checkpoint - ENVIANDO ACK")
                 ch.basic_ack(delivery_tag=method.delivery_tag)
                 return True
             
-            logger.info(f"Verificando si mensaje {client_id}:{message_id} está en checkpoint...")
-            
-            if last_line_client and last_line_client.strip() and ';' in last_line_client:    
-                client_id_client_log, message_id_client_log = last_line_client.split(';')
-                
-                logger.info(f"   Del log: {client_id_client_log}:{message_id_client_log}")
-                logger.info(f"   Actual:  {client_id}:{message_id}")
-                
-                if client_id == client_id_client_log and message_id == message_id_client_log:
-                    logger.info(f"COINCIDEN - Verificando checkpoint...")
-                    
-                    if self._message_in_checkpoint(client_id, message_id):
-                        logger.info(f"YA EN CHECKPOINT - SKIPPING y ACK")
-                        ch.basic_ack(delivery_tag=method.delivery_tag)
-                        return True
-                    else:
-                        logger.warning(f"NO en checkpoint - REPROCESANDO")
-                        return False
-                else:
-                    logger.warning(f"NO COINCIDEN - Mensaje es diferente")
-                    return False
-            else:
-                logger.warning(f"No hay último mensaje válido en log")
-                return False
+            if self._message_in_checkpoint(client_id, message_id):
+                logger.info(f"Mensaje {message_id} YA en checkpoint - SKIPPING Y ACK")
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+                return True
+            logger.info(f" MENSAJE NO PROCESADO - REPROCESANDO")
+            return False
+        
+        if self._message_in_tracker(client_id, message_id):
+            logger.info(f"DUPLICADO detectado: {client_id}:{message_id} (nodo corriendo) - SKIPPING")
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+            return True
         
         return False
 
@@ -446,15 +433,11 @@ class CheckpointHandler:
         """
         Verifica si el mensaje específico fue procesado usando rangos.
         """
-        
         try:
-            if hasattr(self.strategy, '_message_id_to_int'):
-                msg_id_int = self.strategy._message_id_to_int(message_id)
-            else:
-                try:
-                    msg_id_int = int(message_id)
-                except ValueError:
-                    msg_id_int = int(message_id.split('_')[-1])
+            if client_id not in self.message_trackers:
+                return False
+                
+            msg_id_int = self._extract_message_id_int(message_id)
             
             is_processed = self.message_trackers[client_id].contains(msg_id_int)
             
@@ -466,6 +449,43 @@ class CheckpointHandler:
         except Exception as e:
             logger.warning(f"Error verificando mensaje en rangos: {e}")
             return False
+    
+    def _message_in_tracker(self, client_id: str, message_id: str) -> bool:
+        """
+        Verifica si mensaje está en tracker EN MEMORIA (para nodo corriendo).
+        """
+        try:
+            if client_id not in self.message_trackers:
+                return False
+            
+            msg_id_int = self._extract_message_id_int(message_id)
+            return self.message_trackers[client_id].contains(msg_id_int)
+            
+        except Exception as e:
+            logger.warning(f"Error verificando tracker: {e}")
+            return False
+        
+    def _extract_message_id_int(self, message_id: str) -> int:
+        """
+        Extrae ID numérico del message_id.
+        Soporta: "8273", "0_8273", "8273:A0", "8273:EOF"
+        """
+        try:
+            # Remover sufijos (:A0, :EOF, :TC)
+            base_id = message_id.split(':')[0]
+            
+            # Remover prefijo de cliente (0_8273 → 8273)
+            if '_' in base_id:
+                base_id = base_id.split('_')[-1]
+            
+            return int(base_id)
+            
+        except Exception as e:
+            logger.error(f"Error extrayendo ID de '{message_id}': {e}")
+            # if hasattr(self.strategy, '_message_id_to_int'):
+            #     return self.strategy._message_id_to_int(message_id)
+            raise
+    
         
         
     def _eof_already_processed(self, client_id: str) -> bool:

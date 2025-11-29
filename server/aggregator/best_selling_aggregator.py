@@ -29,7 +29,7 @@ class BestSellingAggregatorNode:
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.total_years = int(os.getenv('TOTAL_YEARS', '2'))
         self.total_groupby_nodes_per_year = int(os.getenv('TOTAL_GROUPBY_NODES', '4'))
-        
+        self.node_id = int(os.getenv('AGGREGATOR_NODE_ID', '0'))
         self.expected_sources = self.total_years * self.total_groupby_nodes_per_year
         
         total_join_nodes = int(os.getenv('TOTAL_JOIN_NODES', '1'))
@@ -56,10 +56,7 @@ class BestSellingAggregatorNode:
         self.message_id = 0
         
         self._setup_middleware()
-        
-    def _generate_next_message_id(self, client_id: str) -> str:
-        self.message_id += 1
-        return f"{client_id}_{self.message_id}:BS"
+
     
     def _setup_middleware(self):
         input_exchange = os.getenv('INPUT_EXCHANGE', 'best_selling_to_final.exchange')
@@ -192,7 +189,7 @@ class BestSellingAggregatorNode:
         
         return '\n'.join(csv_lines)
     
-    def handle_eof(self, routing_key: str, client_id: str) -> bool:
+    def handle_eof(self, routing_key: str, client_id: str, message_id : str) -> bool:
         try:
             logger.info(f"EOF recibido para cliente {client_id}, routing_key={routing_key}")
             
@@ -209,7 +206,7 @@ class BestSellingAggregatorNode:
             
             if selling_count == self.expected_sources and profit_count == self.expected_sources:
                 logger.info(f"Todos los EOFs recibidos para cliente {client_id}, calculando top 1 global")
-                self._send_final_results(client_id)
+                self._send_final_results(client_id, message_id)
                 
                 # Cleanup
                 del self.eof_selling_count_by_client[client_id]
@@ -232,7 +229,7 @@ class BestSellingAggregatorNode:
         return {}
 
     
-    def _send_final_results(self, client_id: str):
+    def _send_final_results(self, client_id: str,original_message_id : str):
         """Calcula top 1 global y envía al JOIN"""
         best_selling, most_profit = self.calculate_global_top1(client_id)        
         selling_routing_key = self.client_router.get_routing_key(client_id, 'q2_best_selling.data')
@@ -241,7 +238,8 @@ class BestSellingAggregatorNode:
         selling_csv = self.generate_top1_csv(best_selling, "sellings_qty")
         message_id = self._generate_next_message_id(client_id)
         headers = self.create_headers(client_id, message_id)
-        
+
+        outgoing_message_id = f"{original_message_id}:BS{self.node_id}"
         selling_dto = TransactionItemBatchDTO(selling_csv, BatchType.RAW_CSV)
         logger.info(f"Enviando best selling: {len(selling_csv)}")
         self.output_middleware.send(
@@ -249,8 +247,8 @@ class BestSellingAggregatorNode:
             routing_key=selling_routing_key,
             headers=headers
         )
-        message_id = self._generate_next_message_id(client_id)
-        headers = self.create_headers(client_id, message_id)
+        outgoing_message_id = f"{original_message_id}:EOFBS"
+        headers = self.create_headers(client_id, outgoing_message_id)
         selling_eof = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
         self.output_middleware.send(
             selling_eof.to_bytes_fast(),
@@ -259,10 +257,9 @@ class BestSellingAggregatorNode:
         )
         
         # Enviar most profit
+        outgoing_message_id = f"{original_message_id}:MP{self.node_id}"
         profit_csv = self.generate_top1_csv(most_profit, "profit_sum")
-        self.message_id += 1
-        message_id = self._generate_next_message_id(client_id)
-        headers = self.create_headers(client_id, message_id)
+        headers = self.create_headers(client_id, outgoing_message_id)
         profit_dto = TransactionItemBatchDTO(profit_csv, BatchType.RAW_CSV)
         
         self.output_middleware.send(
@@ -270,9 +267,8 @@ class BestSellingAggregatorNode:
             routing_key=profit_routing_key,
             headers=headers
         )
-        self.message_id += 1
-        message_id = self._generate_next_message_id(client_id)
-        headers = self.create_headers(client_id, message_id)
+        outgoing_message_id = f"{original_message_id}:EOFMP"
+        headers = self.create_headers(client_id, outgoing_message_id)
         profit_eof = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
         self.output_middleware.send(
             profit_eof.to_bytes_fast(),
@@ -293,7 +289,7 @@ class BestSellingAggregatorNode:
             dto = TransactionItemBatchDTO.from_bytes_fast(message)
             
             if dto.batch_type == BatchType.EOF:
-                return self.handle_eof(routing_key, client_id)
+                return self.handle_eof(routing_key, client_id, message_id)
             
             if dto.batch_type == BatchType.RAW_CSV:
                 for line in dto.data.split('\n'):

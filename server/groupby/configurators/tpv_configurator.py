@@ -15,7 +15,6 @@ class TPVConfigurator(GroupByConfigurator):
     def __init__(self, rabbitmq_host: str, output_exchange: str):
         super().__init__(rabbitmq_host, output_exchange)
         self.semester = os.getenv('SEMESTER', '1')
-        self.checkpoint_dir = os.getenv('CHECKPOINT_DIR', f'/app/server/logs/groupby_semester_{self.semester}/checkpoints')
         self.eof_received_by_client: Dict[str, bool] = {}
 
         if self.semester not in ['1', '2']:
@@ -69,14 +68,12 @@ class TPVConfigurator(GroupByConfigurator):
         logger.info(f"EOF recibido de cliente '{client_id}'")
         self.eof_received_by_client[client_id] = True
         
-        self._send_results_for_client(client_id, middlewares, strategy)
+        self._send_results_for_client(client_id, middlewares, strategy, message_id)
         
         return False  
 
-    def _generate_next_message_id(self, client_id: str) -> str:
-        return f"{client_id}_{self.message_id}:TPV:{self.semester}"
     
-    def _send_results_for_client(self, client_id: str, middlewares: dict, strategy):
+    def _send_results_for_client(self, client_id: str, middlewares: dict, strategy, original_message_id: str):
         logger.info(f"Generando resultados TPV para cliente '{client_id}'")
         
         results_csv = strategy.generate_results_csv_for_client(client_id)
@@ -84,22 +81,20 @@ class TPVConfigurator(GroupByConfigurator):
         routing_key = self.client_router.get_routing_key(client_id, 'tpv.data')
         logger.info(f"Cliente '{client_id}' → Routing key: {routing_key}")
         
-        self.message_id += 1
-        new_message_id = self._generate_next_message_id(client_id)
+        outgoing_message_id = f"{original_message_id}:TPV{self.semester}"
         result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
         middlewares["output"].send(
             result_dto.to_bytes_fast(),
             routing_key=routing_key,
-            headers={'client_id': client_id, 'message_id': new_message_id}
+            headers={'client_id': client_id, 'message_id': outgoing_message_id}
         )
-        
-        self.message_id += 1
-        new_message_id = self._generate_next_message_id(client_id)
+
+        outgoing_message_id = f"{original_message_id}:EOF"
         eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
         middlewares["output"].send(
             eof_dto.to_bytes_fast(),
             routing_key=routing_key,
-            headers={'client_id': client_id, 'message_id': new_message_id}
+            headers={'client_id': client_id, 'message_id': outgoing_message_id}
         )
         
         logger.info(f"Resultados TPV enviados para cliente '{client_id}'")
@@ -107,7 +102,6 @@ class TPVConfigurator(GroupByConfigurator):
     def get_strategy_config(self) -> dict:
         return {
             'semester': self.semester,
-            'checkpoint_dir': self.checkpoint_dir
         }
 
     # def process_message(self, body: bytes, headers: dict = None) -> tuple:

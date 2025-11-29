@@ -38,6 +38,9 @@ stop:
 	sudo rm -rf ./server/logs/groupby_best_selling_2024_0/checkpoints/*
 	sudo rm -rf ./server/logs/top_customers_aggregator_2/checkpoints/*
 	sudo rm -rf ./server/logs/top_customers_aggregator_1/checkpoints/*
+	sudo rm -rf ./server/logs/join_node_0/checkpoints/*
+	sudo rm -rf ./server/logs/join_node_1/checkpoints/*
+
 
 	sudo rm -rf report*
 
