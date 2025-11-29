@@ -6,9 +6,9 @@ import time
 import threading
 from typing import Optional
 from rabbitmq.middleware import MessageMiddlewareQueue
-from logger_monitor import LoggerMonitor
+from logger_monitor.logger_monitor import LoggerMonitor
 from healthchecker.healthchecker import HealthChecker
-from logger_recovery import RecoveryManager, RecoveryState
+from logger_monitor.logger_recovery import RecoveryManager, RecoveryState
 from strategies import FilterStrategyFactory
 from configurators import NodeConfiguratorFactory
 from dtos.dto import TransactionBatchDTO, TransactionItemBatchDTO, BatchType, FileType

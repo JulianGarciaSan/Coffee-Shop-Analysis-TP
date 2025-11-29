@@ -263,7 +263,14 @@ class ProtocolNew:
                 
                 if item == "EXIT":
                     logger.info("EXIT recibido en reportes")
-                    break
+                    yield ProtocolMessage(
+                        action="EXIT",
+                        file_type="",
+                        last_batch=True,
+                        data="",
+                        size=0
+                    )                    
+                    break   
                 
                 if isinstance(item, str) and item.startswith("L|"):
                     parts = item.split('|', 3)

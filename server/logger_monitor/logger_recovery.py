@@ -1,7 +1,7 @@
 import logging
 from typing import Optional, NamedTuple
 from enum import Enum
-from logger_monitor import LoggerMonitor
+from logger_monitor.logger_monitor import LoggerMonitor
 
 logger = logging.getLogger(__name__)
 

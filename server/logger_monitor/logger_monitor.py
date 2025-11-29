@@ -1,6 +1,6 @@
 from datetime import datetime
 import threading
-from logger_writter import LogWriter
+from logger_monitor.logger_writter import LogWriter
 
 
 class LoggerMonitor:

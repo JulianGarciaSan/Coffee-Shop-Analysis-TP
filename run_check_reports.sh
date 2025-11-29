@@ -72,14 +72,14 @@ fi
 # 5. Ejecutar check_reports.py
 echo ""
 echo -e "${GREEN}=======================================${NC}"
-echo -e "${GREEN}Ejecutando check_reports.py en modo: $MODE${NC}"
+echo -e "${GREEN}Ejecutando build_pandas_report.py en modo: $MODE${NC}"
 echo -e "${GREEN}=======================================${NC}"
 echo ""
 
 if [ "$MODE" == "test" ]; then
-    python3 check_reports.py test
+    python3 build_pandas_report.py test
 else
-    python3 check_reports.py
+    python3 build_pandas_report.py
 fi
 
 EXIT_CODE=$?
@@ -87,7 +87,7 @@ EXIT_CODE=$?
 if [ $EXIT_CODE -eq 0 ]; then
     echo ""
     echo -e "${GREEN}=======================================${NC}"
-    echo -e "${GREEN}check_reports.py ejecutado exitosamente${NC}"
+    echo -e "${GREEN}build_pandas_report.py ejecutado exitosamente${NC}"
     echo -e "${GREEN}=======================================${NC}"
     echo ""
     
@@ -101,7 +101,7 @@ if [ $EXIT_CODE -eq 0 ]; then
 else
     echo ""
     echo -e "${RED}=======================================${NC}"
-    echo -e "${RED}Error ejecutando check_reports.py (codigo: $EXIT_CODE)${NC}"
+    echo -e "${RED}Error ejecutando build_pandas_report.py (codigo: $EXIT_CODE)${NC}"
     echo -e "${RED}=======================================${NC}"
 fi
 
@@ -110,9 +110,9 @@ echo ""
 echo -e "${YELLOW}El entorno virtual sigue activo.${NC}"
 echo -e "${YELLOW}   Para desactivar: deactivate${NC}"
 if [ "$MODE" == "test" ]; then
-    echo -e "${YELLOW}   Para ejecutar nuevamente: python3 check_reports.py test${NC}"
+    echo -e "${YELLOW}   Para ejecutar nuevamente: python3 build_pandas_report.py test${NC}"
 else
-    echo -e "${YELLOW}   Para ejecutar nuevamente: python3 check_reports.py${NC}"
+    echo -e "${YELLOW}   Para ejecutar nuevamente: python3 build_pandas_report.py${NC}"
 fi
 
 exit $EXIT_CODE

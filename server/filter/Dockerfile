@@ -11,6 +11,7 @@ COPY ./server/dtos/ ./dtos/
 COPY ./common/ ./common/
 COPY ./server/coordinator/ ./coordinator/
 COPY ./server/healthchecker/ ./healthchecker/
+COPY ./server/logger_monitor/ ./logger_monitor/
 
 # Copiar código del filtro AL FINAL (para mejor cache)
 COPY ./server/filter/ .
