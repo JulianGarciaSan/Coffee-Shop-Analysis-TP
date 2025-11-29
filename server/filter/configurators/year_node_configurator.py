@@ -5,7 +5,7 @@ import os
 import threading
 import time
 from typing import Optional, Dict, Any
-from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange, MessageMiddlewareQueueManual
+from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange, MessageMiddlewareQueueManual,MessageMiddlewareExchangeManual
 from dtos.dto import TransactionBatchDTO, TransactionItemBatchDTO, BatchType, CoordinationMessageDTO
 from .base_configurator import NodeConfigurator
 from coordinator.coordinator import PeerCoordinator 
@@ -53,7 +53,7 @@ class YearNodeConfigurator(NodeConfigurator):
                 for node_id in range(total_groupby_nodes):
                     groupby_routes.append(f"groupby_{year}_node_{node_id}")
             
-            self.groupby_exchange = MessageMiddlewareExchange(
+            self.groupby_exchange = MessageMiddlewareExchangeManual(
                 host=rabbitmq_host,
                 exchange_name='groupby_input.exchange',
                 route_keys=groupby_routes
@@ -181,10 +181,10 @@ class YearNodeConfigurator(NodeConfigurator):
             logger.info(f"  Output Q1 Queue: {output_q1}")
         
         if output_q2:
-            middlewares['q2'] = MessageMiddlewareExchange(
+            middlewares['q2'] = MessageMiddlewareExchangeManual(
                 host=self.rabbitmq_host,
                 exchange_name=output_q2,
-                route_keys=[]
+                route_keys=[],
             )
             logger.info(f"  Output Q2 Exchange: {output_q2}")
         
@@ -223,7 +223,7 @@ class YearNodeConfigurator(NodeConfigurator):
         elif batch_type == "transaction_items":
             logger.info(f"Procesando líneas de TransactionItems para Q2")
             if 'q2' in middlewares:
-                self._send_transaction_items_by_year(data, client_id)
+                self._send_transaction_items_by_year(data, client_id, message_id)
 
     def _on_all_acks_received(self, client_id: str,message_id:str, batch_type: str):
         logger.info(f"Todos los ACKs recibidos para cliente {client_id}, propagando EOF downstream")
@@ -263,9 +263,7 @@ class YearNodeConfigurator(NodeConfigurator):
         
         elif batch_type == "transaction_items":
             if 'q2' in middlewares:
-                client_id_str=str(client_id) if client_id is not None else "default"
-                message_id_str=str(message_id) if message_id is not None else "default"
-                self.send_eof_to_groupby(client_id_str,message_id_str)
+                self.send_eof_to_groupby(headers)
     
     def handle_eof(self, counter: int, total_filters: int, eof_type: str, 
             middlewares: Dict[str, Any], input_middleware: Any, client_id: Optional[int] = None) -> bool:
@@ -276,7 +274,7 @@ class YearNodeConfigurator(NodeConfigurator):
         logger.warning("handle_eof llamado pero ya no se usa (coordinador maneja EOF)")
         return False
     
-    def _send_transaction_items_by_year(self, data: str, client_id: str):
+    def _send_transaction_items_by_year(self, data: str, client_id: str, message_id:str):
         lines = data.strip().split('\n')
         header = lines[0] if lines else "created_at,transaction_id,item_id,quantity,subtotal"
         
@@ -320,16 +318,16 @@ class YearNodeConfigurator(NodeConfigurator):
                 csv_data = '\n'.join(batch_lines)
                 dto = TransactionItemBatchDTO(csv_data, BatchType.RAW_CSV)
                 routing_key = f"groupby_{year}_node_{node_index}"
-                
+                headers = self.create_headers(client_id,message_id)
                 self.groupby_exchange.send(
                     dto.to_bytes_fast(),
                     routing_key=routing_key,
-                    headers={'client_id': client_id}
+                    headers=headers
                 )
                 
-                logger.info(f"Batch enviado a {routing_key}: {len(batch_lines)-1} líneas, cliente {client_id}")
+                # logger.info(f"Batch enviado a {routing_key}: {len(batch_lines)-1} líneas, cliente {client_id}")
 
-    def send_eof_to_groupby(self, client_id: str,message_id):
+    def send_eof_to_groupby(self, headers: Dict[str, Any]):
         total_groupby_nodes = int(os.getenv('TOTAL_GROUPBY_NODES', '4'))
         
         for year in ['2024', '2025']:
@@ -337,14 +335,13 @@ class YearNodeConfigurator(NodeConfigurator):
                 routing_key = f"groupby_{year}_node_{node_index}"
                 
                 eof_dto = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
-                
                 self.groupby_exchange.send(
                     eof_dto.to_bytes_fast(),
                     routing_key=routing_key,
-                    headers={'client_id': client_id,'message_id':message_id}
+                    headers=headers
                 )
-        
-        logger.info(f"EOF enviado a TODOS los nodos GroupBy para cliente {client_id}")
+
+        logger.info(f"EOF enviado a TODOS los nodos GroupBy para cliente {headers.get('client_id')}:{headers.get('message_id')}")
             
     def close(self):
         """Cleanup del configurator"""

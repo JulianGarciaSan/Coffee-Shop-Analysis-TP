@@ -2,12 +2,13 @@
 import logging
 import os
 import sys
-from typing import Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 from collections import defaultdict
 from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
 from dtos.dto import TransactionItemBatchDTO, BatchType
 from common.graceful_shutdown import GracefulShutdown
 from client_routing.client_routing import ClientRouter
+from logger_monitor.logger_monitor import LoggerMonitor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ class BestSellingAggregatorNode:
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.total_years = int(os.getenv('TOTAL_YEARS', '2'))
         self.total_groupby_nodes_per_year = int(os.getenv('TOTAL_GROUPBY_NODES', '4'))
-        
+        self.node_id = int(os.getenv('AGGREGATOR_NODE_ID', '0'))
         self.expected_sources = self.total_years * self.total_groupby_nodes_per_year
         
         total_join_nodes = int(os.getenv('TOTAL_JOIN_NODES', '1'))
@@ -50,7 +51,12 @@ class BestSellingAggregatorNode:
         logger.info(f"  Esperando datos de {self.expected_sources} fuentes")
         logger.info(f"  Total nodos join: {total_join_nodes}")
         
+        self.client_logger = LoggerMonitor('/app/client_logs.txt')
+        self.is_first_message = True
+        self.message_id = 0
+        
         self._setup_middleware()
+
     
     def _setup_middleware(self):
         input_exchange = os.getenv('INPUT_EXCHANGE', 'best_selling_to_final.exchange')
@@ -183,7 +189,7 @@ class BestSellingAggregatorNode:
         
         return '\n'.join(csv_lines)
     
-    def handle_eof(self, routing_key: str, client_id: str) -> bool:
+    def handle_eof(self, routing_key: str, client_id: str, message_id : str) -> bool:
         try:
             logger.info(f"EOF recibido para cliente {client_id}, routing_key={routing_key}")
             
@@ -200,7 +206,7 @@ class BestSellingAggregatorNode:
             
             if selling_count == self.expected_sources and profit_count == self.expected_sources:
                 logger.info(f"Todos los EOFs recibidos para cliente {client_id}, calculando top 1 global")
-                self._send_final_results(client_id)
+                self._send_final_results(client_id, message_id)
                 
                 # Cleanup
                 del self.eof_selling_count_by_client[client_id]
@@ -213,25 +219,38 @@ class BestSellingAggregatorNode:
         except Exception as e:
             logger.error(f"Error manejando EOF: {e}")
             return False
+        
+    def create_headers(self, client_id: Optional[int], message_id: Optional[int]) -> Dict[str, Any]:
+        headers = {}
+        if client_id is not None and message_id is not None:
+            return {'client_id': client_id,
+                    'message_id': message_id
+                    }
+        return {}
+
+    def generate_next_message_id(self, message_id):
+        return int(self.node_id) * 1000000 + int(message_id)
     
-    def _send_final_results(self, client_id: str):
+    def _send_final_results(self, client_id: str,original_message_id : str):
         """Calcula top 1 global y envía al JOIN"""
-        best_selling, most_profit = self.calculate_global_top1(client_id)
-        
-        headers = {'client_id': client_id}
-        
+        best_selling, most_profit = self.calculate_global_top1(client_id)        
         selling_routing_key = self.client_router.get_routing_key(client_id, 'q2_best_selling.data')
         profit_routing_key = self.client_router.get_routing_key(client_id, 'q2_most_profit.data')
         
         selling_csv = self.generate_top1_csv(best_selling, "sellings_qty")
-        selling_dto = TransactionItemBatchDTO(selling_csv, BatchType.RAW_CSV)
         
-        logger.info(f"Enviando best selling: {len(selling_csv)} bytes → {selling_routing_key}")
+        unique_data_id = self.generate_next_message_id(original_message_id)
+        headers = self.create_headers(client_id, unique_data_id)
+
+        selling_dto = TransactionItemBatchDTO(selling_csv, BatchType.RAW_CSV)
+        logger.info(f"Enviando best selling: {len(selling_csv)}")
         self.output_middleware.send(
             selling_dto.to_bytes_fast(),
             routing_key=selling_routing_key,
             headers=headers
         )
+        unique_data_id = self.generate_next_message_id(original_message_id) + 1
+        headers = self.create_headers(client_id, unique_data_id)
         selling_eof = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
         self.output_middleware.send(
             selling_eof.to_bytes_fast(),
@@ -240,7 +259,9 @@ class BestSellingAggregatorNode:
         )
         
         # Enviar most profit
+        unique_data_id = self.generate_next_message_id(original_message_id) + 2
         profit_csv = self.generate_top1_csv(most_profit, "profit_sum")
+        headers = self.create_headers(client_id, unique_data_id)
         profit_dto = TransactionItemBatchDTO(profit_csv, BatchType.RAW_CSV)
         
         self.output_middleware.send(
@@ -248,6 +269,8 @@ class BestSellingAggregatorNode:
             routing_key=profit_routing_key,
             headers=headers
         )
+        unique_data_id = self.generate_next_message_id(original_message_id) + 3
+        headers = self.create_headers(client_id, unique_data_id)
         profit_eof = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
         self.output_middleware.send(
             profit_eof.to_bytes_fast(),
@@ -258,25 +281,17 @@ class BestSellingAggregatorNode:
         logger.info(f"Resultados finales enviados al JOIN para cliente {client_id}")
         logger.info(f"  Best selling: {len(best_selling)} meses")
         logger.info(f"  Most profit: {len(most_profit)} meses")
-    
-    def process_message(self, message: bytes, routing_key: str, headers: dict = None) -> bool:
+
+    def process_message(self, message: bytes, routing_key: str, client_id: str, message_id: str) -> bool:
         try:
             if self.shutdown.is_shutting_down():
                 logger.warning("Shutdown en progreso")
                 return True
             
-            client_id = 'default_client'
-            if headers and 'client_id' in headers:
-                client_id = headers['client_id']
-                if isinstance(client_id, bytes):
-                    client_id = client_id.decode('utf-8')
-            
-            client_id = str(client_id)
-            
             dto = TransactionItemBatchDTO.from_bytes_fast(message)
             
             if dto.batch_type == BatchType.EOF:
-                return self.handle_eof(routing_key, client_id)
+                return self.handle_eof(routing_key, client_id, message_id)
             
             if dto.batch_type == BatchType.RAW_CSV:
                 for line in dto.data.split('\n'):
@@ -288,6 +303,31 @@ class BestSellingAggregatorNode:
         except Exception as e:
             logger.error(f"Error procesando mensaje: {e}")
             return False
+
+    def parse_message_headers(self, properties) -> Tuple[str, str]:
+        client_id = None
+        message_id = None
+        if properties and properties.headers:
+            client_id = properties.headers.get('client_id')
+            message_id = properties.headers.get('message_id')
+        return str(client_id), str(message_id)
+    
+    def analyze_first_message(self, client_id: str, message_id: str, ch, method, body) -> bool:
+        
+        # if self.is_first_message:
+        #     self.is_first_message = False
+            
+        last_line_client = self.client_logger._get_last_line()
+        if last_line_client and last_line_client.strip() and ';' in last_line_client:    
+            client_id_client_log, message_id_client_log = last_line_client.split(';')
+            if client_id_client_log == client_id and message_id_client_log == message_id:
+                logger.info(f"Estado ya consistente con cliente {client_id} y mensaje {message_id}")
+                return True
+        try:
+            pass
+        except Exception as e:
+            logger.error(f"Error recuperando estado: {e}")
+        return False
     
     def on_message_callback(self, ch, method, properties, body):
         try:
@@ -296,9 +336,12 @@ class BestSellingAggregatorNode:
                 return
             
             routing_key = getattr(method, 'routing_key', None)
-            headers = getattr(properties, 'headers', None)
-            
-            should_stop = self.process_message(body, routing_key, headers)
+
+            client_id, message_id = self.parse_message_headers(properties)
+            if self.analyze_first_message(client_id, message_id, ch, method, body):
+                return
+
+            should_stop = self.process_message(body, routing_key, client_id,message_id)
             if should_stop:
                 ch.stop_consuming()
                 

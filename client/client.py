@@ -22,14 +22,14 @@ class Client:
         self.client_socket = None
         self.protocol = None  
         self.processor = None
-        self.expected_reports = 1
+        self.expected_reports = 6
         
         self.report_files = {} 
         self.report_headers = {
         'q1': 'transaction_id,final_amount',
         'q2_most_profit': 'year_month_created_at,item_name,profit_sum',
         'q2_best_selling': 'year_month_created_at,item_name,sellings_qty',
-        'q3': 'year_half,store_name,tpv',
+        'q3': 'year_half_created_at,store_name,tpv',
         'q4': 'store_name,birthdate'
         }
         
@@ -72,10 +72,10 @@ class Client:
             #"D": "/data/transactions",
             "D": "/data/transactions_test",
             #"I": "/data/transaction_items",
-            # "I": "/data/transactions_items_test",
-            # "U": "/data/users",
-            # "S": "/data/stores",
-            # "M": "/data/menu_items",
+             "I": "/data/transactions_items_test",
+            "U": "/data/users",
+            "S": "/data/stores",
+            "M": "/data/menu_items",
             #"payment_methods": "/data/payment_methods",
             #"vouchers": "/data/vouchers"
         }

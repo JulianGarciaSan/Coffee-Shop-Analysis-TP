@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 class NodeConfigurator(ABC):
-    def __init__(self, rabbitmq_host: str, logging_instance, client_logging_instance, eof_logging_instance):
+    def __init__(self, rabbitmq_host: str, logging_instance, client_logging_instance,eof_logging_instance):
         self.rabbitmq_host = rabbitmq_host
         self.logger = logging_instance
         self.logger_client = client_logging_instance

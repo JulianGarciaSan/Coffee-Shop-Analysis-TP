@@ -236,6 +236,7 @@ class FilterNode:
             logging.info("Mensaje recibido en FilterNode")
             should_stop = self.process_message(body, routing_key, client_id,message_id)
             ch.basic_ack(delivery_tag=method.delivery_tag)
+            self.logger.write_with_timestamp(f"Termine la iteracion")
 
             
             if should_stop:

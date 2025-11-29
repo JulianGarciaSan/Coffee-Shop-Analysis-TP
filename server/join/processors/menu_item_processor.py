@@ -1,4 +1,4 @@
-from data_processor import DataProcessor
+from processors.data_processor import DataProcessor
 
 
 class MenuItemProcessor(DataProcessor):

@@ -3,6 +3,7 @@ import os
 import queue
 import threading
 import time
+from typing import Any, Dict, Optional
 from common.new_protocolo import ProtocolMessage, ProtocolNew
 from logger import get_logger
 import logging
@@ -42,10 +43,10 @@ class ClientHandler(threading.Thread):
         
         self.report_data = {
             'q1': [],
-            # 'q3': [],
-            # 'q4': [],
-            # 'q2_most_profit': [],
-            # 'q2_best_selling': []
+            'q3': [],
+            'q4': [],
+            'q2_most_profit': [],
+            'q2_best_selling': []
         }
         self.eof_count = 0
         #self.max_expected_reports = 5
@@ -114,6 +115,15 @@ class ClientHandler(threading.Thread):
     def run(self):
         self._is_running = True
         self._start_receiver_and_sender_threads()
+        
+    def create_headers(self, client_id: Optional[int], message_id: Optional[int]) -> Dict[str, Any]:
+        headers = {}
+        if client_id is not None and message_id is not None:
+            return {'client_id': client_id,
+                    'message_id': message_id
+                    }
+        return {}
+
             
     def process_client_messages(self):
         logger.info(f"ClientHandler {self.client_id} iniciado")
@@ -165,8 +175,9 @@ class ClientHandler(threading.Thread):
         }
         
         handler = handlers.get(message.file_type)
+        headers = self.create_headers(self.client_id, self.message_id)
         if handler:
-            handler(message)
+            handler(message,headers)
         else:
             logger.warning(f"Unknown file_type from client {self.client_id}: {message.file_type}")
             
@@ -180,18 +191,18 @@ class ClientHandler(threading.Thread):
         if self.shutdown and self.shutdown.is_shutting_down():
             logger.info("Shutdown activo, no enviando EOF")
             return
-               
+        headers = self.create_headers(self.client_id, self.message_id)
         try:
             if file_type == "D":
                 eof_dto = TransactionBatchDTO("EOF:1", batch_type=BatchType.EOF)
-                self._output_middleware.send(eof_dto.to_bytes_fast(), routing_key='transactions', headers={'client_id': self.client_id, 'message_id': self.message_id})
+                self._output_middleware.send(eof_dto.to_bytes_fast(), routing_key='transactions', headers=headers)
                 logger.info("EOF:1 enviado")
                 
             elif file_type == "S":
                 routing_keys = self.client_router.get_all_routing_keys('stores.data')
                 for routing_key in routing_keys:
                     eof_dto = StoreBatchDTO("EOF:1", batch_type=BatchType.EOF)
-                    self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key=routing_key, headers={'client_id': self.client_id})
+                    self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key=routing_key, headers=headers)
                 logger.info(f"EOF stores enviado a {len(routing_keys)} join nodes")
 
             elif file_type == "U":
@@ -203,7 +214,7 @@ class ClientHandler(threading.Thread):
                         self._join_middleware.send(
                             eof_dto.to_bytes_fast(),
                             routing_key=routing_key,
-                            headers={'client_id': self.client_id}
+                            headers=headers
                         )
                     
                     logger.info(f"EOF de users enviado a {self.total_join_nodes} nodos")
@@ -212,35 +223,35 @@ class ClientHandler(threading.Thread):
                 
             elif file_type == "I":
                 eof_dto = TransactionItemBatchDTO("EOF:1", batch_type=BatchType.EOF)
-                self._output_middleware.send(eof_dto.to_bytes_fast(), routing_key='transaction_items', headers={'client_id': self.client_id})
+                self._output_middleware.send(eof_dto.to_bytes_fast(), routing_key='transaction_items', headers=headers)
                 logger.info("EOF:1 enviado para tipo I (transaction_items)")
 
             elif file_type == "M":
                 eof_dto = MenuItemBatchDTO("EOF:1", batch_type=BatchType.EOF)
                 routing_key = self._get_routing_key_for_join('menu_items.data')
-                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key=routing_key, headers={'client_id': self.client_id})
+                self._join_middleware.send(eof_dto.to_bytes_fast(), routing_key=routing_key, headers=headers)
                 logger.info("EOF:1 enviado para tipo M (menu_items)")
 
         except Exception as e:
             logger.error(f"Error manejando FINISH: {e}")
 
-    def process_type_d_message(self, message: ProtocolMessage):
+    def process_type_d_message(self, message: ProtocolMessage, headers: Dict[str, Any]):
         try:
             dto = TransactionBatchDTO(message.data, BatchType.RAW_CSV)
             dto.filter_columns()
-            self._output_middleware.send(dto.to_bytes_fast(), routing_key='transactions', headers={'client_id': self.client_id,'message_id': self.message_id})
+            self._output_middleware.send(dto.to_bytes_fast(), routing_key='transactions', headers=headers)
         except Exception as e:
             logger.error(f"Error procesando mensaje de tipo 'D': {e}")
 
-    def process_type_i_message(self, message: ProtocolMessage):
+    def process_type_i_message(self, message: ProtocolMessage, headers: Dict[str, Any]):
         try:
             dto = TransactionItemBatchDTO(message.data, BatchType.RAW_CSV)
             dto.filter_columns()
-            self._output_middleware.send(dto.to_bytes_fast(), routing_key='transaction_items', headers={'client_id': self.client_id})
+            self._output_middleware.send(dto.to_bytes_fast(), routing_key='transaction_items', headers=headers)
         except Exception as e:
             logger.error(f"Error procesando mensaje de tipo 'I': {e}")
-            
-    def process_type_s_message(self, message: ProtocolMessage):
+
+    def process_type_s_message(self, message: ProtocolMessage, headers: Dict[str, Any]):
         try:
             bytes_data = message.data.encode('utf-8')
             dto = StoreBatchDTO.from_bytes_fast(bytes_data)
@@ -249,12 +260,12 @@ class ClientHandler(threading.Thread):
 
             routing_keys = self.client_router.get_all_routing_keys('stores.data')
             for routing_key in routing_keys:
-                self._join_middleware.send(serialized_data, routing_key=routing_key, headers={'client_id': self.client_id})
+                self._join_middleware.send(serialized_data, routing_key=routing_key, headers=headers)
             
         except Exception as e:
             logger.error(f"Error procesando mensaje de tipo 'S': {e}")
-            
-    def process_type_u_message(self, message: ProtocolMessage):
+
+    def process_type_u_message(self, message: ProtocolMessage, headers: Dict[str, Any]):
         try:
             bytes_data = message.data.encode('utf-8')
             dto = UserBatchDTO.from_bytes_fast(bytes_data)
@@ -275,45 +286,31 @@ class ClientHandler(threading.Thread):
                     data_lines.append(line)
             
             total_users = len(data_lines)
-            # logger.info(f"[USERS] Cliente {self.client_id}: Procesando {total_users} users")
+            # logger.info(f"[USERS] Cliente {self.client_id}: Procesando {total_users} users para enviar a TODOS los nodos")
             
             CHUNK_SIZE = 5000
             
             for chunk_start in range(0, len(data_lines), CHUNK_SIZE):
                 chunk_lines = data_lines[chunk_start:chunk_start + CHUNK_SIZE]
                 
-                batches_by_node = {i: [] for i in range(self.total_join_nodes)}
+                lines_to_send = chunk_lines.copy()
+                if header_line:
+                    lines_to_send.insert(0, header_line)
                 
-                for line in chunk_lines:
-                    parts = line.split(',')
-                    if len(parts) < 1:
-                        continue
-                    
-                    user_id = parts[0]
-                    shard_id = self._get_shard_for_user(user_id)
-                    batches_by_node[shard_id].append(line)
+                batch_data = '\n'.join(lines_to_send)
+                batch_dto = UserBatchDTO(batch_data, BatchType.RAW_CSV)
+                serialized_data = batch_dto.to_bytes_fast()
                 
-                for node_id, node_lines in batches_by_node.items():
-                    if not node_lines:
-                        continue
-                    
-                    lines_to_send = node_lines.copy()
-                    
-                    if header_line:
-                        lines_to_send.insert(0, header_line)
-                    
-                    batch_data = '\n'.join(lines_to_send)
-                    node_dto = UserBatchDTO(batch_data, BatchType.RAW_CSV)
-                    
+                for node_id in range(self.total_join_nodes):
                     routing_key = f"join_node_{node_id}.users.data"
                     
                     self._join_middleware.send(
-                        node_dto.to_bytes_fast(),
+                        serialized_data,  
                         routing_key=routing_key,
-                        headers={'client_id': self.client_id}
+                        headers=headers
                     )
                     
-                    logger.debug(f"Chunk {chunk_start//CHUNK_SIZE + 1}: Users → join_node_{node_id}: {len(lines_to_send)-1} líneas")
+                    logger.debug(f"Chunk {chunk_start//CHUNK_SIZE + 1}: Users → join_node_{node_id}: {len(lines_to_send)-1} líneas (COPIA COMPLETA)")
                 
                 if hasattr(self._join_middleware, 'connection') and self._join_middleware.connection:
                     try:
@@ -321,12 +318,12 @@ class ClientHandler(threading.Thread):
                     except Exception:
                         pass
             
-            logger.info(f"[USERS] Cliente {self.client_id}: {total_users} users enviados en {(len(data_lines) // CHUNK_SIZE) + 1} chunks")
+            # logger.info(f"[USERS] Cliente {self.client_id}: {total_users} users enviados a {self.total_join_nodes} nodos (SIN SHARDING)")
             
         except Exception as e:
             logger.error(f"Error procesando mensaje de tipo 'U': {e}")
             
-    def process_type_m_message(self, message: ProtocolMessage):
+    def process_type_m_message(self, message: ProtocolMessage, headers: Dict[str, Any]):
         try:
             bytes_data = message.data.encode('utf-8')
             dto = MenuItemBatchDTO.from_bytes_fast(bytes_data)
@@ -334,7 +331,7 @@ class ClientHandler(threading.Thread):
             serialized_data = dto.to_bytes_fast()
 
             routing_key = self._get_routing_key_for_join('menu_items.data')
-            self._join_middleware.send(serialized_data, routing_key=routing_key, headers={'client_id': self.client_id})
+            self._join_middleware.send(serialized_data, routing_key=routing_key, headers=headers)
 
 
             line_count = len([line for line in dto.data.split('\n') if line.strip()])
@@ -343,7 +340,6 @@ class ClientHandler(threading.Thread):
             logger.error(f"Error procesando mensaje de tipo 'M': {e}")
 
         
-    # En gateway_client.py - collect_data_for_reports()
     def collect_data_for_reports(self):
         logger.info(f"Reports collector started for client {self.client_id}")
         # total_lines_sent = 0
