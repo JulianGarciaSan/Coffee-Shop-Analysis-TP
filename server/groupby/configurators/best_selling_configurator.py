@@ -1,9 +1,10 @@
 # best_selling_configurator.py
+from collections import defaultdict
 import logging
 import os
 import threading
 from typing import Dict, Any
-from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue,MessageMiddlewareQueueManual
+from rabbitmq.middleware import MessageMiddlewareExchangeManual, MessageMiddlewareQueue,MessageMiddlewareQueueManual
 from dtos.dto import TransactionItemBatchDTO, BatchType, CoordinationMessageDTO
 from .base_configurators import GroupByConfigurator
 
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class BestSellingConfigurator(GroupByConfigurator):
-    def __init__(self, rabbitmq_host: str, output_exchange: str):
+    def __init__(self, rabbitmq_host: str, output_exchange: str,outgoing_counter_by_client: Dict[str, int] = None):
         super().__init__(rabbitmq_host, output_exchange)
         self.year = os.getenv('AGGREGATOR_YEAR', '2024')
         self.input_exchange = os.getenv('INPUT_EXCHANGE', 'groupby_input.exchange')
@@ -20,7 +21,7 @@ class BestSellingConfigurator(GroupByConfigurator):
         self.total_groupby_nodes = int(os.getenv('TOTAL_GROUPBY_NODES', '4'))
         # all_node_ids_str = os.getenv('ALL_NODE_IDS', '')
         # all_node_ids = [nid.strip() for nid in all_node_ids_str.split(',')] if all_node_ids_str else [f'groupby_{self.year}_node_{self.node_id}']
-        
+        self.outgoing_counter_by_client = outgoing_counter_by_client or defaultdict(int)
         self.node_name = f'groupby_{self.year}_node_{self.node_id}'
         self.input_queue_name = f"best_selling_{self.year}_node_{self.node_id}"
         
@@ -49,7 +50,7 @@ class BestSellingConfigurator(GroupByConfigurator):
         return middleware
     
     def create_output_middlewares(self) -> Dict[str, Any]:
-        output_middleware = MessageMiddlewareExchange(
+        output_middleware = MessageMiddlewareExchangeManual(
             host=self.rabbitmq_host,
             exchange_name=self.output_exchange, 
             route_keys=['top_selling.data', 'top_profit.data']
@@ -79,33 +80,44 @@ class BestSellingConfigurator(GroupByConfigurator):
             logger.error(f"Error manejando EOF para client_id={client_id}: {e}")
             return False
     
-    def generate_next_message_id(self, message_id):
-        return int(self.node_id) * 1000000 + int(message_id)
+    def generate_next_message_id(self, client_id: str) -> int:
+        """
+        Genera ID único por mensaje para este cliente.
+        Determinístico porque el contador se reconstruye desde el checkpoint.
+        """
+        self.outgoing_counter_by_client[client_id] += 1
+        return int(self.node_id) * 1000000 + self.outgoing_counter_by_client[client_id]
     
     def _send_eof_to_aggregator(self, output_middleware, client_id, message_id):
-        """Envía EOF al Aggregator Final"""        
+        """Envía EOF al Aggregator Final"""
+        
         eof_dto = TransactionItemBatchDTO(f"EOF:{self.node_name}", BatchType.EOF)
-        message_id = self.generate_next_message_id(message_id)
-        headers = self.create_headers(client_id, message_id)
+        
+        # EOF para top_selling.data
+        unique_id = self.generate_next_message_id(client_id)
+        headers = self.create_headers(client_id, unique_id)
         output_middleware.send(
             eof_dto.to_bytes_fast(),
             routing_key='top_selling.data',
             headers=headers
         )
-        message_id = self.generate_next_message_id(message_id) + 1
-        headers = self.create_headers(client_id, message_id)
+        logger.info(f"EOF top_selling enviado (ID={unique_id})")
+        
+        # EOF para top_profit.data
+        unique_id = self.generate_next_message_id(client_id)
+        headers = self.create_headers(client_id, unique_id)
         output_middleware.send(
             eof_dto.to_bytes_fast(),
             routing_key='top_profit.data',
             headers=headers
         )
+        logger.info(f"EOF top_profit enviado (ID={unique_id})")
         
         logger.info(f"EOF enviado al Aggregator Final para cliente {client_id}")
     
     def _calculate_and_send_top1(self, output_middleware, strategy, client_id, message_id):
         """
-        Calcula el top 1 LOCAL (de los items que procesó este nodo)
-        y envía al Aggregator Final
+        Calcula el top 1 LOCAL y envía al Aggregator Final
         """
         month_item_aggregations_by_client = getattr(strategy, 'month_item_aggregations_by_client', {})
         client_data = month_item_aggregations_by_client.get(client_id, {})
@@ -113,9 +125,7 @@ class BestSellingConfigurator(GroupByConfigurator):
         if not client_data:
             return
         
-        base_message_id = self.generate_next_message_id(message_id)
-        
-        for idx, year_month in enumerate(sorted(client_data.keys())):
+        for year_month in sorted(client_data.keys()):
             items = client_data[year_month]
             valid_items = [item for item in items.values() if item is not None]
             
@@ -129,14 +139,15 @@ class BestSellingConfigurator(GroupByConfigurator):
             selling_csv = f"created_at,item_id,sellings_qty\n"
             selling_csv += f"{year_month},{top_selling_item.item_id},{top_selling_item.sellings_qty}"
             
-            # ID único: base + offset del mes
-            unique_id = base_message_id + (idx * 2)  # *2 porque envías selling + profit
+            # Generar ID único usando client_id
+            unique_id = self.generate_next_message_id(client_id)
             selling_dto = TransactionItemBatchDTO(selling_csv, BatchType.RAW_CSV)
             output_middleware.send(
                 selling_dto.to_bytes_fast(),
                 routing_key='top_selling.data',
                 headers=self.create_headers(client_id, unique_id)
             )
+            logger.info(f"Enviado selling {year_month} (ID={unique_id})")
             
             # Top profit
             top_profit_item = max(valid_items,
@@ -145,25 +156,23 @@ class BestSellingConfigurator(GroupByConfigurator):
             profit_csv = f"created_at,item_id,profit_sum\n"
             profit_csv += f"{year_month},{top_profit_item.item_id},{top_profit_item.profit_sum:.2f}"
             
-            # ID único: base + offset + 1
-            unique_id = base_message_id + (idx * 2) + 1
+            # Generar siguiente ID único
+            unique_id = self.generate_next_message_id(client_id)
             profit_dto = TransactionItemBatchDTO(profit_csv, BatchType.RAW_CSV)
             output_middleware.send(
                 profit_dto.to_bytes_fast(),
                 routing_key='top_profit.data',
                 headers=self.create_headers(client_id, unique_id)
             )
+            logger.info(f"Enviado profit {year_month} (ID={unique_id})")
                     
         logger.info(f"Top 1 local enviado para cliente {client_id}")
-        
-        if client_id in month_item_aggregations_by_client:
-            del month_item_aggregations_by_client[client_id]
-            logger.info(f"Memoria limpiada para cliente {client_id}")
     
     def get_strategy_config(self) -> dict:
         return {
             'input_queue_name': self.input_queue_name,
-            'year': self.year
+            'year': self.year,
+            'outgoing_counter_by_client': self.outgoing_counter_by_client
         }
     
     # def close(self):

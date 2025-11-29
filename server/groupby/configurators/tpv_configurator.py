@@ -81,16 +81,17 @@ class TPVConfigurator(GroupByConfigurator):
         logger.info(f"Cliente '{client_id}'  Routing key: {routing_key}")
         
         outgoing_message_id = self.generate_next_message_id(original_message_id)
-
+        print(f"MESSAGE ID DATA: {outgoing_message_id}")
         result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
         middlewares["output"].send(
             result_dto.to_bytes_fast(),
             routing_key=routing_key,
             headers={'client_id': client_id, 'message_id': outgoing_message_id}
         )
-        print("///////////// ENVIANDO EOF A JOIN NODE /////////////")
-        time.sleep(10)
+        # print("///////////// ENVIANDO EOF A JOIN NODE /////////////")
+        # time.sleep(10)
         outgoing_message_id = self.generate_next_message_id(original_message_id) + 1
+        print(f"MESSAGE ID EOF: {outgoing_message_id}")
         eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
         middlewares["output"].send(
             eof_dto.to_bytes_fast(),

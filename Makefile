@@ -40,7 +40,7 @@ stop:
 	sudo rm -rf ./server/logs/top_customers_aggregator_1/checkpoints/*
 	sudo rm -rf ./server/logs/join_node_0/checkpoints/*
 	sudo rm -rf ./server/logs/join_node_1/checkpoints/*
-
+	sudo rm -rf ./server/logs/aggregator_best_selling_final/checkpoints/*
 
 	sudo rm -rf report*
 
