@@ -2,7 +2,7 @@ from collections import defaultdict
 import logging
 import os
 import time
-from typing import Dict, Any
+from typing import Dict, Any, List
 from rabbitmq.middleware import MessageMiddlewareQueueManual, MessageMiddlewareExchangeManual
 from dtos.dto import TransactionBatchDTO, BatchType
 from .base_configurators import GroupByConfigurator
@@ -16,12 +16,13 @@ class TopCustomerConfigurator(GroupByConfigurator):
         self.input_queue_name = os.getenv('INPUT_QUEUE', 'year_filtered_q4')
         self.total_groupby_nodes = int(os.getenv('TOTAL_GROUPBY_NODES', '3'))
         self.topk_node_id = int(os.getenv('TOPK_NODE_ID', '1'))
-        self.total_aggregator_nodes = int(os.getenv('TOTAL_TOPK_AGGREGATORS', '2'))
+        aggregator_ids_str = os.getenv('TOPK_AGGREGATORS_IDS', '3,4')
+        self.topk_aggregators_ids: List[int] = [int(x.strip()) for x in aggregator_ids_str.split(',')]
+        
         
         logger.info(f"TopCustomerConfigurator inicializado:")
         logger.info(f"  Input Queue: {self.input_queue_name}")
         logger.info(f"  Total GroupBy nodes: {self.total_groupby_nodes}")
-        logger.info(f"  Total Aggregator nodes: {self.total_aggregator_nodes}")
 
     def create_input_middleware(self):
         middleware = MessageMiddlewareQueueManual(
@@ -32,8 +33,7 @@ class TopCustomerConfigurator(GroupByConfigurator):
         return middleware
 
     def create_output_middlewares(self) -> Dict[str, Any]:
-        route_keys = [f'top_customers_aggregator_{i}' for i in range(self.total_aggregator_nodes)]
-        
+        route_keys = [f'top_customers_aggregator_{i}' for i in self.topk_aggregators_ids]        
         output_middleware = MessageMiddlewareExchangeManual(
             host=self.rabbitmq_host,
             exchange_name=self.output_exchange,
@@ -58,14 +58,19 @@ class TopCustomerConfigurator(GroupByConfigurator):
         return False
 
     def _shard_store_to_aggregator(self, store_id: str) -> int:
-        """Sharding determinístico: store_id % total_aggregators"""
+        """Sharding determinístico: store_id % cantidad_de_aggregators, mapeado a IDs específicos"""
         try:
             store_num = int(store_id.replace('store_', ''))
         except ValueError:
             store_num = hash(store_id)
         
-        return store_num % self.total_aggregator_nodes
+        # Mapear al índice dentro de la lista de aggregators
+        aggregator_index = store_num % len(self.topk_aggregators_ids)
+        return self.topk_aggregators_ids[aggregator_index]
 
+    def generate_next_message_id(self, message_id):
+        return int(self.topk_node_id) * 1000000 + int(message_id)
+    
     def _send_data_by_aggregator(self, output_middleware, strategy, client_id, original_message_id):
         """
         Agrupa stores por aggregator y envía UN mensaje por aggregator.
@@ -92,7 +97,8 @@ class TopCustomerConfigurator(GroupByConfigurator):
                 for user_purchase in user_purchases.values():
                     csv_lines.append(user_purchase.to_csv_line(store_id))
             
-            outgoing_message_id = f"{original_message_id}:A{aggregator_id}"
+            
+            outgoing_message_id = self.generate_next_message_id(original_message_id)
             
             routing_key = f'top_customers_aggregator_{aggregator_id}'
             batch_csv = '\n'.join(csv_lines)
@@ -103,21 +109,19 @@ class TopCustomerConfigurator(GroupByConfigurator):
                 routing_key,
                 headers={'client_id': client_id, 'message_id': outgoing_message_id}
             )
-            
-            logger.info(f"Aggregator {aggregator_id}: {len(stores)} stores, {len(csv_lines)-1} líneas")
 
     def _send_eof_broadcast(self, output_middleware, client_id, original_message_id):
         """Envía UN EOF a todos los aggregators."""
-        logger.info(f"Enviando EOF a {self.total_aggregator_nodes} aggregators")
+        logger.info(f"Enviando EOF a {len(self.topk_aggregators_ids)} aggregators")
         
-        for aggregator_id in range(self.total_aggregator_nodes):
-            outgoing_message_id = f"{original_message_id}:EOF"
+        for aggregator_id in self.topk_aggregators_ids:
+            eof_message_id = self.generate_next_message_id(original_message_id) + 1
             routing_key = f'top_customers_aggregator_{aggregator_id}'
             eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
             output_middleware.send(
                 eof_dto.to_bytes_fast(),
                 routing_key,
-                headers={'client_id': client_id, 'message_id': outgoing_message_id}
+                headers={'client_id': client_id, 'message_id': eof_message_id}
             )
         
         logger.info(f"EOF enviado a todos los aggregators")

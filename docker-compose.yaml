@@ -525,61 +525,61 @@ services:
       - ./server/logs/join_node_1/checkpoints:/app/server/logs/join_node_1/checkpoints
       - ./server/logs/join_node_1/client_logs.txt:/app/client_logs.txt
 
-  ## NODOS Q3 TPV
-  # groupby_semester_1:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/groupby/Dockerfile
-  #   container_name: groupby_semester_1
-  #   restart: on-failure
-  #   ports:
-  #     - "2002:9999"
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - SEMESTER=1
-  #     - INPUT_Q3=groupby.join.exchange
-  #     - TOTAL_GROUPBY_NODES=2
-  #     - JOIN_EXCHANGE=join.exchange
-  #     - NODE_ID=groupby_node_1
-  #     - ALL_NODE_IDS=groupby_node_1,groupby_node_2
-  #     - TOTAL_JOIN_NODES=2
-  #     - CHECKPOINT_DIR=/app/server/logs/groupby_semester_1/checkpoints
+  # NODOS Q3 TPV
+  groupby_semester_1:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_semester_1
+    restart: on-failure
+    ports:
+      - "2002:9999"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - SEMESTER=1
+      - INPUT_Q3=groupby.join.exchange
+      - TOTAL_GROUPBY_NODES=2
+      - JOIN_EXCHANGE=join.exchange
+      - NODE_ID=groupby_node_1
+      - ALL_NODE_IDS=groupby_node_1,groupby_node_2
+      - TOTAL_JOIN_NODES=2
+      - CHECKPOINT_DIR=/app/server/logs/groupby_semester_1/checkpoints
 
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
-  #     - ./server/logs/groupby_semester_1/client_logs.txt:/app/client_logs.txt
-  #     - ./server/logs/groupby_semester_1/checkpoints:/app/server/logs/groupby_semester_1/checkpoints
+    volumes:
+      - ./server/config.ini:/app/config.ini
+      - ./server/logs/groupby_semester_1/client_logs.txt:/app/client_logs.txt
+      - ./server/logs/groupby_semester_1/checkpoints:/app/server/logs/groupby_semester_1/checkpoints
 
-  # groupby_semester_2:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/groupby/Dockerfile
-  #   container_name: groupby_semester_2
-  #   restart: on-failure
-  #   ports:
-  #     - "2001:9999"
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - SEMESTER=2
-  #     - INPUT_Q3=groupby.join.exchange
-  #     - TOTAL_GROUPBY_NODES=2
-  #     - JOIN_EXCHANGE=join.exchange
-  #     - NODE_ID=groupby_node_2
-  #     - ALL_NODE_IDS=groupby_node_1,groupby_node_2
-  #     - TOTAL_JOIN_NODES=2
-  #     - CHECKPOINT_DIR=/app/server/logs/groupby_semester_2/checkpoints
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
-  #     - ./server/logs/groupby_semester_2/client_logs.txt:/app/client_logs.txt
-  #     - ./server/logs/groupby_semester_2/checkpoints:/app/server/logs/groupby_semester_2/checkpoints
+  groupby_semester_2:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_semester_2
+    restart: on-failure
+    ports:
+      - "2001:9999"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - SEMESTER=2
+      - INPUT_Q3=groupby.join.exchange
+      - TOTAL_GROUPBY_NODES=2
+      - JOIN_EXCHANGE=join.exchange
+      - NODE_ID=groupby_node_2
+      - ALL_NODE_IDS=groupby_node_1,groupby_node_2
+      - TOTAL_JOIN_NODES=2
+      - CHECKPOINT_DIR=/app/server/logs/groupby_semester_2/checkpoints
+    volumes:
+      - ./server/config.ini:/app/config.ini
+      - ./server/logs/groupby_semester_2/client_logs.txt:/app/client_logs.txt
+      - ./server/logs/groupby_semester_2/checkpoints:/app/server/logs/groupby_semester_2/checkpoints
   
   ##NODOS Q4 TOP CONSUMERS
   top_consumers_aggregator_1:
@@ -597,12 +597,12 @@ services:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
       #- AGGREGATOR_MODE=intermediate
-      - TOPK_NODE_ID=0
+      - TOPK_NODE_ID=3
       - INPUT_QUEUE=aggregated_data_1
       - OUTPUT_EXCHANGE=join.exchange
       - TOTAL_TOPK_NODES=2
       - AGGREGATOR_TYPE=top_consumers_intermediate
-      - ALL_NODE_IDS=1,2
+      - ALL_NODE_IDS=3,4
       - TOTAL_JOIN_NODES=2 
       - CHECKPOINT_DIR=/app/server/logs/top_customers_aggregator_1/checkpoints
 
@@ -629,12 +629,12 @@ services:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_HOST=rabbitmq
       #- AGGREGATOR_MODE=intermediate
-      - TOPK_NODE_ID=1
+      - TOPK_NODE_ID=4
       - INPUT_QUEUE=aggregated_data_2
       - OUTPUT_EXCHANGE=join.exchange
       - TOTAL_TOPK_NODES=2
       - AGGREGATOR_TYPE=top_consumers_intermediate
-      - ALL_NODE_IDS=1,2
+      - ALL_NODE_IDS=3,4
       - TOTAL_JOIN_NODES=2 
       - CHECKPOINT_DIR=/app/server/logs/top_customers_aggregator_2/checkpoints
     volumes:
@@ -662,252 +662,254 @@ services:
       - OUTPUT_EXCHANGE=aggregated.exchange
       - TOTAL_GROUPBY_NODES=1
       - CHECKPOINT_DIR=/app/server/logs/groupby_top_customers/checkpoints
-      - TOTAL_TOPK_AGGREGATORS=2
+      - TOPK_AGGREGATORS_IDS=3,4
     volumes:
       - ./server/config.ini:/app/config.ini
       - ./server/logs/groupby_top_customers/client_logs.txt:/app/client_logs.txt
       - ./server/logs/groupby_top_customers/checkpoints:/app/server/logs/groupby_top_customers/checkpoints
 
   ## NODOS Q2 BEST SELLING ITEMS PER YEAR
-  # groupby_best_selling_2024_0:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/groupby/Dockerfile
-  #   container_name: groupby_best_selling_2024_0
-  #   restart: on-failure
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   ports:
-  #     - "2003:9999"
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - GROUPBY_MODE=best_selling
-  #     - GROUPBY_NODE_ID=0
-  #     - AGGREGATOR_YEAR=2024
-  #     - TOTAL_GROUPBY_NODES=4
-  #     - INPUT_EXCHANGE=groupby_input.exchange
-  #     - OUTPUT_EXCHANGE=best_selling_to_final.exchange
-  #     - CHECKPOINT_DIR=/app/server/logs/groupby_best_selling_2024_0/checkpoints
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
-  #     - ./server/logs/groupby_best_selling_2024_0/checkpoints:/app/server/logs/groupby_best_selling_2024_0/checkpoints
-  #     - ./server/logs/groupby_best_selling_2024_0/client_logs.txt:/app/client_logs.txt
+  groupby_best_selling_2024_0:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_best_selling_2024_0
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    ports:
+      - "2003:9999"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=best_selling
+      - GROUPBY_NODE_ID=13
+      - AGGREGATOR_YEAR=2024
+      - TOTAL_GROUPBY_NODES=4
+      - INPUT_EXCHANGE=groupby_input.exchange
+      - OUTPUT_EXCHANGE=best_selling_to_final.exchange
+      - CHECKPOINT_DIR=/app/server/logs/groupby_best_selling_2024_0/checkpoints
+    volumes:
+      - ./server/config.ini:/app/config.ini
+      - ./server/logs/groupby_best_selling_2024_0/checkpoints:/app/server/logs/groupby_best_selling_2024_0/checkpoints
+      - ./server/logs/groupby_best_selling_2024_0/client_logs.txt:/app/client_logs.txt
 
 
-  # groupby_best_selling_2024_1:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/groupby/Dockerfile
-  #   container_name: groupby_best_selling_2024_1
-  #   restart: on-failure
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   ports:
-  #     - "2004:9999"
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - GROUPBY_MODE=best_selling
-  #     - GROUPBY_NODE_ID=1
-  #     - AGGREGATOR_YEAR=2024
-  #     - TOTAL_GROUPBY_NODES=4
-  #     - INPUT_EXCHANGE=groupby_input.exchange
-  #     - OUTPUT_EXCHANGE=best_selling_to_final.exchange
-  #     - CHECKPOINT_DIR=/app/server/logs/groupby_best_selling_2024_1/checkpoints
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
-  #     - ./server/logs/groupby_best_selling_2024_1/checkpoints:/app/server/logs/groupby_best_selling_2024_1/checkpoints
-  #     - ./server/logs/groupby_best_selling_2024_1/client_logs.txt:/app/client_logs.txt
+  groupby_best_selling_2024_1:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_best_selling_2024_1
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    ports:
+      - "2004:9999"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=best_selling
+      - GROUPBY_NODE_ID=12
+      - AGGREGATOR_YEAR=2024
+      - TOTAL_GROUPBY_NODES=4
+      - INPUT_EXCHANGE=groupby_input.exchange
+      - OUTPUT_EXCHANGE=best_selling_to_final.exchange
+      - CHECKPOINT_DIR=/app/server/logs/groupby_best_selling_2024_1/checkpoints
+    volumes:
+      - ./server/config.ini:/app/config.ini
+      - ./server/logs/groupby_best_selling_2024_1/checkpoints:/app/server/logs/groupby_best_selling_2024_1/checkpoints
+      - ./server/logs/groupby_best_selling_2024_1/client_logs.txt:/app/client_logs.txt
 
-  # groupby_best_selling_2024_2:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/groupby/Dockerfile
-  #   container_name: groupby_best_selling_2024_2
-  #   restart: on-failure
-  #   ports:
-  #     - "2005:9999"
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - GROUPBY_MODE=best_selling
-  #     - GROUPBY_NODE_ID=2
-  #     - AGGREGATOR_YEAR=2024
-  #     - TOTAL_GROUPBY_NODES=4
-  #     - INPUT_EXCHANGE=groupby_input.exchange
-  #     - OUTPUT_EXCHANGE=best_selling_to_final.exchange
-  #     - CHECKPOINT_DIR=/app/server/logs/groupby_best_selling_2024_2/checkpoints
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
-  #     - ./server/logs/groupby_best_selling_2024_2/checkpoints:/app/server/logs/groupby_best_selling_2024_2/checkpoints
-  #     - ./server/logs/groupby_best_selling_2024_2/client_logs.txt:/app/client_logs.txt
+  groupby_best_selling_2024_2:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_best_selling_2024_2
+    restart: on-failure
+    ports:
+      - "2005:9999"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=best_selling
+      - GROUPBY_NODE_ID=11
+      - AGGREGATOR_YEAR=2024
+      - TOTAL_GROUPBY_NODES=4
+      - INPUT_EXCHANGE=groupby_input.exchange
+      - OUTPUT_EXCHANGE=best_selling_to_final.exchange
+      - CHECKPOINT_DIR=/app/server/logs/groupby_best_selling_2024_2/checkpoints
+    volumes:
+      - ./server/config.ini:/app/config.ini
+      - ./server/logs/groupby_best_selling_2024_2/checkpoints:/app/server/logs/groupby_best_selling_2024_2/checkpoints
+      - ./server/logs/groupby_best_selling_2024_2/client_logs.txt:/app/client_logs.txt
 
-  # groupby_best_selling_2024_3:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/groupby/Dockerfile
-  #   container_name: groupby_best_selling_2024_3
-  #   restart: on-failure
-  #   ports:
-  #     - "2006:9999"
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - GROUPBY_MODE=best_selling
-  #     - GROUPBY_NODE_ID=3
-  #     - AGGREGATOR_YEAR=2024
-  #     - TOTAL_GROUPBY_NODES=4
-  #     - INPUT_EXCHANGE=groupby_input.exchange
-  #     - OUTPUT_EXCHANGE=best_selling_to_final.exchange
-  #     - CHECKPOINT_DIR=/app/server/logs/groupby_best_selling_2024_3/checkpoints
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
-  #     - ./server/logs/groupby_best_selling_2024_3/checkpoints:/app/server/logs/groupby_best_selling_2024_3/checkpoints
-  #     - ./server/logs/groupby_best_selling_2024_3/client_logs.txt:/app/client_logs.txt
+  groupby_best_selling_2024_3:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_best_selling_2024_3
+    restart: on-failure
+    ports:
+      - "2006:9999"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=best_selling
+      - GROUPBY_NODE_ID=10
+      - AGGREGATOR_YEAR=2024
+      - TOTAL_GROUPBY_NODES=4
+      - INPUT_EXCHANGE=groupby_input.exchange
+      - OUTPUT_EXCHANGE=best_selling_to_final.exchange
+      - CHECKPOINT_DIR=/app/server/logs/groupby_best_selling_2024_3/checkpoints
+    volumes:
+      - ./server/config.ini:/app/config.ini
+      - ./server/logs/groupby_best_selling_2024_3/checkpoints:/app/server/logs/groupby_best_selling_2024_3/checkpoints
+      - ./server/logs/groupby_best_selling_2024_3/client_logs.txt:/app/client_logs.txt
 
-  # groupby_best_selling_2025_0:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/groupby/Dockerfile
-  #   container_name: groupby_best_selling_2025_0
-  #   restart: on-failure
-  #   ports:
-  #     - "2007:9999"
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - GROUPBY_MODE=best_selling
-  #     - GROUPBY_NODE_ID=0
-  #     - AGGREGATOR_YEAR=2025
-  #     - TOTAL_GROUPBY_NODES=4
-  #     - INPUT_EXCHANGE=groupby_input.exchange
-  #     - OUTPUT_EXCHANGE=best_selling_to_final.exchange
-  #     - CHECKPOINT_DIR=/app/server/logs/groupby_best_selling_2025_0/checkpoints
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
-  #     - ./server/logs/groupby_best_selling_2025_0/checkpoints:/app/server/logs/groupby_best_selling_2025_0/checkpoints
-  #     - ./server/logs/groupby_best_selling_2025_0/client_logs.txt:/app/client_logs.txt
-
-
-  # groupby_best_selling_2025_1:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/groupby/Dockerfile
-  #   container_name: groupby_best_selling_2025_1
-  #   restart: on-failure
-  #   ports:
-  #     - "2008:9999"
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - GROUPBY_MODE=best_selling
-  #     - GROUPBY_NODE_ID=1
-  #     - AGGREGATOR_YEAR=2025
-  #     - TOTAL_GROUPBY_NODES=4
-  #     - INPUT_EXCHANGE=groupby_input.exchange
-  #     - OUTPUT_EXCHANGE=best_selling_to_final.exchange
-  #     - CHECKPOINT_DIR=/app/server/logs/groupby_best_selling_2025_1/checkpoints
-
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
-  #     - ./server/logs/groupby_best_selling_2025_1/checkpoints:/app/server/logs/groupby_best_selling_2025_1/checkpoints
-  #     - ./server/logs/groupby_best_selling_2025_1/client_logs.txt:/app/client_logs.txt
+  groupby_best_selling_2025_0:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_best_selling_2025_0
+    restart: on-failure
+    ports:
+      - "2007:9999"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=best_selling
+      - GROUPBY_NODE_ID=9
+      - AGGREGATOR_YEAR=2025
+      - TOTAL_GROUPBY_NODES=4
+      - INPUT_EXCHANGE=groupby_input.exchange
+      - OUTPUT_EXCHANGE=best_selling_to_final.exchange
+      - CHECKPOINT_DIR=/app/server/logs/groupby_best_selling_2025_0/checkpoints
+    volumes:
+      - ./server/config.ini:/app/config.ini
+      - ./server/logs/groupby_best_selling_2025_0/checkpoints:/app/server/logs/groupby_best_selling_2025_0/checkpoints
+      - ./server/logs/groupby_best_selling_2025_0/client_logs.txt:/app/client_logs.txt
 
 
-  # groupby_best_selling_2025_2:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/groupby/Dockerfile
-  #   container_name: groupby_best_selling_2025_2
-  #   restart: on-failure
-  #   ports:
-  #     - "2009:9999"
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - GROUPBY_MODE=best_selling
-  #     - GROUPBY_NODE_ID=2
-  #     - AGGREGATOR_YEAR=2025
-  #     - TOTAL_GROUPBY_NODES=4
-  #     - INPUT_EXCHANGE=groupby_input.exchange
-  #     - OUTPUT_EXCHANGE=best_selling_to_final.exchange
-  #     - CHECKPOINT_DIR=/app/server/logs/groupby_best_selling_2025_2/checkpoints
+  groupby_best_selling_2025_1:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_best_selling_2025_1
+    restart: on-failure
+    ports:
+      - "2008:9999"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=best_selling
+      - GROUPBY_NODE_ID=8
+      - AGGREGATOR_YEAR=2025
+      - TOTAL_GROUPBY_NODES=4
+      - INPUT_EXCHANGE=groupby_input.exchange
+      - OUTPUT_EXCHANGE=best_selling_to_final.exchange
+      - CHECKPOINT_DIR=/app/server/logs/groupby_best_selling_2025_1/checkpoints
 
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
-  #     - ./server/logs/groupby_best_selling_2025_2/checkpoints:/app/server/logs/groupby_best_selling_2025_2/checkpoints
-  #     - ./server/logs/groupby_best_selling_2025_2/client_logs.txt:/app/client_logs.txt
+    volumes:
+      - ./server/config.ini:/app/config.ini
+      - ./server/logs/groupby_best_selling_2025_1/checkpoints:/app/server/logs/groupby_best_selling_2025_1/checkpoints
+      - ./server/logs/groupby_best_selling_2025_1/client_logs.txt:/app/client_logs.txt
 
 
-  # groupby_best_selling_2025_3:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/groupby/Dockerfile
-  #   container_name: groupby_best_selling_2025_3
-  #   restart: on-failure
-  #   ports:
-  #     - "2010:9999"
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - GROUPBY_MODE=best_selling
-  #     - GROUPBY_NODE_ID=3
-  #     - AGGREGATOR_YEAR=2025
-  #     - TOTAL_GROUPBY_NODES=4
-  #     - INPUT_EXCHANGE=groupby_input.exchange
-  #     - OUTPUT_EXCHANGE=best_selling_to_final.exchange
-  #     - CHECKPOINT_DIR=/app/server/logs/groupby_best_selling_2025_3/checkpoints
+  groupby_best_selling_2025_2:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_best_selling_2025_2
+    restart: on-failure
+    ports:
+      - "2009:9999"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=best_selling
+      - GROUPBY_NODE_ID=7
+      - AGGREGATOR_YEAR=2025
+      - TOTAL_GROUPBY_NODES=4
+      - INPUT_EXCHANGE=groupby_input.exchange
+      - OUTPUT_EXCHANGE=best_selling_to_final.exchange
+      - CHECKPOINT_DIR=/app/server/logs/groupby_best_selling_2025_2/checkpoints
 
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
-  #     - ./server/logs/groupby_best_selling_2025_3/checkpoints:/app/server/logs/groupby_best_selling_2025_3/checkpoints
-  #     - ./server/logs/groupby_best_selling_2025_3/client_logs.txt:/app/client_logs.txt
+    volumes:
+      - ./server/config.ini:/app/config.ini
+      - ./server/logs/groupby_best_selling_2025_2/checkpoints:/app/server/logs/groupby_best_selling_2025_2/checkpoints
+      - ./server/logs/groupby_best_selling_2025_2/client_logs.txt:/app/client_logs.txt
 
-  # aggregator_best_selling_final:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/aggregator/Dockerfile
-  #   container_name: aggregator_best_selling_final
-  #   restart: on-failure
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - AGGREGATOR_MODE=final
-  #     - TOTAL_YEARS=2
-  #     - TOTAL_GROUPBY_NODES=4
-  #     - TOTAL_JOIN_NODES=2  
-  #     - INPUT_EXCHANGE=best_selling_to_final.exchange
-  #     - INPUT_QUEUE=best_selling_final
-  #     - OUTPUT_EXCHANGE=join.exchange
-  #     - AGGREGATOR_TYPE=best_selling_final
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
-  #     - ./server/logs/aggregator_best_selling_final/client_logs.txt:/app/client_logs.txt
 
+  groupby_best_selling_2025_3:
+    build:
+      context: .
+      dockerfile: ./server/groupby/Dockerfile
+    container_name: groupby_best_selling_2025_3
+    restart: on-failure
+    ports:
+      - "2010:9999"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - GROUPBY_MODE=best_selling
+      - GROUPBY_NODE_ID=6
+      - AGGREGATOR_YEAR=2025
+      - TOTAL_GROUPBY_NODES=4
+      - INPUT_EXCHANGE=groupby_input.exchange
+      - OUTPUT_EXCHANGE=best_selling_to_final.exchange
+      - CHECKPOINT_DIR=/app/server/logs/groupby_best_selling_2025_3/checkpoints
+
+    volumes:
+      - ./server/config.ini:/app/config.ini
+      - ./server/logs/groupby_best_selling_2025_3/checkpoints:/app/server/logs/groupby_best_selling_2025_3/checkpoints
+      - ./server/logs/groupby_best_selling_2025_3/client_logs.txt:/app/client_logs.txt
+
+  aggregator_best_selling_final:
+    build:
+      context: .
+      dockerfile: ./server/aggregator/Dockerfile
+    container_name: aggregator_best_selling_final
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - AGGREGATOR_MODE=final
+      - TOTAL_YEARS=2
+      - TOTAL_GROUPBY_NODES=4
+      - TOTAL_JOIN_NODES=2  
+      - INPUT_EXCHANGE=best_selling_to_final.exchange
+      - INPUT_QUEUE=best_selling_final
+      - OUTPUT_EXCHANGE=join.exchange
+      - AGGREGATOR_TYPE=best_selling_final
+      - AGGREGATOR_NODE_ID=5
+      - CHECKPOINT_DIR=/app/server/logs/aggregator_best_selling_final/checkpoints
+    volumes:
+      - ./server/config.ini:/app/config.ini
+      - ./server/logs/aggregator_best_selling_final/checkpoints:/app/server/logs/aggregator_best_selling_final/checkpoints
+      - ./server/logs/aggregator_best_selling_final/client_logs.txt:/app/client_logs.txt
   chaos_monkey:
     build:
       context: ./server/chaos_monkey

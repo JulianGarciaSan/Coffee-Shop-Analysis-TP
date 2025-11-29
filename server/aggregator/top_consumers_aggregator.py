@@ -39,7 +39,7 @@ class TopCustomersAggregatorNode:
         stores_per_node = total_stores // self.total_nodes
         extra_stores = total_stores % self.total_nodes
         
-        self.client_logger = LoggerMonitor('/app/client_logs.txt')
+        # self.client_logger = LoggerMonitor('/app/client_logs.txt')
         
         self.message_id = 0
         
@@ -67,6 +67,7 @@ class TopCustomersAggregatorNode:
         self.checkpoint_handler = CheckpointHandler(
             checkpoint_dir=self.checkpoint_dir,
             strategy=self,
+            checkpont_interval=1000
         )
         
         #self._setup_input_middleware(start_store, end_store)
@@ -118,10 +119,9 @@ class TopCustomersAggregatorNode:
         logger.info("Señal de shutdown recibida")
         if self.input_middleware:
             self.input_middleware.stop_consuming()
-            
-    def _generate_next_message_id(self, client_id: str) -> str:
-        self.message_id += 1
-        return f"{client_id}_{self.message_id}:TC"
+    
+    def generate_next_message_id(self, message_id):
+        return int(self.node_id) * 1000000 + int(message_id)
 
     
     def process_csv_line(self, csv_line: str, client_id: str):
@@ -189,28 +189,28 @@ class TopCustomersAggregatorNode:
         logger.info(f"EOF enviado a {self.total_join_nodes} join nodes para cliente {client_id}")
 
     def send_data_to_join_node(self, csv_data: str, client_id: str, node_id: int, original_message_id: str):
-        print("///////////// ENVIANDO DATA A JOIN NODE /////////////")
-        time.sleep(10)
-        outgoing_message_id = f"{original_message_id}:A{node_id}"
+        unique_data_id = self.generate_next_message_id(original_message_id)
+        
         result_dto = TransactionBatchDTO(csv_data, BatchType.RAW_CSV)
         routing_key = f"join_node_{node_id}.top_customers.data"
         
         self.output_middleware.send(
             result_dto.to_bytes_fast(),
             routing_key=routing_key,
-            headers={'client_id': client_id, 'message_id': outgoing_message_id}
+            headers={'client_id': client_id, 'message_id': unique_data_id}
         )
     def send_eof_to_join_node(self, client_id: str, node_id: int, original_message_id: str):
-        print("///////////// ENVIANDO EOF A JOIN NODE /////////////")
-        time.sleep(10)
-        outgoing_message_id = f"{original_message_id}:EOF"
+        # print("///////////// ENVIANDO EOF A JOIN NODE /////////////")
+        # time.sleep(10)
+        unique_data_id = self.generate_next_message_id(original_message_id)
+
         eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
         routing_key = f"join_node_{node_id}.top_customers.data"
         
         self.output_middleware.send(
             eof_dto.to_bytes_fast(),
             routing_key=routing_key,
-            headers={'client_id': client_id, 'message_id': outgoing_message_id}
+            headers={'client_id': client_id, 'message_id': unique_data_id}
         )
         
     def handle_eof(self, dto: TransactionBatchDTO, client_id: str, message_id: str) -> bool:
@@ -308,7 +308,7 @@ class TopCustomersAggregatorNode:
             if self.checkpoint_handler.analyze_first_message(client_id, message_id, ch, method, body):
                 return
             
-            self.checkpoint_handler.register_incoming_message(client_id, message_id)
+            # self.checkpoint_handler.register_incoming_message(client_id, message_id)
             should_stop, should_ack = self.process_message(body, client_id, message_id)
 
             if should_ack:
@@ -457,6 +457,7 @@ class TopCustomersAggregatorNode:
         except ValueError:
             logger.warning(f"   Estado desconocido '{state_str}', usando RECEIVING_DATA")
             self.client_states[client_id] = self.ClientState.RECEIVING_DATA
+            
             
 
 if __name__ == "__main__":

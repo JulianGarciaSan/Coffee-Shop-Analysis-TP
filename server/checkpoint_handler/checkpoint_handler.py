@@ -13,10 +13,10 @@ logger = logging.getLogger(__name__)
 
 
 class CheckpointHandler:
-    def __init__(self, checkpoint_dir: str = None, strategy = None):
+    def __init__(self, checkpoint_dir: str = None, strategy = None, checkpont_interval: int = 1000):
         self.message_trackers: Dict[str, MessageRangeTracker] = {}
         self.strategy = strategy
-        self.client_logger = LogWriter('/app/client_logs.txt')
+        # self.client_logger = LogWriter('/app/client_logs.txt')
         self.is_first_message = True
 
         if checkpoint_dir:
@@ -30,7 +30,7 @@ class CheckpointHandler:
         self.message_count = defaultdict(int)  
         
         self.fsync_interval = 100 
-        self.checkpoint_interval = 1000  
+        self.checkpoint_interval = checkpont_interval
         
         logger.info(f"Sistema de checkpoints inicializado en {self.checkpoint_dir}")
 
@@ -438,7 +438,6 @@ class CheckpointHandler:
                 return False
                 
             msg_id_int = self._extract_message_id_int(message_id)
-            
             is_processed = self.message_trackers[client_id].contains(msg_id_int)
             
             if is_processed:
@@ -516,8 +515,8 @@ class CheckpointHandler:
         
         return False
     
-    def register_incoming_message(self, client_id: str, message_id: str):
-        self.client_logger.write(f"{client_id};{message_id}")
+    # def register_incoming_message(self, client_id: str, message_id: str):
+    #     self.client_logger.write(f"{client_id};{message_id}")
     
     def close(self):
         """

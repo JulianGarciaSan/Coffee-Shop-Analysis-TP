@@ -46,7 +46,7 @@ class JoinNode:
         self.processor_handler = ProcessorsHandler(self)
         
         self.checkpoint_handler = JoinNodeCheckpointHandler(join_node=self)
-        self.checkpoint_handler = CheckpointHandler(checkpoint_dir=self.checkpoint_dir,strategy=self.checkpoint_handler)
+        self.checkpoint_handler = CheckpointHandler(checkpoint_dir=self.checkpoint_dir,strategy=self.checkpoint_handler, checkpont_interval=3000)
         self._setup_input_middleware()
         self._setup_output_middleware()
         
@@ -256,7 +256,7 @@ class JoinNode:
             if self.checkpoint_handler.analyze_first_message(client_id, message_id, ch, method, body):
                 return
 
-            self.checkpoint_handler.register_incoming_message(client_id, message_id)
+            # self.checkpoint_handler.register_incoming_message(client_id, message_id)
             
             should_stop, should_ack = self.process_message(body, base_routing_key, client_id, message_id)
 

@@ -39,8 +39,8 @@ class ChaosMonkey:
             
             if any(keyword in container.name.lower() for keyword in [
                 'groupby_top_customers',
-                # 'top_consumers_aggregator',
-                # 'groupby_semester',
+                'top_consumers_aggregator',
+                'groupby_semester_1',
                 # 'groupby_best_selling_2024_1',
                 # 'groupby_best_selling_2024_2'
             ]):

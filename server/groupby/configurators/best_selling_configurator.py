@@ -18,8 +18,8 @@ class BestSellingConfigurator(GroupByConfigurator):
         
         self.node_id = int(os.getenv('GROUPBY_NODE_ID', '0'))
         self.total_groupby_nodes = int(os.getenv('TOTAL_GROUPBY_NODES', '4'))
-        all_node_ids_str = os.getenv('ALL_NODE_IDS', '')
-        all_node_ids = [nid.strip() for nid in all_node_ids_str.split(',')] if all_node_ids_str else [f'groupby_{self.year}_node_{self.node_id}']
+        # all_node_ids_str = os.getenv('ALL_NODE_IDS', '')
+        # all_node_ids = [nid.strip() for nid in all_node_ids_str.split(',')] if all_node_ids_str else [f'groupby_{self.year}_node_{self.node_id}']
         
         self.node_name = f'groupby_{self.year}_node_{self.node_id}'
         self.input_queue_name = f"best_selling_{self.year}_node_{self.node_id}"
@@ -64,9 +64,9 @@ class BestSellingConfigurator(GroupByConfigurator):
         logger.info(f"EOF recibido para cliente '{client_id}'")
         
         try:
-            self._calculate_and_send_top1(middlewares["output"], strategy, client_id)
+            self._calculate_and_send_top1(middlewares["output"], strategy, client_id, message_id)
             
-            self._send_eof_to_aggregator(middlewares["output"], client_id)
+            self._send_eof_to_aggregator(middlewares["output"], client_id, message_id)
             
             month_item_aggregations = getattr(strategy, 'month_item_aggregations_by_client', {})
             if client_id in month_item_aggregations:
@@ -79,21 +79,20 @@ class BestSellingConfigurator(GroupByConfigurator):
             logger.error(f"Error manejando EOF para client_id={client_id}: {e}")
             return False
     
-    def _generate_next_message_id(self, client_id: str) -> str:
-        self.message_id += 1
-        return f"{client_id}_{self.message_id}:BST:{self.node_name}"
+    def generate_next_message_id(self, message_id):
+        return int(self.node_id) * 1000000 + int(message_id)
     
-    def _send_eof_to_aggregator(self, output_middleware, client_id):
+    def _send_eof_to_aggregator(self, output_middleware, client_id, message_id):
         """Envía EOF al Aggregator Final"""        
         eof_dto = TransactionItemBatchDTO(f"EOF:{self.node_name}", BatchType.EOF)
-        message_id = self._generate_next_message_id(client_id)
+        message_id = self.generate_next_message_id(message_id)
         headers = self.create_headers(client_id, message_id)
         output_middleware.send(
             eof_dto.to_bytes_fast(),
             routing_key='top_selling.data',
             headers=headers
         )
-        message_id = self._generate_next_message_id(client_id)
+        message_id = self.generate_next_message_id(message_id) + 1
         headers = self.create_headers(client_id, message_id)
         output_middleware.send(
             eof_dto.to_bytes_fast(),
@@ -103,7 +102,7 @@ class BestSellingConfigurator(GroupByConfigurator):
         
         logger.info(f"EOF enviado al Aggregator Final para cliente {client_id}")
     
-    def _calculate_and_send_top1(self, output_middleware, strategy, client_id):
+    def _calculate_and_send_top1(self, output_middleware, strategy, client_id, message_id):
         """
         Calcula el top 1 LOCAL (de los items que procesó este nodo)
         y envía al Aggregator Final
@@ -112,51 +111,49 @@ class BestSellingConfigurator(GroupByConfigurator):
         client_data = month_item_aggregations_by_client.get(client_id, {})
         
         if not client_data:
-            logger.warning(f"No hay datos para enviar para client_id={client_id}")
             return
         
-        logger.info(f"Calculando top 1 local para {len(client_data)} meses, cliente {client_id}")
+        base_message_id = self.generate_next_message_id(message_id)
         
-        for year_month in sorted(client_data.keys()):
+        for idx, year_month in enumerate(sorted(client_data.keys())):
             items = client_data[year_month]
-            
             valid_items = [item for item in items.values() if item is not None]
             
             if not valid_items:
                 continue
             
+            # Top selling
             top_selling_item = max(valid_items, 
                                 key=lambda x: (x.sellings_qty, -int(x.item_id) if x.item_id.isdigit() else 0))
             
             selling_csv = f"created_at,item_id,sellings_qty\n"
             selling_csv += f"{year_month},{top_selling_item.item_id},{top_selling_item.sellings_qty}"
-            message_id = self._generate_next_message_id(client_id)
+            
+            # ID único: base + offset del mes
+            unique_id = base_message_id + (idx * 2)  # *2 porque envías selling + profit
             selling_dto = TransactionItemBatchDTO(selling_csv, BatchType.RAW_CSV)
             output_middleware.send(
                 selling_dto.to_bytes_fast(),
                 routing_key='top_selling.data',
-                headers=self.create_headers(client_id, message_id)
+                headers=self.create_headers(client_id, unique_id)
             )
             
-            logger.info(f"Top selling local {year_month}: item {top_selling_item.item_id} ({top_selling_item.sellings_qty} ventas)")
-            
+            # Top profit
             top_profit_item = max(valid_items,
                                 key=lambda x: (x.profit_sum, -int(x.item_id) if x.item_id.isdigit() else 0))
             
             profit_csv = f"created_at,item_id,profit_sum\n"
             profit_csv += f"{year_month},{top_profit_item.item_id},{top_profit_item.profit_sum:.2f}"
             
+            # ID único: base + offset + 1
+            unique_id = base_message_id + (idx * 2) + 1
             profit_dto = TransactionItemBatchDTO(profit_csv, BatchType.RAW_CSV)
-            message_id = self._generate_next_message_id(client_id)
-            headers = self.create_headers(client_id, message_id)
             output_middleware.send(
                 profit_dto.to_bytes_fast(),
                 routing_key='top_profit.data',
-                headers=headers
+                headers=self.create_headers(client_id, unique_id)
             )
-            
-            logger.info(f"Top profit local {year_month}: item {top_profit_item.item_id} (${top_profit_item.profit_sum:.2f})")
-        
+                    
         logger.info(f"Top 1 local enviado para cliente {client_id}")
         
         if client_id in month_item_aggregations_by_client:

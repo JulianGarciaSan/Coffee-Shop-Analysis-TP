@@ -45,6 +45,7 @@ class GroupByNode:
         self.checkpoint_handler = CheckpointHandler(
             checkpoint_dir=self.checkpoint_dir,
             strategy=self.strategy,
+            checkpont_interval=1000
         )
         self.input_middleware = self.configurator.create_input_middleware()
         if hasattr(self.input_middleware, 'shutdown'):
@@ -118,7 +119,7 @@ class GroupByNode:
             if self.checkpoint_handler.analyze_first_message(client_id, message_id, ch, method, body):
                 return
 
-            self.checkpoint_handler.register_incoming_message(client_id, message_id)
+            # self.checkpoint_handler.register_incoming_message(client_id, message_id)
 
             should_stop, should_ack = self.process_message(body, client_id, message_id)
         

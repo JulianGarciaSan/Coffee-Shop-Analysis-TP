@@ -41,9 +41,7 @@ class TPVQueryHandler:
                     csv_lines.append(f"{record['year_half_created_at']},{store_name},{record['tpv']:.1f}")
                 
                 results_csv = '\n'.join(csv_lines)
-                
-                logger.info(f"Tamaño del batch {i//BATCH_SIZE + 1}: {len(results_csv)} bytes")
-                
+                                
                 result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
                 self.output_middleware.send(
                     result_dto.to_bytes_fast(), 
@@ -87,11 +85,10 @@ class TPVQueryHandler:
         if dto.batch_type == BatchType.RAW_CSV:
             csv_lines_with_prefix = [f"tpv:{line}" for line in dto.data.split('\n') if line.strip()]
             
+            self.join_node.tpv_processors[client_id].process_batch(dto.data, self._parse_tpv_line)
             self.join_node.checkpoint_handler.save_message_checkpoint(
                 client_id, message_id, csv_lines_with_prefix
             )
-            
-            self.join_node.tpv_processors[client_id].process_batch(dto.data, self._parse_tpv_line)
             return (False, True)
         
         if dto.batch_type == BatchType.EOF:

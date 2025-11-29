@@ -1,6 +1,7 @@
 from collections import defaultdict
 import logging
 import os
+import time
 from typing import Dict, Any, Tuple
 from rabbitmq.middleware import MessageMiddlewareExchangeManual,MessageMiddlewareExchange
 from dtos.dto import TransactionBatchDTO, BatchType
@@ -28,9 +29,6 @@ class TPVConfigurator(GroupByConfigurator):
         
         total_join_nodes = int(os.getenv('TOTAL_JOIN_NODES', '3'))
         self.client_router = ClientRouter(total_join_nodes=total_join_nodes)
-        
-        self.message_id = 0
-
     
     def create_input_middleware(self):
         middleware = MessageMiddlewareExchangeManual(
@@ -72,24 +70,27 @@ class TPVConfigurator(GroupByConfigurator):
         
         return False  
 
+    def generate_next_message_id(self, message_id):
+        return int(self.semester) * 1000000 + int(message_id)
     
     def _send_results_for_client(self, client_id: str, middlewares: dict, strategy, original_message_id: str):
         logger.info(f"Generando resultados TPV para cliente '{client_id}'")
-        
         results_csv = strategy.generate_results_csv_for_client(client_id)
         
         routing_key = self.client_router.get_routing_key(client_id, 'tpv.data')
-        logger.info(f"Cliente '{client_id}' → Routing key: {routing_key}")
+        logger.info(f"Cliente '{client_id}'  Routing key: {routing_key}")
         
-        outgoing_message_id = f"{original_message_id}:TPV{self.semester}"
+        outgoing_message_id = self.generate_next_message_id(original_message_id)
+
         result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
         middlewares["output"].send(
             result_dto.to_bytes_fast(),
             routing_key=routing_key,
             headers={'client_id': client_id, 'message_id': outgoing_message_id}
         )
-
-        outgoing_message_id = f"{original_message_id}:EOF"
+        print("///////////// ENVIANDO EOF A JOIN NODE /////////////")
+        time.sleep(10)
+        outgoing_message_id = self.generate_next_message_id(original_message_id) + 1
         eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
         middlewares["output"].send(
             eof_dto.to_bytes_fast(),
