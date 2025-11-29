@@ -46,24 +46,46 @@ class YearNodeConfigurator(NodeConfigurator):
         
         self.output_middlewares: Optional[Dict[str, Any]] = None
         if self.file_mode == 'transaction_items':
-            total_groupby_nodes = int(os.getenv('TOTAL_GROUPBY_NODES', '4'))
-            
-            groupby_routes = []
-            for year in ['2024', '2025']:
-                for node_id in range(total_groupby_nodes):
-                    groupby_routes.append(f"groupby_{year}_node_{node_id}")
-            
-            self.groupby_exchange = MessageMiddlewareExchangeManual(
-                host=rabbitmq_host,
-                exchange_name='groupby_input.exchange',
-                route_keys=groupby_routes
-            )       
+            self.setup_transactions_items_output(rabbitmq_host)
         self._start_coordination_thread()
         
         logger.info(f"YearNodeConfigurator inicializado con coordinación multi-cliente")
         logger.info(f"  Node ID: {self.node_id}")
         logger.info(f"  Total nodos: {self.total_nodes}")
         
+    def setup_transactions_items_output(self,rabbitmq_host:str):
+        # Obtener los IDs reales desde variables de entorno
+        self.groupby_node_ids_2024 = self._parse_groupby_ids('GROUPBY_2024_NODE_IDS', [13, 12, 11, 10])  # Default fallback
+        self.groupby_node_ids_2025 = self._parse_groupby_ids('GROUPBY_2025_NODE_IDS', [9, 8, 7, 6])   # Default fallback
+        
+        # Crear routing keys con los IDs reales
+        groupby_routes = []
+        for node_id in self.groupby_node_ids_2024:
+            groupby_routes.append(f"groupby_2024_node_{node_id}")
+        for node_id in self.groupby_node_ids_2025:
+            groupby_routes.append(f"groupby_2025_node_{node_id}")
+        
+        self.groupby_exchange = MessageMiddlewareExchangeManual(
+            host=rabbitmq_host,
+            exchange_name='groupby_input.exchange',
+            route_keys=groupby_routes
+        )
+        
+        logger.info(f"GroupBy 2024 nodes: {self.groupby_node_ids_2024}")
+        logger.info(f"GroupBy 2025 nodes: {self.groupby_node_ids_2025}")
+    
+    def _parse_groupby_ids(self, env_var: str, default_ids: list) -> list:
+        """Parse node IDs from environment variable or use defaults"""
+        ids_str = os.getenv(env_var, '')
+        if ids_str:
+            try:
+                return [int(x.strip()) for x in ids_str.split(',')]
+            except ValueError:
+                logger.warning(f"Error parsing {env_var}, using defaults: {default_ids}")
+                return default_ids
+        else:
+            logger.info(f"{env_var} not set, using defaults: {default_ids}")
+            return default_ids
     
     def _start_coordination_thread(self):
         self.coordination_running = True
@@ -274,75 +296,96 @@ class YearNodeConfigurator(NodeConfigurator):
         logger.warning("handle_eof llamado pero ya no se usa (coordinador maneja EOF)")
         return False
     
-    def _send_transaction_items_by_year(self, data: str, client_id: str, message_id:str):
-        lines = data.strip().split('\n')
-        header = lines[0] if lines else "created_at,transaction_id,item_id,quantity,subtotal"
-        
-        dto_helper = TransactionItemBatchDTO("", BatchType.RAW_CSV)
-        total_groupby_nodes = int(os.getenv('TOTAL_GROUPBY_NODES', '4'))
-        
-        batches = {}
-        
-        node_distribution = defaultdict(int)
-        
-        for line in lines[1:]:
-            if not line.strip() or line.startswith('created_at'):
-                continue
-        
-            try:
-                created_at = dto_helper.get_column_value(line, 'created_at')
-                item_id = dto_helper.get_column_value(line, 'item_id')
-                
-                if not created_at or not item_id:
+    def _send_transaction_items_by_year(self, data: str, client_id: str, message_id: str):
+            lines = data.strip().split('\n')
+            header = lines[0] if lines else "created_at,transaction_id,item_id,quantity,subtotal"
+            
+            dto_helper = TransactionItemBatchDTO("", BatchType.RAW_CSV)
+            
+            batches = {}
+            node_distribution = defaultdict(int)
+            
+            for line in lines[1:]:
+                if not line.strip() or line.startswith('created_at'):
                     continue
-                
-                year = created_at[:4]
+            
                 try:
-                    node_index = int(item_id) % total_groupby_nodes
-                except (ValueError, TypeError):
-                    node_index = hash(str(item_id)) % total_groupby_nodes
-                
-                node_distribution[node_index] += 1
-                
-                key = (year, node_index)
-                if key not in batches:
-                    batches[key] = [header]
-                
-                batches[key].append(line)
-                
-            except Exception as e:
-                logger.warning(f"Error procesando línea: {e}")
-        
-        for (year, node_index), batch_lines in batches.items():
-            if len(batch_lines) > 1:
-                csv_data = '\n'.join(batch_lines)
-                dto = TransactionItemBatchDTO(csv_data, BatchType.RAW_CSV)
-                routing_key = f"groupby_{year}_node_{node_index}"
-                headers = self.create_headers(client_id,message_id)
-                self.groupby_exchange.send(
-                    dto.to_bytes_fast(),
-                    routing_key=routing_key,
-                    headers=headers
-                )
-                
-                # logger.info(f"Batch enviado a {routing_key}: {len(batch_lines)-1} líneas, cliente {client_id}")
+                    created_at = dto_helper.get_column_value(line, 'created_at')
+                    item_id = dto_helper.get_column_value(line, 'item_id')
+                    
+                    if not created_at or not item_id:
+                        continue
+                    
+                    year = created_at[:4]
+                    
+                    # Usar los IDs reales de los nodos según el año
+                    if year == '2024':
+                        available_nodes = self.groupby_node_ids_2024
+                    elif year == '2025':
+                        available_nodes = self.groupby_node_ids_2025
+                    else:
+                        logger.warning(f"Año desconocido: {year}, skipping")
+                        continue
+                    
+                    # Sharding basado en item_id
+                    try:
+                        item_hash = int(item_id) % len(available_nodes)
+                    except (ValueError, TypeError):
+                        item_hash = hash(str(item_id)) % len(available_nodes)
+                    
+                    # Obtener el ID real del nodo
+                    actual_node_id = available_nodes[item_hash]
+                    node_distribution[actual_node_id] += 1
+                    
+                    key = (year, actual_node_id)
+                    if key not in batches:
+                        batches[key] = [header]
+                    
+                    batches[key].append(line)
+                    
+                except Exception as e:
+                    logger.warning(f"Error procesando línea: {e}")
+            
+            # Enviar batches usando los IDs reales
+            for (year, actual_node_id), batch_lines in batches.items():
+                if len(batch_lines) > 1:
+                    csv_data = '\n'.join(batch_lines)
+                    dto = TransactionItemBatchDTO(csv_data, BatchType.RAW_CSV)
+                    routing_key = f"groupby_{year}_node_{actual_node_id}"
+                    headers = self.create_headers(client_id, message_id)
+                    
+                    self.groupby_exchange.send(
+                        dto.to_bytes_fast(),
+                        routing_key=routing_key,
+                        headers=headers
+                    )
+                    
+                    logger.info(f"Batch enviado a {routing_key}: {len(batch_lines)-1} líneas, cliente {client_id}")
 
     def send_eof_to_groupby(self, headers: Dict[str, Any]):
-        total_groupby_nodes = int(os.getenv('TOTAL_GROUPBY_NODES', '4'))
+        """Enviar EOF a todos los nodos GroupBy con sus IDs reales"""
+        # EOF para nodos 2024
+        for node_id in self.groupby_node_ids_2024:
+            routing_key = f"groupby_2024_node_{node_id}"
+            eof_dto = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
+            self.groupby_exchange.send(
+                eof_dto.to_bytes_fast(),
+                routing_key=routing_key,
+                headers=headers
+            )
         
-        for year in ['2024', '2025']:
-            for node_index in range(total_groupby_nodes):
-                routing_key = f"groupby_{year}_node_{node_index}"
-                
-                eof_dto = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
-                self.groupby_exchange.send(
-                    eof_dto.to_bytes_fast(),
-                    routing_key=routing_key,
-                    headers=headers
-                )
+        # EOF para nodos 2025
+        for node_id in self.groupby_node_ids_2025:
+            routing_key = f"groupby_2025_node_{node_id}"
+            eof_dto = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
+            self.groupby_exchange.send(
+                eof_dto.to_bytes_fast(),
+                routing_key=routing_key,
+                headers=headers
+            )
 
-        logger.info(f"EOF enviado a TODOS los nodos GroupBy para cliente {headers.get('client_id')}:{headers.get('message_id')}")
-            
+        logger.info(f"EOF enviado a nodos 2024: {self.groupby_node_ids_2024} y 2025: {self.groupby_node_ids_2025}")
+    
     def close(self):
         """Cleanup del configurator"""
         logger.info("Cerrando YearNodeConfigurator...")

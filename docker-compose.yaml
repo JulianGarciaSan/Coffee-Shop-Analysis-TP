@@ -245,7 +245,8 @@ services:
       - FILE_MODE=transaction_items
       - NODE_ID=year_node_4
       - ALL_NODE_IDS=year_node_4,year_node_5,year_node_6
-      - TOTAL_GROUPBY_NODES=4
+      - GROUPBY_2024_NODE_IDS=13,12,11,10
+      - GROUPBY_2025_NODE_IDS=9,8,7,6
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -271,7 +272,8 @@ services:
       - FILE_MODE=transaction_items
       - NODE_ID=year_node_5
       - ALL_NODE_IDS=year_node_4,year_node_5,year_node_6
-      - TOTAL_GROUPBY_NODES=4
+      - GROUPBY_2024_NODE_IDS=13,12,11,10
+      - GROUPBY_2025_NODE_IDS=9,8,7,6
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -297,7 +299,8 @@ services:
       - FILE_MODE=transaction_items
       - NODE_ID=year_node_6
       - ALL_NODE_IDS=year_node_4,year_node_5,year_node_6
-      - TOTAL_GROUPBY_NODES=4
+      - GROUPBY_2024_NODE_IDS=13,12,11,10
+      - GROUPBY_2025_NODE_IDS=9,8,7,6
     volumes:
       - ./server/config.ini:/app/config.ini
 
@@ -910,6 +913,7 @@ services:
       - ./server/config.ini:/app/config.ini
       - ./server/logs/aggregator_best_selling_final/checkpoints:/app/server/logs/aggregator_best_selling_final/checkpoints
       - ./server/logs/aggregator_best_selling_final/client_logs.txt:/app/client_logs.txt
+      
   chaos_monkey:
     build:
       context: ./server/chaos_monkey
@@ -920,7 +924,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - PYTHONUNBUFFERED=1
-      - KILL_INTERVAL=10  # Segundos entre caídas
+      - KILL_INTERVAL=5  # Segundos entre caídas
     depends_on:
       gateway:
         condition: service_started
