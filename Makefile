@@ -181,6 +181,9 @@ stop:
 	echo -n > server/logs/filter_amount_3/client_logs.txt
 	echo -n > server/logs/filter_amount_3/logs.txt
 	echo -n > server/logs/filter_amount_3/eof_logs.txt
+
+	sudo rm -rf dedup_checkpoints/*
+
 .PHONY: stop
 
 # Limpieza profunda (usar solo cuando realmente quieras limpiar todo)
