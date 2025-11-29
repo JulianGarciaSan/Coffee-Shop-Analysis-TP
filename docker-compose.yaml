@@ -32,7 +32,7 @@ services:
       - MAX_FAILURES=3
       - PING_TIMEOUT=2.0
       - STARTUP_DELAY=15
-      - MONITORED_NODES=filter_year_1:9999,filter_year_2:9999,filter_year_3:9999,filter_hour_1:9999,filter_hour_2:9999,filter_hour_3:9999,filter_amount_1:9999,filter_amount_2:9999,filter_amount_3:9999,groupby_top_customers:9999, groupby_semester_1:9999,groupby_semester_2:9999,groupby_best_selling_2025_3:9999,groupby_best_selling_2025_2:9999,groupby_best_selling_2025_1:9999,groupby_best_selling_2025_0:9999,groupby_best_selling_2024_3:9999,groupby_best_selling_2024_2:9999,groupby_best_selling_2024_1:9999,groupby_best_selling_2024_0:9999, top_consumers_aggregator_1:9999,top_consumers_aggregator_2:9999,dedup_q1:9999,join_node_0:9999,join_node_1:9999
+      - MONITORED_NODES=filter_year_1:9999,filter_year_2:9999,filter_year_3:9999,filter_hour_1:9999,filter_hour_2:9999,filter_hour_3:9999,filter_amount_1:9999,filter_amount_2:9999,filter_amount_3:9999,groupby_top_customers:9999, groupby_semester_1:9999,groupby_semester_2:9999,groupby_best_selling_2025_3:9999,groupby_best_selling_2025_2:9999,groupby_best_selling_2025_1:9999,groupby_best_selling_2025_0:9999,groupby_best_selling_2024_3:9999,groupby_best_selling_2024_2:9999,groupby_best_selling_2024_1:9999,groupby_best_selling_2024_0:9999, top_consumers_aggregator_1:9999,top_consumers_aggregator_2:9999,aggregator_best_selling_final:9999,dedup_q1:9999,join_node_0:9999,join_node_1:9999
     depends_on:
       gateway:
         condition: service_started
@@ -931,6 +931,8 @@ services:
       dockerfile: ./server/aggregator/Dockerfile
     container_name: aggregator_best_selling_final
     restart: on-failure
+    ports:
+      - "2020:9999"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -962,7 +964,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - PYTHONUNBUFFERED=1
-      - KILL_INTERVAL=5  # Segundos entre caídas
+      - KILL_INTERVAL=10  # Segundos entre caídas
     depends_on:
       gateway:
         condition: service_started
@@ -1009,6 +1011,8 @@ services:
       top_consumers_aggregator_1:
         condition: service_started
       top_consumers_aggregator_2:
+        condition: service_started
+      aggregator_best_selling_final:
         condition: service_started
 
 

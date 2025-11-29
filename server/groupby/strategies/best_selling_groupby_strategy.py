@@ -20,7 +20,7 @@ class ItemAggregation:
         self.profit_sum += subtotal
 
 class BestSellingGroupByStrategy(GroupByStrategy):
-    def __init__(self, input_queue_name: str, year: str = '2024'):
+    def __init__(self, input_queue_name: str, year: str = '2024',outgoing_counter_by_client: Dict[str, int] = None):
         super().__init__()  
         self.input_queue_name = input_queue_name
         self.year = year
@@ -28,7 +28,7 @@ class BestSellingGroupByStrategy(GroupByStrategy):
             lambda: defaultdict(lambda: defaultdict(lambda: None))
         )
         self.dto_helper = TransactionItemBatchDTO("", BatchType.RAW_CSV)
-        
+        self.outgoing_counter_by_client = outgoing_counter_by_client or {}
         # self.lines_processed_by_client = defaultdict(int)
         # self.lines_per_item_by_client = defaultdict(lambda: defaultdict(int))
 
@@ -142,45 +142,65 @@ class BestSellingGroupByStrategy(GroupByStrategy):
     
     def _serialize_client_data(self, client_id: str) -> Dict:
         """
-        Serializa el estado de BestSelling a un diccionario.
+        Serializa el estado de BestSelling incluyendo outgoing_counter.
         
         Estructura:
         {
-            "2024-01": {
-                "item_123": {
-                    "sellings_qty": 150,
-                    "profit_sum": 4500.50
+            "aggregations": {
+                "2024-01": {
+                    "item_123": {
+                        "sellings_qty": 150,
+                        "profit_sum": 4500.50
+                    }
                 }
-            }
+            },
+            "outgoing_counter": 42
         }
         """
         client_aggregations = self.month_item_aggregations_by_client.get(client_id, {})
-        serialized = {}
+        serialized = {"aggregations": {}}
         
         for year_month, items_dict in client_aggregations.items():
-            serialized[year_month] = {}
+            serialized["aggregations"][year_month] = {}
             
             for item_id, aggregation in items_dict.items():
                 if aggregation is not None: 
-                    serialized[year_month][item_id] = {
+                    serialized["aggregations"][year_month][item_id] = {
                         "sellings_qty": aggregation.sellings_qty,
                         "profit_sum": aggregation.profit_sum
                     }
         
+        # AGREGAR: Incluir el contador desde la referencia compartida
+        serialized["outgoing_counter"] = self.outgoing_counter_by_client.get(client_id, 0)
+        
+        logger.info(f"Serializando cliente {client_id}: counter={serialized['outgoing_counter']}")
         return serialized
 
     def _deserialize_client_data(self, client_id: str, data: Dict):
         """
         Reconstruye el estado de BestSelling desde un diccionario.
-        
-        data: Diccionario con estructura {year_month: {item_id: {sellings_qty, profit_sum}}}
         """
         self.month_item_aggregations_by_client[client_id] = defaultdict(lambda: defaultdict(lambda: None))
         
-        for year_month, items_dict in data.items():
+        # Deserializar aggregations (compatibilidad con formato anterior)
+        aggregations_data = data.get("aggregations", data)  # Fallback al formato anterior
+        
+        for year_month, items_dict in aggregations_data.items():
+            if year_month == "outgoing_counter":  # Skip counter field
+                continue
+                
             for item_id, aggregation_data in items_dict.items():
                 self.month_item_aggregations_by_client[client_id][year_month][item_id] = ItemAggregation(item_id)
                 
                 aggregation = self.month_item_aggregations_by_client[client_id][year_month][item_id]
                 aggregation.sellings_qty = aggregation_data.get('sellings_qty', 0)
                 aggregation.profit_sum = aggregation_data.get('profit_sum', 0.0)
+        
+        # AGREGAR: Restaurar contador en la referencia compartida
+        if "outgoing_counter" in data:
+            self.outgoing_counter_by_client[client_id] = data["outgoing_counter"]
+            logger.info(f"Contador restaurado para {client_id}: {data['outgoing_counter']}")
+        else:
+            # Compatibilidad con checkpoints antiguos
+            self.outgoing_counter_by_client[client_id] = 0
+            logger.info(f"Contador inicializado para {client_id}: 0 (checkpoint sin counter)")

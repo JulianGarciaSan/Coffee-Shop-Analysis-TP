@@ -1,14 +1,15 @@
-# best_selling_aggregator.py
 import logging
 import os
 import sys
 from typing import Any, Dict, Optional, Tuple
 from collections import defaultdict
-from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
+from rabbitmq.middleware import MessageMiddlewareExchangeManual, MessageMiddlewareQueueManual
 from dtos.dto import TransactionItemBatchDTO, BatchType
 from common.graceful_shutdown import GracefulShutdown
 from client_routing.client_routing import ClientRouter
-from logger_monitor.logger_monitor import LoggerMonitor
+from checkpoint_handler.checkpoint_handler import CheckpointHandler
+from healthchecker.healthchecker import HealthChecker
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ class BestSellingAggregatorNode:
         self.total_groupby_nodes_per_year = int(os.getenv('TOTAL_GROUPBY_NODES', '4'))
         self.node_id = int(os.getenv('AGGREGATOR_NODE_ID', '0'))
         self.expected_sources = self.total_years * self.total_groupby_nodes_per_year
-        
+        self.checkpoint_dir = os.getenv('CHECKPOINT_DIR', f'/app/server/logs/best_selling_aggregator_final/checkpoints')
         total_join_nodes = int(os.getenv('TOTAL_JOIN_NODES', '1'))
         self.client_router = ClientRouter(total_join_nodes, node_prefix="join_node")
         
@@ -41,7 +42,16 @@ class BestSellingAggregatorNode:
         self.month_profit_candidates_by_client: Dict[str, Dict[str, list]] = defaultdict(
             lambda: defaultdict(list)
         )
+        self.outgoing_counter_by_client: Dict[str, int] = defaultdict(int)
+        health_port = int(os.getenv('HEALTH_PORT', '9999'))
+        self.health_server = HealthChecker(port=health_port)
+        self.health_server.start()
         
+        self.checkpoint_handler = CheckpointHandler(
+            checkpoint_dir=self.checkpoint_dir,
+            strategy=self,
+            checkpont_interval=4
+        )
         self.eof_selling_count_by_client: Dict[str, int] = defaultdict(int)
         self.eof_profit_count_by_client: Dict[str, int] = defaultdict(int)
         
@@ -50,10 +60,7 @@ class BestSellingAggregatorNode:
         logger.info(f"  Nodos GroupBy por año: {self.total_groupby_nodes_per_year}")
         logger.info(f"  Esperando datos de {self.expected_sources} fuentes")
         logger.info(f"  Total nodos join: {total_join_nodes}")
-        
-        self.client_logger = LoggerMonitor('/app/client_logs.txt')
-        self.is_first_message = True
-        self.message_id = 0
+
         
         self._setup_middleware()
 
@@ -62,7 +69,7 @@ class BestSellingAggregatorNode:
         input_exchange = os.getenv('INPUT_EXCHANGE', 'best_selling_to_final.exchange')
         input_queue = os.getenv('INPUT_QUEUE', 'best_selling_final')
         
-        self.input_middleware = MessageMiddlewareQueue(
+        self.input_middleware = MessageMiddlewareQueueManual(
             host=self.rabbitmq_host,
             queue_name=input_queue,
             exchange_name=input_exchange,
@@ -80,7 +87,7 @@ class BestSellingAggregatorNode:
         route_keys.extend(self.client_router.get_all_routing_keys('q2_best_selling.data'))
         route_keys.extend(self.client_router.get_all_routing_keys('q2_most_profit.data'))
         
-        self.output_middleware = MessageMiddlewareExchange(
+        self.output_middleware = MessageMiddlewareExchangeManual(
             host=self.rabbitmq_host,
             exchange_name=output_exchange,
             route_keys=route_keys
@@ -189,7 +196,7 @@ class BestSellingAggregatorNode:
         
         return '\n'.join(csv_lines)
     
-    def handle_eof(self, routing_key: str, client_id: str, message_id : str) -> bool:
+    def handle_eof(self, routing_key: str, client_id: str, message_id: str) -> bool:
         try:
             logger.info(f"EOF recibido para cliente {client_id}, routing_key={routing_key}")
             
@@ -204,15 +211,25 @@ class BestSellingAggregatorNode:
             selling_count = self.eof_selling_count_by_client[client_id]
             profit_count = self.eof_profit_count_by_client[client_id]
             
+            # SOLO cuando recibimos TODOS los EOFs, enviamos resultados
             if selling_count == self.expected_sources and profit_count == self.expected_sources:
-                logger.info(f"Todos los EOFs recibidos para cliente {client_id}, calculando top 1 global")
+                logger.info(f"✓ TODOS los EOFs recibidos para cliente {client_id} ({selling_count} selling + {profit_count} profit)")
+                logger.info(f"Calculando top 1 global y enviando resultados")
+                
                 self._send_final_results(client_id, message_id)
+                
+                # AHORA SÍ guardamos checkpoint con eof_processed=True
+                self.checkpoint_handler.save_eof_checkpoint(client_id, message_id)
                 
                 # Cleanup
                 del self.eof_selling_count_by_client[client_id]
                 del self.eof_profit_count_by_client[client_id]
                 del self.month_selling_candidates_by_client[client_id]
                 del self.month_profit_candidates_by_client[client_id]
+                
+                logger.info(f"✓ Cliente {client_id} completado y limpiado")
+            else:
+                logger.info(f"Esperando más EOFs: {selling_count}/{self.expected_sources} selling, {profit_count}/{self.expected_sources} profit")
             
             return False
             
@@ -228,81 +245,115 @@ class BestSellingAggregatorNode:
                     }
         return {}
 
-    def generate_next_message_id(self, message_id):
-        return int(self.node_id) * 1000000 + int(message_id)
+    def generate_next_message_id(self, client_id: str) -> int:
+        """
+        Genera ID único por mensaje para este cliente.
+        Determinístico porque el contador se reconstruye desde el checkpoint.
+        """
+        self.outgoing_counter_by_client[client_id] += 1
+        return int(self.node_id) * 1000000 + self.outgoing_counter_by_client[client_id]
     
-    def _send_final_results(self, client_id: str,original_message_id : str):
+    def _send_final_results(self, client_id: str, original_message_id: str):
         """Calcula top 1 global y envía al JOIN"""
         best_selling, most_profit = self.calculate_global_top1(client_id)        
         selling_routing_key = self.client_router.get_routing_key(client_id, 'q2_best_selling.data')
         profit_routing_key = self.client_router.get_routing_key(client_id, 'q2_most_profit.data')
         
-        selling_csv = self.generate_top1_csv(best_selling, "sellings_qty")
+        self.send_best_selling_data(client_id, best_selling, original_message_id, selling_routing_key)
         
-        unique_data_id = self.generate_next_message_id(original_message_id)
-        headers = self.create_headers(client_id, unique_data_id)
-
+        self.send_most_profit_data(client_id, most_profit, original_message_id, profit_routing_key)
+        
+        logger.info(f"Resultados finales enviados al JOIN para cliente {client_id}")
+        
+    def send_best_selling_data(self, client_id: str, best_selling: Dict[str, Tuple[str, int]], message_id: str, selling_routing_key: str):
+        # Enviar best selling DATA
+        selling_csv = self.generate_top1_csv(best_selling, "sellings_qty")
+        unique_id = self.generate_next_message_id(message_id)  # ID 1
+        headers = self.create_headers(client_id, unique_id)
+        
         selling_dto = TransactionItemBatchDTO(selling_csv, BatchType.RAW_CSV)
-        logger.info(f"Enviando best selling: {len(selling_csv)}")
+        logger.info(f"Enviando best selling (ID={unique_id}): {len(selling_csv)} bytes")
         self.output_middleware.send(
             selling_dto.to_bytes_fast(),
             routing_key=selling_routing_key,
             headers=headers
         )
-        unique_data_id = self.generate_next_message_id(original_message_id) + 1
-        headers = self.create_headers(client_id, unique_data_id)
+        
+        # Enviar best selling EOF
+        unique_id = self.generate_next_message_id(client_id)  # ID 2
+        headers = self.create_headers(client_id, unique_id)
         selling_eof = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
         self.output_middleware.send(
             selling_eof.to_bytes_fast(),
             routing_key=selling_routing_key,
             headers=headers
         )
+        logger.info(f"Enviando best selling EOF (ID={unique_id})")
         
-        # Enviar most profit
-        unique_data_id = self.generate_next_message_id(original_message_id) + 2
+    def send_most_profit_data(self, client_id: str, most_profit: Dict[str, Tuple[str, float]], message_id: str, profit_routing_key: str):
+        # Enviar most profit DATA
+        unique_id = self.generate_next_message_id(client_id)  # ID 3
         profit_csv = self.generate_top1_csv(most_profit, "profit_sum")
-        headers = self.create_headers(client_id, unique_data_id)
-        profit_dto = TransactionItemBatchDTO(profit_csv, BatchType.RAW_CSV)
+        headers = self.create_headers(client_id, unique_id)
         
+        profit_dto = TransactionItemBatchDTO(profit_csv, BatchType.RAW_CSV)
+        logger.info(f"Enviando most profit (ID={unique_id}): {len(profit_csv)} bytes")
         self.output_middleware.send(
             profit_dto.to_bytes_fast(),
             routing_key=profit_routing_key,
             headers=headers
         )
-        unique_data_id = self.generate_next_message_id(original_message_id) + 3
-        headers = self.create_headers(client_id, unique_data_id)
+        
+        # Enviar most profit EOF
+        unique_id = self.generate_next_message_id(client_id)  # ID 4
+        headers = self.create_headers(client_id, unique_id)
         profit_eof = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
         self.output_middleware.send(
             profit_eof.to_bytes_fast(),
             routing_key=profit_routing_key,
             headers=headers
         )
+        logger.info(f"Enviando most profit EOF (ID={unique_id})")
         
-        logger.info(f"Resultados finales enviados al JOIN para cliente {client_id}")
-        logger.info(f"  Best selling: {len(best_selling)} meses")
-        logger.info(f"  Most profit: {len(most_profit)} meses")
-
     def process_message(self, message: bytes, routing_key: str, client_id: str, message_id: str) -> bool:
         try:
             if self.shutdown.is_shutting_down():
                 logger.warning("Shutdown en progreso")
-                return True
+                return (True, False)
             
             dto = TransactionItemBatchDTO.from_bytes_fast(message)
             
             if dto.batch_type == BatchType.EOF:
-                return self.handle_eof(routing_key, client_id, message_id)
+                # Manejar EOF (actualiza contadores)
+                self.handle_eof(routing_key, client_id, message_id)
+                
+                # Guardar checkpoint REGULAR (sin eof_processed=True)
+                # Solo para persistir los contadores de EOF
+                lines = [f"EOF:{routing_key}"]
+                self.checkpoint_handler.save_message_checkpoint(
+                    client_id=client_id,
+                    message_id=message_id,
+                    csv_lines=lines
+                )
+                
+                return (False, True) 
             
             if dto.batch_type == BatchType.RAW_CSV:
-                for line in dto.data.split('\n'):
-                    if line.strip():
-                        self.process_csv_line(line.strip(), routing_key, client_id)
-            
-            return False
+                lines = [line.strip() for line in dto.data.split('\n') if line.strip()]
+                
+                for line in lines:
+                    self.process_csv_line(line, routing_key, client_id)
+                
+                self.checkpoint_handler.save_message_checkpoint(
+                    client_id=client_id,
+                    message_id=message_id,
+                    csv_lines=lines
+                )
+                return (False, True) 
             
         except Exception as e:
             logger.error(f"Error procesando mensaje: {e}")
-            return False
+            return (False, False)
 
     def parse_message_headers(self, properties) -> Tuple[str, str]:
         client_id = None
@@ -311,23 +362,6 @@ class BestSellingAggregatorNode:
             client_id = properties.headers.get('client_id')
             message_id = properties.headers.get('message_id')
         return str(client_id), str(message_id)
-    
-    def analyze_first_message(self, client_id: str, message_id: str, ch, method, body) -> bool:
-        
-        # if self.is_first_message:
-        #     self.is_first_message = False
-            
-        last_line_client = self.client_logger._get_last_line()
-        if last_line_client and last_line_client.strip() and ';' in last_line_client:    
-            client_id_client_log, message_id_client_log = last_line_client.split(';')
-            if client_id_client_log == client_id and message_id_client_log == message_id:
-                logger.info(f"Estado ya consistente con cliente {client_id} y mensaje {message_id}")
-                return True
-        try:
-            pass
-        except Exception as e:
-            logger.error(f"Error recuperando estado: {e}")
-        return False
     
     def on_message_callback(self, ch, method, properties, body):
         try:
@@ -338,13 +372,17 @@ class BestSellingAggregatorNode:
             routing_key = getattr(method, 'routing_key', None)
 
             client_id, message_id = self.parse_message_headers(properties)
-            if self.analyze_first_message(client_id, message_id, ch, method, body):
+            
+            if self.checkpoint_handler.analyze_first_message(client_id, message_id, ch, method, body):
                 return
-
-            should_stop = self.process_message(body, routing_key, client_id,message_id)
+            
+            # self.checkpoint_handler.register_incoming_message(client_id, message_id)
+            should_stop, should_ack = self.process_message(body,routing_key, client_id, message_id)
+            if should_ack:
+                ch.basic_ack(delivery_tag=method.delivery_tag)
             if should_stop:
+                logger.info("Shutdown solicitado - deteniendo consuming")
                 ch.stop_consuming()
-                
         except Exception as e:
             logger.error(f"Error en callback: {e}")
     
@@ -366,6 +404,251 @@ class BestSellingAggregatorNode:
             logger.info("Conexiones cerradas")
         except Exception as e:
             logger.error(f"Error en cleanup: {e}")
+            
+            
+    def serialize_operation(self, client_id: str, csv_line: str) -> str:
+        """
+        Serializa una operación BestSelling para el WAL.
+        
+        Formato para selling: client_id,S,year_month,item_id,sellings_qty
+        Formato para profit:  client_id,P,year_month,item_id,profit_sum
+        Formato para EOF:     client_id,EOF,routing_key
+        
+        Ejemplo: 0,S,2024-01,item_123,50
+                0,P,2024-01,item_456,125.50
+                0,EOF,top_selling.data
+        """
+        try:
+            # Manejar EOF
+            if csv_line.startswith('EOF:'):
+                routing_key = csv_line.split(':', 1)[1]
+                return f"{client_id},EOF,{routing_key}"
+            
+            parts = csv_line.split(',')
+            
+            # Saltear header
+            if len(parts) < 3 or parts[0] == 'created_at':
+                return None
+            
+            year_month = parts[0]
+            item_id = parts[1]
+            value_str = parts[2]
+            
+            # Detectar tipo (selling o profit)
+            try:
+                if '.' not in value_str or value_str.endswith('.0'):
+                    value = int(float(value_str))
+                    return f"{client_id},S,{year_month},{item_id},{value}"
+                else:
+                    value = float(value_str)
+                    return f"{client_id},P,{year_month},{item_id},{value}"
+            except ValueError:
+                logger.warning(f"Error parseando valor '{value_str}'")
+                return None
+            
+        except Exception as e:
+            logger.error(f"Error serializando operación BestSelling: {e}")
+            raise
+
+    def deserialize_operation(self, operation_str: str) -> dict:
+        """
+        Deserializa una operación BestSelling desde el WAL.
+        
+        Input: "0,S,2024-01,item_123,50"
+            "0,EOF,top_selling.data"
+        """
+        try:
+            parts = operation_str.split(',')
+            
+            if len(parts) < 3:
+                raise ValueError(f"Formato inválido: {operation_str}")
+            
+            client_id = parts[0]
+            op_type = parts[1]
+            
+            # Manejar EOF
+            if op_type == 'EOF':
+                routing_key = parts[2]
+                return {
+                    'client_id': client_id,
+                    'type': 'eof',
+                    'routing_key': routing_key
+                }
+            
+            # Manejar datos
+            if len(parts) != 5:
+                raise ValueError(f"Formato inválido, esperaba 5 campos: {operation_str}")
+            
+            year_month = parts[2]
+            item_id = parts[3]
+            value_str = parts[4]
+            
+            if op_type == 'S':
+                return {
+                    'client_id': client_id,
+                    'type': 'selling',
+                    'year_month': year_month,
+                    'item_id': item_id,
+                    'value': int(value_str)
+                }
+            elif op_type == 'P':
+                return {
+                    'client_id': client_id,
+                    'type': 'profit',
+                    'year_month': year_month,
+                    'item_id': item_id,
+                    'value': float(value_str)
+                }
+            else:
+                raise ValueError(f"Tipo de operación desconocido: {op_type}")
+            
+        except Exception as e:
+            logger.error(f"Error deserializando operación BestSelling: {e}")
+            raise
+
+    def apply_operation(self, operation: dict):
+        """
+        Aplica una operación BestSelling al estado en memoria.
+        """
+        try:
+            client_id = operation['client_id']
+            op_type = operation['type']
+            
+            if op_type == 'eof':
+                # Actualizar contador de EOF
+                routing_key = operation['routing_key']
+                if 'top_selling' in routing_key:
+                    self.eof_selling_count_by_client[client_id] += 1
+                    logger.debug(f"Aplicado EOF selling para cliente {client_id}")
+                elif 'top_profit' in routing_key:
+                    self.eof_profit_count_by_client[client_id] += 1
+                    logger.debug(f"Aplicado EOF profit para cliente {client_id}")
+            
+            elif op_type == 'selling':
+                year_month = operation['year_month']
+                item_id = operation['item_id']
+                value = operation['value']
+                
+                self.month_selling_candidates_by_client[client_id][year_month].append({
+                    'item_id': item_id,
+                    'sellings_qty': value
+                })
+                logger.debug(f"Aplicada operación selling: {year_month}, item {item_id}, qty {value}")
+                
+            elif op_type == 'profit':
+                year_month = operation['year_month']
+                item_id = operation['item_id']
+                value = operation['value']
+                
+                self.month_profit_candidates_by_client[client_id][year_month].append({
+                    'item_id': item_id,
+                    'profit_sum': value
+                })
+                logger.debug(f"Aplicada operación profit: {year_month}, item {item_id}, profit ${value:.2f}")
+            
+        except Exception as e:
+            logger.error(f"Error aplicando operación BestSelling: {e}")
+            raise
+
+    def _serialize_client_data(self, client_id: str) -> Dict:
+        """
+        Serializa el estado completo del cliente para checkpoint.
+        
+        Estructura:
+        {
+            "selling_candidates": {
+                "2024-01": [
+                    {"item_id": "item_123", "sellings_qty": 50},
+                    {"item_id": "item_456", "sellings_qty": 30}
+                ],
+                "2024-02": [...]
+            },
+            "profit_candidates": {
+                "2024-01": [
+                    {"item_id": "item_123", "profit_sum": 125.50},
+                    {"item_id": "item_456", "profit_sum": 89.20}
+                ]
+            },
+            "eof_selling_count": 4,
+            "eof_profit_count": 4,
+            "outgoing_counter": 0
+        }
+        """
+        selling_candidates = self.month_selling_candidates_by_client.get(client_id, {})
+        profit_candidates = self.month_profit_candidates_by_client.get(client_id, {})
+        
+        serialized = {
+            "selling_candidates": {},
+            "profit_candidates": {},
+            "eof_selling_count": self.eof_selling_count_by_client.get(client_id, 0),
+            "eof_profit_count": self.eof_profit_count_by_client.get(client_id, 0),
+            "outgoing_counter": self.outgoing_counter_by_client.get(client_id, 0)
+        }
+        
+        # Serializar candidatos de selling
+        for year_month, candidates in selling_candidates.items():
+            serialized["selling_candidates"][year_month] = [
+                {
+                    "item_id": cand["item_id"],
+                    "sellings_qty": cand["sellings_qty"]
+                }
+                for cand in candidates
+            ]
+        
+        # Serializar candidatos de profit
+        for year_month, candidates in profit_candidates.items():
+            serialized["profit_candidates"][year_month] = [
+                {
+                    "item_id": cand["item_id"],
+                    "profit_sum": cand["profit_sum"]
+                }
+                for cand in candidates
+            ]
+        
+        return serialized
+
+    def _deserialize_client_data(self, client_id: str, data: Dict):
+        """
+        Reconstruye el estado desde un checkpoint.
+        """
+        # Inicializar estructuras
+        self.month_selling_candidates_by_client[client_id] = defaultdict(list)
+        self.month_profit_candidates_by_client[client_id] = defaultdict(list)
+        
+        # Restaurar candidatos de selling
+        selling_data = data.get("selling_candidates", {})
+        for year_month, candidates in selling_data.items():
+            self.month_selling_candidates_by_client[client_id][year_month] = [
+                {
+                    "item_id": cand["item_id"],
+                    "sellings_qty": cand["sellings_qty"]
+                }
+                for cand in candidates
+            ]
+        
+        # Restaurar candidatos de profit
+        profit_data = data.get("profit_candidates", {})
+        for year_month, candidates in profit_data.items():
+            self.month_profit_candidates_by_client[client_id][year_month] = [
+                {
+                    "item_id": cand["item_id"],
+                    "profit_sum": cand["profit_sum"]
+                }
+                for cand in candidates
+            ]
+        
+        # Restaurar contadores de EOF
+        self.eof_selling_count_by_client[client_id] = data.get("eof_selling_count", 0)
+        self.eof_profit_count_by_client[client_id] = data.get("eof_profit_count", 0)
+        
+        # Restaurar contador de mensajes salientes
+        self.outgoing_counter_by_client[client_id] = data.get("outgoing_counter", 0)
+        
+        logger.info(f"   Candidatos selling: {sum(len(v) for v in self.month_selling_candidates_by_client[client_id].values())}")
+        logger.info(f"   Candidatos profit: {sum(len(v) for v in self.month_profit_candidates_by_client[client_id].values())}")
+        logger.info(f"   EOF selling: {self.eof_selling_count_by_client[client_id]}")
+        logger.info(f"   EOF profit: {self.eof_profit_count_by_client[client_id]}")
+        logger.info(f"   Contador saliente: {self.outgoing_counter_by_client[client_id]}")
 
 
 if __name__ == "__main__":
