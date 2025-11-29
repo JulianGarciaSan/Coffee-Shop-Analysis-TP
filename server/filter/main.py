@@ -8,6 +8,7 @@ from typing import Optional
 from rabbitmq.middleware import MessageMiddlewareQueue
 from logger_monitor.logger_monitor import LoggerMonitor
 from healthchecker.healthchecker import HealthChecker
+from logger_monitor.logger_recovery import RecoveryManager, RecoveryState
 from strategies import FilterStrategyFactory
 from configurators import NodeConfiguratorFactory
 from dtos.dto import TransactionBatchDTO, TransactionItemBatchDTO, BatchType, FileType
@@ -51,6 +52,13 @@ class FilterNode:
         self.logger = LoggerMonitor('/app/logs.txt')
         self.client_logger = LoggerMonitor('/app/client_logs.txt')
         self.eof_logger = LoggerMonitor('/app/eof_logs.txt')
+        
+        self.recovery = RecoveryManager(
+            self.logger,
+            self.client_logger, 
+            self.eof_logger
+        )
+
         self.is_first_message = True
         
         self.node_configurator = NodeConfiguratorFactory.create_configurator(
@@ -128,15 +136,23 @@ class FilterNode:
             logger.warning("Shutdown en progreso, ignorando mensaje")
         
         try:
-            should_stop, batch_type, dto, is_eof = self.node_configurator.process_message(
-                body, routing_key, client_id, message_id
-            )
+            result = self.node_configurator.process_message(body, routing_key, client_id, message_id)
             
+            if len(result) == 5:
+                should_stop, batch_type, dto, is_eof, is_dup = result
+            else:
+                should_stop, batch_type, dto, is_eof = result
+                is_dup = False 
+                
             # if is_eof:
             #     return self._handle_eof_message(dto, batch_type, client_id)
             
             if is_eof:
                 self.logger.write_with_timestamp(f"END:{client_id}")
+                return False
+            
+            if is_dup:
+                logger.info(f"Mensaje duplicado detectado para client_id {client_id}, message_id {message_id}. Ignorando procesamiento.")
                 return False
 
             if should_stop:
@@ -157,10 +173,11 @@ class FilterNode:
                 return True
                         
             processed_data = self.node_configurator.process_filtered_data(filtered_csv)
-            self.logger.write_with_timestamp(f"Informo que Filtre el mensaje")
+            self.logger.write_filter()
             self.node_configurator.send_data(processed_data, self.middlewares, batch_type, client_id=client_id,message_id=message_id)
-            self.logger.write_with_timestamp(f"Informo que encole el mensaje")
+            self.logger.write_enqueue()
             # time.sleep(30)
+            self.logger.write_termination()
             return False
 
         except Exception as e:
@@ -187,18 +204,37 @@ class FilterNode:
             if self.is_first_message:
                 self.is_first_message = False
                 last_log = self.logger._get_last_line()
-                # logger.info(f"Esto es la ultima linea del logger: {last_log}")
                 
-                if self.analize_log(last_log, client_id, message_id):
-                    logger.info("Mensaje ya procesado, haciendo ACK y continuando")
+                action = self.recovery.check_message_recovery(
+                    last_log, 
+                    client_id, 
+                    message_id
+                )
+                
+                if action.state == RecoveryState.ALREADY_DONE:
                     ch.basic_ack(delivery_tag=method.delivery_tag)
-                    self.logger.write_with_timestamp(f"Termine la iteracion")
+                    self.logger.write_termination()
                     return
+                
+                if action.state == RecoveryState.COMPLETE_EOF:
+                    self.node_configurator._on_all_acks_received(
+                        action.client_id,
+                        action.batch_type
+                    )
+                
+                if action.state == RecoveryState.RESEND_EOF:
+                    self.node_configurator.process_message(
+                        TransactionBatchDTO("EOF:1", BatchType.EOF).to_bytes_fast(),
+                        None,
+                        action.client_id
+                    )
+                
+                if action.state == RecoveryState.RETRY_SEND:
+                    pass
 
-            self.client_logger.write(f"{client_id};{message_id}")
+            self.client_logger.write(f"{client_id}:{message_id}")
             logging.info("Mensaje recibido en FilterNode")
             should_stop = self.process_message(body, routing_key, client_id,message_id)
-            #time.sleep(30)
             ch.basic_ack(delivery_tag=method.delivery_tag)
             self.logger.write_with_timestamp(f"Termine la iteracion")
 
@@ -211,103 +247,29 @@ class FilterNode:
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
 
 
-    def pre_analyze_eof_log(self):
-        logger.info(f"Analizando EOF log en pre_analyze_eof_log")
-        last_line = self.eof_logger._get_last_line()
-        logger.info(f"Ultima linea del eof log: {last_line}")
-        
-        if not last_line or ':' not in last_line:
-            logger.warning("No hay logs EOF previos válidos")
-            return False
-        
-        parts = last_line.split(':', 2)
-        eof_status = parts[0] if len(parts) > 0 else ""
-        client_id_eof_log = parts[1] if len(parts) > 1 else ""
-        batch_type_eof_log = parts[2] if len(parts) > 2 else ""
-        
-        if "EOF" in eof_status:
-            self.node_configurator._on_all_acks_received(client_id_eof_log, batch_type_eof_log)
-            return False
-
-        if "BEF" in eof_status:
-            self.node_configurator.process_message(TransactionBatchDTO("", BatchType.EOF).to_bytes_fast(),client_id_eof_log)
-            return False
-
-        return True
-    
-    def analize_log(self, log, client_id, message_id):
-        logger.info(f"Analizando log en analize_log: {log}")
-        last_line_client = self.client_logger._get_last_line()
-        logger.info(f"Ultima linea del client log: {last_line_client}")
-        last_line_eof = self.eof_logger._get_last_line()
-        logger.info(f"Ultima linea del eof log: {last_line_eof}")
-        
-        client_id = str(client_id) if client_id is not None else ""
-        message_id = str(message_id) if message_id is not None else ""
-        
-        if not last_line_client or ';' not in last_line_client:
-            logger.warning("No hay logs previos válidos")
-            return False
-        
-        client_id_client_log, message_id_client_log = last_line_client.split(';')
-
-        if not last_line_eof or ':' not in last_line_eof:
-            logger.warning("No hay logs previos válidos")
-            return False
-
-        eof_eof_log, client_id_eof_log, batch_type_eof_log = last_line_eof.split(':')
-
-               
-        if "END" in log:
-            if "END" in eof_eof_log:
-                if client_id == client_id_client_log and message_id == message_id_client_log:
-                    return True
-                return False
-            
-            if "EOF" in eof_eof_log:
-                self.node_configurator._on_all_acks_received(client_id_eof_log, batch_type_eof_log)
-                
-                #Esto es de el mensaje de los logs client
-                if client_id == client_id_client_log and message_id == message_id_client_log:
-                    return True
-                
-                return False
-            
-            if "BEF" in eof_eof_log:
-                self.node_configurator.process_message(TransactionBatchDTO("", BatchType.EOF).to_bytes_fast(),client_id_eof_log)
-                return False
-            
-        if "EOF" in log:
-            if "END" in eof_eof_log:
-                #De alguna manera llegaron todos los acks, antes de que envie el ack del Primero EOF recibido
-                #Solo falta mandar el ACK del primero EOF recibido
-                if client_id_client_log == client_id_eof_log == client_id and message_id_client_log == message_id:
-                    return True
-                return False
-            
-            if "EOF" in eof_eof_log:
-                self.node_configurator._on_all_acks_received(client_id_eof_log, batch_type_eof_log)
-                #Solo falta mandar el ACK del primero EOF recibido
-                if client_id_client_log == client_id_eof_log == client_id and message_id_client_log == message_id:
-                    return True
-                return 
-        
-            return False
-
-        if "Informo que encole el mensaje" in log:
-            if client_id_client_log == client_id and message_id_client_log == message_id:
-                return True
-                
-        if "Informo que Filtre" in log:
-            logger.info(f"FilterNode: Reintento filtrar y enviar el mensaje")
-            return False
-        
-        return False
-
     def start(self):
         try:
             logger.info("Iniciando consumo de mensajes...")
-            self.is_first_message = self.pre_analyze_eof_log()
+            action = self.recovery.check_startup_recovery()
+
+            if action.state == RecoveryState.COMPLETE_EOF:
+                self.node_configurator._on_all_acks_received(
+                    action.client_id, 
+                    action.batch_type
+                )
+                self.is_first_message = False
+                
+            elif action.state == RecoveryState.RESEND_EOF:
+                self.node_configurator.process_message(
+                    TransactionBatchDTO("EOF:1", BatchType.EOF).to_bytes_fast(),
+                    None,
+                    action.client_id
+                )
+                self.is_first_message = False
+                
+            else:
+                self.is_first_message = True
+
             self.input_middleware.start_consuming(self.on_message_callback)
         except KeyboardInterrupt:
             logger.info("Filtro detenido manualmente")

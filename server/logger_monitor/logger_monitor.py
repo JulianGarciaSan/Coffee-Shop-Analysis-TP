@@ -13,14 +13,28 @@ class LoggerMonitor:
     def write(self, message):
         """Escritura thread-safe"""
         with self.lock:
-            self.logger.write(message)
+            self.logger.write(message+";")
     
     def write_with_timestamp(self, message):
         """Escritura con timestamp thread-safe"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         with self.lock:
-            self.logger.write(f"[{timestamp}] {message}")
+            self.logger.write(f"[{timestamp}] {message};")
+    def write_filter(self):
+        """Escritura thread-safe para el filtro"""
+        with self.lock:
+            self.logger.write("F;")
     
+    def write_enqueue(self):
+        """Escritura thread-safe para el encolado"""
+        with self.lock:
+            self.logger.write("E;")
+            
+    def write_termination(self):
+        """Escritura thread-safe para la terminación"""
+        with self.lock:
+            self.logger.write("T;")
+            
     def get_last_line(self):
         """Lectura thread-safe de última línea"""
         with self.lock:

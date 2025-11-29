@@ -157,6 +157,30 @@ stop:
 	# Limpiar logs de top_customers_aggregator_1
 	echo -n > server/logs/top_customers_aggregator_1/client_logs.txt
 
+	# Backup de logs de filter_amount_1
+	sudo cp server/logs/filter_amount_1/client_logs.txt server/logs/filter_amount_1/client_logs_backup.txt || true
+	sudo cp server/logs/filter_amount_1/logs.txt server/logs/filter_amount_1/logs_backup.txt || true
+	sudo cp server/logs/filter_amount_1/eof_logs.txt server/logs/filter_amount_1/eof_logs_backup.txt || true
+	# Backup de logs de filter_amount_2
+	sudo cp server/logs/filter_amount_2/client_logs.txt server/logs/filter_amount_2/client_logs_backup.txt || true
+	sudo cp server/logs/filter_amount_2/logs.txt server/logs/filter_amount_2/logs_backup.txt || true
+	sudo cp server/logs/filter_amount_2/eof_logs.txt server/logs/filter_amount_2/eof_logs_backup.txt || true
+	# Backup de logs de filter_amount_3
+	sudo cp server/logs/filter_amount_3/client_logs.txt server/logs/filter_amount_3/client_logs_backup.txt || true
+	sudo cp server/logs/filter_amount_3/logs.txt server/logs/filter_amount_3/logs_backup.txt || true
+	sudo cp server/logs/filter_amount_3/eof_logs.txt server/logs/filter_amount_3/eof_logs_backup.txt || true
+	# Limpiar logs de filter_amount_1
+	echo -n > server/logs/filter_amount_1/client_logs.txt
+	echo -n > server/logs/filter_amount_1/logs.txt
+	echo -n > server/logs/filter_amount_1/eof_logs.txt
+	# Limpiar logs de filter_amount_2
+	echo -n > server/logs/filter_amount_2/client_logs.txt
+	echo -n > server/logs/filter_amount_2/logs.txt
+	echo -n > server/logs/filter_amount_2/eof_logs.txt
+	# Limpiar logs de filter_amount_3
+	echo -n > server/logs/filter_amount_3/client_logs.txt
+	echo -n > server/logs/filter_amount_3/logs.txt
+	echo -n > server/logs/filter_amount_3/eof_logs.txt
 .PHONY: stop
 
 # Limpieza profunda (usar solo cuando realmente quieras limpiar todo)
