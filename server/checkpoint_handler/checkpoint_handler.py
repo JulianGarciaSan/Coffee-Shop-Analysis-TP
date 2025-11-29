@@ -5,7 +5,6 @@ import tempfile
 from typing import Dict
 from collections import defaultdict
 from message_range_tracker.message_range_tracker import MessageRangeTracker
-from logger_monitor.logger_writter import LogWriter
 
 
 logging.basicConfig(level=logging.INFO)

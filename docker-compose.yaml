@@ -32,7 +32,7 @@ services:
       - MAX_FAILURES=3
       - PING_TIMEOUT=2.0
       - STARTUP_DELAY=15
-      - MONITORED_NODES=filter_year_1:9999,filter_year_2:9999,filter_year_3:9999,filter_hour_1:9999,filter_hour_2:9999,filter_hour_3:9999,filter_amount_1:9999,filter_amount_2:9999,filter_amount_3:9999,groupby_top_customers:9999, groupby_semester_1:9999,groupby_semester_2:9999,groupby_best_selling_2025_3:9999,groupby_best_selling_2025_2:9999,groupby_best_selling_2025_1:9999,groupby_best_selling_2025_0:9999,groupby_best_selling_2024_3:9999,groupby_best_selling_2024_2:9999,groupby_best_selling_2024_1:9999,groupby_best_selling_2024_0:9999, top_consumers_aggregator_1:9999,top_consumers_aggregator_2:9999, aggregator_best_selling_final:9999
+      - MONITORED_NODES=filter_year_1:9999,filter_year_2:9999,filter_year_3:9999,filter_hour_1:9999,filter_hour_2:9999,filter_hour_3:9999,filter_amount_1:9999,filter_amount_2:9999,filter_amount_3:9999,groupby_top_customers:9999, groupby_semester_1:9999,groupby_semester_2:9999,groupby_best_selling_2025_3:9999,groupby_best_selling_2025_2:9999,groupby_best_selling_2025_1:9999,groupby_best_selling_2025_0:9999,groupby_best_selling_2024_3:9999,groupby_best_selling_2024_2:9999,groupby_best_selling_2024_1:9999,groupby_best_selling_2024_0:9999, top_consumers_aggregator_1:9999,top_consumers_aggregator_2:9999,aggregator_best_selling_final:9999,dedup_q1:9999,join_node_0:9999,join_node_1:9999
     depends_on:
       gateway:
         condition: service_started
@@ -148,6 +148,7 @@ services:
       - INPUT_QUEUE=amount_filtered
     volumes:
       - ./server/config.ini:/app/config.ini
+      - ./dedup_checkpoints:/app/dedup/checkpoints  # Persistir checkpoints
       # - ./server/logs/filter_amount_1/logs.txt:/app/logs.txt
       # - ./server/logs/filter_amount_1/client_logs.txt:/app/client_logs.txt
       # - ./server/logs/filter_amount_1/eof_logs.txt:/app/eof_logs.txt
@@ -482,6 +483,7 @@ services:
       - NODE_ID=amount_node_2
       - ALL_NODE_IDS=amount_node_1,amount_node_2,amount_node_3
       - NODE_ADDRESSES=filter_amount_1:5000,filter_amount_2:5001,filter_amount_3:5002
+
     volumes:
       - ./server/config.ini:/app/config.ini
       - ./server/logs/filter_amount_2/logs.txt:/app/logs.txt
