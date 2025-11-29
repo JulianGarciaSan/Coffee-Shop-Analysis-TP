@@ -62,55 +62,55 @@ services:
       - ./report_client_1:/app/report_client_1
       - ./data/transactions_items_test:/data/transactions_items_test
 
-  client_2:
-    build:
-      context: .
-      dockerfile: ./client/Dockerfile
-    restart: on-failure
-    environment:
-      - PYTHONUNBUFFERED=1
-      - RABBITMQ_HOST=rabbitmq
-      - CLIENT_ID=client_2
-    depends_on:
-      gateway:
-        condition: service_started
-    volumes:
-      - ./client/config.ini:/config.ini
-      - ./data/transaction_items:/data/transaction_items
-      - ./data/users:/data/users
-      - ./data/stores:/data/stores
-      - ./data/menu_items:/data/menu_items
-      - ./data/payment_methods:/data/payment_methods
-      - ./data/vouchers:/data/vouchers
-      - ./data/transactions:/data/transactions
-      - ./data/transactions_test:/data/transactions_test
-      - ./report_client_2:/app/report_client_2
-      - ./data/transactions_items_test:/data/transactions_items_test
+  # client_2:
+  #   build:
+  #     context: .
+  #     dockerfile: ./client/Dockerfile
+  #   restart: on-failure
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #     - RABBITMQ_HOST=rabbitmq
+  #     - CLIENT_ID=client_2
+  #   depends_on:
+  #     gateway:
+  #       condition: service_started
+  #   volumes:
+  #     - ./client/config.ini:/config.ini
+  #     - ./data/transaction_items:/data/transaction_items
+  #     - ./data/users:/data/users
+  #     - ./data/stores:/data/stores
+  #     - ./data/menu_items:/data/menu_items
+  #     - ./data/payment_methods:/data/payment_methods
+  #     - ./data/vouchers:/data/vouchers
+  #     - ./data/transactions:/data/transactions
+  #     - ./data/transactions_test:/data/transactions_test
+  #     - ./report_client_2:/app/report_client_2
+  #     - ./data/transactions_items_test:/data/transactions_items_test
   
-  client_3:
-    build:
-      context: .
-      dockerfile: ./client/Dockerfile
-    restart: on-failure
-    environment:
-      - PYTHONUNBUFFERED=1
-      - RABBITMQ_HOST=rabbitmq
-      - CLIENT_ID=client_3
-    depends_on:
-      gateway:
-        condition: service_started
-    volumes:
-      - ./client/config.ini:/config.ini
-      - ./data/transaction_items:/data/transaction_items
-      - ./data/users:/data/users
-      - ./data/stores:/data/stores
-      - ./data/menu_items:/data/menu_items
-      - ./data/payment_methods:/data/payment_methods
-      - ./data/vouchers:/data/vouchers
-      - ./data/transactions:/data/transactions
-      - ./data/transactions_test:/data/transactions_test
-      - ./report_client_3:/app/report_client_3
-      - ./data/transactions_items_test:/data/transactions_items_test
+  # client_3:
+  #   build:
+  #     context: .
+  #     dockerfile: ./client/Dockerfile
+  #   restart: on-failure
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #     - RABBITMQ_HOST=rabbitmq
+  #     - CLIENT_ID=client_3
+  #   depends_on:
+  #     gateway:
+  #       condition: service_started
+  #   volumes:
+  #     - ./client/config.ini:/config.ini
+  #     - ./data/transaction_items:/data/transaction_items
+  #     - ./data/users:/data/users
+  #     - ./data/stores:/data/stores
+  #     - ./data/menu_items:/data/menu_items
+  #     - ./data/payment_methods:/data/payment_methods
+  #     - ./data/vouchers:/data/vouchers
+  #     - ./data/transactions:/data/transactions
+  #     - ./data/transactions_test:/data/transactions_test
+  #     - ./report_client_3:/app/report_client_3
+  #     - ./data/transactions_items_test:/data/transactions_items_test
 
   gateway:
     build:
@@ -148,6 +148,7 @@ services:
       - INPUT_QUEUE=amount_filtered
     volumes:
       - ./server/config.ini:/app/config.ini
+      - ./dedup_checkpoints:/app/dedup/checkpoints  # Persistir checkpoints
       # - ./server/logs/filter_amount_1/logs.txt:/app/logs.txt
       # - ./server/logs/filter_amount_1/client_logs.txt:/app/client_logs.txt
       # - ./server/logs/filter_amount_1/eof_logs.txt:/app/eof_logs.txt
@@ -448,7 +449,6 @@ services:
       - INPUT_QUEUE=hour_filtered
       - OUTPUT_Q1=report.exchange
       - TOTAL_AMOUNT_FILTERS=3
-      - TOTAL_AMOUNT_FILTERS=1
       - MIN_AMOUNT=75
       - NODE_ID=amount_node_1
       - ALL_NODE_IDS=amount_node_1,amount_node_2,amount_node_3
@@ -482,6 +482,8 @@ services:
       - MIN_AMOUNT=75
       - NODE_ID=amount_node_2
       - ALL_NODE_IDS=amount_node_1,amount_node_2,amount_node_3
+      - NODE_ADDRESSES=filter_amount_1:5000,filter_amount_2:5001,filter_amount_3:5002
+
     volumes:
       - ./server/config.ini:/app/config.ini
       - ./server/logs/filter_amount_2/logs.txt:/app/logs.txt
@@ -510,6 +512,7 @@ services:
       - MIN_AMOUNT=75
       - NODE_ID=amount_node_3
       - ALL_NODE_IDS=amount_node_1,amount_node_2,amount_node_3
+      - NODE_ADDRESSES=filter_amount_1:5000,filter_amount_2:5001,filter_amount_3:5002
     volumes:
       - ./server/config.ini:/app/config.ini
       - ./server/logs/filter_amount_3/logs.txt:/app/logs.txt
@@ -949,42 +952,42 @@ services:
       - ./server/logs/aggregator_best_selling_final/checkpoints:/app/server/logs/aggregator_best_selling_final/checkpoints
       - ./server/logs/aggregator_best_selling_final/client_logs.txt:/app/client_logs.txt
       
-  chaos_monkey:
-    build:
-      context: ./server/chaos_monkey
-      dockerfile: Dockerfile
-    container_name: chaos_monkey
-    restart: "no"  # No reiniciar automáticamente
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      - PYTHONUNBUFFERED=1
-      - KILL_INTERVAL=5  # Segundos entre caídas
-    depends_on:
-      gateway:
-        condition: service_started
-      filter_year_1:
-        condition: service_started
-      filter_year_2:
-        condition: service_started  
-      filter_year_3:
-        condition: service_started
-      filter_hour_1:
-        condition: service_started
-      filter_hour_2:
-        condition: service_started 
-      filter_hour_3:
-        condition: service_started
-      filter_amount_1:
-        condition: service_started
-      filter_amount_2:
-        condition: service_started
-      filter_amount_3:
-        condition: service_started 
-      client_1:
-        condition: service_started
-      groupby_top_customers:
-        condition: service_started
+  # chaos_monkey:
+  #   build:
+  #     context: ./server/chaos_monkey
+  #     dockerfile: Dockerfile
+  #   container_name: chaos_monkey
+  #   restart: "no"  # No reiniciar automáticamente
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock:ro
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #     - KILL_INTERVAL=5  # Segundos entre caídas
+  #   depends_on:
+  #     gateway:
+  #       condition: service_started
+  #     filter_year_1:
+  #       condition: service_started
+  #     filter_year_2:
+  #       condition: service_started  
+  #     filter_year_3:
+  #       condition: service_started
+  #     filter_hour_1:
+  #       condition: service_started
+  #     filter_hour_2:
+  #       condition: service_started 
+  #     filter_hour_3:
+  #       condition: service_started
+  #     filter_amount_1:
+  #       condition: service_started
+  #     filter_amount_2:
+  #       condition: service_started
+  #     filter_amount_3:
+  #       condition: service_started 
+  #     client_1:
+  #       condition: service_started
+  #     groupby_top_customers:
+  #       condition: service_started
       # groupby_semester_1:
       #   condition: service_started
       # groupby_semester_2:
