@@ -6,7 +6,7 @@ from typing import Callable, Dict, List
 from collections import defaultdict
 
 from common.graceful_shutdown import GracefulShutdown
-from rabbitmq.middleware import MessageMiddlewareExchangeManual, MessageMiddlewareQueueManual
+from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueueManual
 from dtos.dto import BatchType, MenuItemBatchDTO, StoreBatchDTO, TransactionBatchDTO, TransactionItemBatchDTO, UserBatchDTO
 from processors.aggregated_data_processor import AggregatedDataProcessor
 from join_engine import JoinEngine
@@ -143,7 +143,7 @@ class JoinNode:
         
             
     def _setup_output_middleware(self):
-        self.output_middleware = MessageMiddlewareExchangeManual(
+        self.output_middleware = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
             #exchange_name=self.output_exchange,
             exchange_name='reports_exchange',

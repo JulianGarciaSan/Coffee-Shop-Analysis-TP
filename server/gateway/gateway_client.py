@@ -45,8 +45,8 @@ class ClientHandler(threading.Thread):
             'q1': [],
             'q3': [],
             'q4': [],
-            # 'q2_most_profit': [],
-            # 'q2_best_selling': []
+            'q2_most_profit': [],
+            'q2_best_selling': []
         }
         self.eof_count = 0
         #self.max_expected_reports = 5
