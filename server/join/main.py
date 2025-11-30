@@ -20,6 +20,8 @@ from queries.top_customers_query_handler import TopCustomersQueryHandler
 from queries.tpv_query_handler import TPVQueryHandler
 from checkpoint_handler.checkpoint_handler import CheckpointHandler
 from join_node_checkpoint_handler import JoinNodeCheckpointHandler
+from healthchecker.healthchecker import HealthChecker
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -53,7 +55,12 @@ class JoinNode:
         self.intialize_processors()
         self.intialize_query_handlers()
         
-        self._setup_message_routes()        
+        self._setup_message_routes()  
+        
+        health_port = int(os.getenv('HEALTH_PORT', '9999'))
+        self.health_server = HealthChecker(port=health_port)
+        self.health_server.start()  
+            
         logger.info("JoinNode inicializado con soporte multi-cliente")
         logger.info(f"  RabbitMQ Host: {self.rabbitmq_host}")
         logger.info(f"  Input Exchange: {self.input_exchange}")
