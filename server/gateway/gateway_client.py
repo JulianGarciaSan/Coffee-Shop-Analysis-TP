@@ -43,7 +43,7 @@ class ClientHandler(threading.Thread):
         
         self.report_data = {
             'q1': [],
-            # 'q3': [],
+            'q3': [],
             # 'q4': [],
             # 'q2_most_profit': [],
             # 'q2_best_selling': []
@@ -75,7 +75,7 @@ class ClientHandler(threading.Thread):
             'transaction_id,final_amount',
             'year_month_created_at,item_name,profit_sum',
             'year_month_created_at,item_name,sellings_qty', 
-            'year_half,store_name,tpv',
+            'year_half_created_at,store_name,tpv',
             'store_name,birthdate'
         ]
         
