@@ -261,7 +261,9 @@ class YearNodeConfigurator(NodeConfigurator):
         client_id_int = int(client_id) if client_id.isdigit() else None
 
         message_id_int = int(message_id) if message_id.isdigit() else None
-
+        
+        logger.info(f"Enviando EOF downstream para cliente {client_id_int}, message_id {message_id_int}")
+        
         if batch_type == 'transactions':
             self.send_eof(self.output_middlewares, "transactions", client_id=client_id_int,message_id=message_id_int)
         else:
@@ -270,6 +272,7 @@ class YearNodeConfigurator(NodeConfigurator):
         self.eof_logger.write(f"END:{client_id}:{batch_type}")
         
     def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None,message_id:Optional[int]=None):
+        
         headers = self.create_headers(client_id,message_id)
         
         if batch_type == "transactions":

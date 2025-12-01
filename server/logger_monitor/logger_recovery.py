@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, NamedTuple
+from typing import Optional, NamedTuple, Dict, Set, List
 from enum import Enum
 from logger_monitor.logger_monitor import LoggerMonitor
 
@@ -13,6 +13,7 @@ class RecoveryState(Enum):
     COMPLETE_EOF = "complete_eof"            # Completar EOF pendiente
     RESEND_EOF = "resend_eof"                # Reenviar EOF
     RETRY_SEND = "retry_send"                # Reintentar envío
+    MULTIPLE_PENDING = "multiple_pending"    # Múltiples clientes pendientes
 
 
 class RecoveryAction(NamedTuple):
@@ -20,6 +21,30 @@ class RecoveryAction(NamedTuple):
     state: RecoveryState
     client_id: Optional[str] = None
     batch_type: Optional[str] = None
+    pending_clients: Optional[List[tuple]] = None  # Lista de (client_id, batch_type, is_eof)
+
+
+class ClientState:
+    """Estado de un cliente según los logs"""
+    def __init__(self, client_id: str):
+        self.client_id = client_id
+        self.has_bef = False
+        self.has_eof = False
+        self.has_end = False
+        self.batch_type: Optional[str] = None
+        self.last_status: Optional[str] = None  # "BEF", "EOF", o "END"
+    
+    def is_pending(self) -> bool:
+        """Retorna True si el cliente tiene trabajo pendiente"""
+        return (self.has_bef or self.has_eof) and not self.has_end
+    
+    def needs_eof_completion(self) -> bool:
+        """Retorna True si tiene EOF pero no END"""
+        return self.last_status == "EOF" and not self.has_end
+    
+    def needs_eof_resend(self) -> bool:
+        """Retorna True si tiene BEF pero no EOF ni END"""
+        return self.last_status == "BEF" and not self.has_eof and not self.has_end
 
 
 class RecoveryManager:
@@ -40,35 +65,113 @@ class RecoveryManager:
         self.LOG_DELIMITER = ';'
         self.LOG_SPLITTER = ':'
     
+    def _parse_all_eof_logs(self) -> Dict[str, ClientState]:
+        """
+        Lee TODO el archivo eof_logs.txt y construye el estado de cada cliente.
+        Retorna un diccionario {client_id: ClientState}
+        """
+        client_states: Dict[str, ClientState] = {}
+        
+        try:
+            with open(self.eof_logger.log_path, 'r') as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            logger.info("No hay archivo de EOF logs, inicio limpio")
+            return client_states
+        except Exception as e:
+            logger.error(f"Error leyendo EOF logs: {e}")
+            return client_states
+        
+        for line in lines:
+            line = line.strip()
+            if not line or self.LOG_DELIMITER not in line:
+                continue
+            
+            # Parse: STATUS:client_id:batch_type;
+            # Ejemplo: BEF:2:transactions;
+            parts = line.split(self.LOG_SPLITTER)
+            if len(parts) < 2:
+                continue
+            
+            status = parts[0]
+            client_id = parts[1]
+            batch_type = parts[2].rstrip(self.LOG_DELIMITER) if len(parts) > 2 else None
+            
+            # Inicializar estado si no existe
+            if client_id not in client_states:
+                client_states[client_id] = ClientState(client_id)
+            
+            # Actualizar estado según el log
+            if status == "BEF":
+                client_states[client_id].has_bef = True
+                client_states[client_id].last_status = "BEF"
+                if batch_type:
+                    client_states[client_id].batch_type = batch_type
+            
+            elif status == "EOF":
+                client_states[client_id].has_eof = True
+                client_states[client_id].last_status = "EOF"
+                if batch_type:
+                    client_states[client_id].batch_type = batch_type
+            
+            elif status == "END":
+                client_states[client_id].has_end = True
+                client_states[client_id].last_status = "END"
+        
+        return client_states
+    
     def check_startup_recovery(self) -> RecoveryAction:
         """
         Analiza logs al iniciar.
         Retorna qué acción tomar antes de procesar mensajes.
-        """
-        last_line = self.eof_logger._get_last_line()
         
-        if not last_line or self.LOG_DELIMITER not in last_line:
+        Ahora verifica TODOS los clientes, no solo el último.
+        """
+        client_states = self._parse_all_eof_logs()
+        
+        if not client_states:
             return RecoveryAction(RecoveryState.PROCESS_NEW)
         
-        parts = last_line.split(self.LOG_SPLITTER, 2)
-        status = parts[0] if len(parts) > 0 else ""
-        client_id = parts[1] if len(parts) > 1 else ""
-        batch_type = parts[2] if len(parts) > 2 else ""
+        pending_eof_completions = [] 
+        pending_eof_resends = []      
         
-        # EOF pendiente: completar
-        if "EOF" in status:
-            return RecoveryAction(
-                RecoveryState.COMPLETE_EOF,
-                client_id=client_id,
-                batch_type=batch_type
-            )
+        for client_id, state in client_states.items():
+            if state.needs_eof_completion():
+                pending_eof_completions.append((client_id, state.batch_type, True))
+                logger.warning(f"Cliente {client_id} quedó en EOF sin END")
+            
+            elif state.needs_eof_resend():
+                pending_eof_resends.append((client_id, state.batch_type, False))
+                logger.warning(f"Cliente {client_id} quedó en BEF sin EOF")
         
-        # BEF pendiente: reenviar
-        if "BEF" in status:
-            return RecoveryAction(
-                RecoveryState.RESEND_EOF,
-                client_id=client_id
-            )
+        all_pending = pending_eof_completions + pending_eof_resends
+        
+        if all_pending:
+            if len(all_pending) == 1:
+                client_id, batch_type, is_eof = all_pending[0]
+                if is_eof:
+                    logger.info(f"Completando EOF pendiente para cliente {client_id}")
+                    return RecoveryAction(
+                        RecoveryState.COMPLETE_EOF,
+                        client_id=client_id,
+                        batch_type=batch_type
+                    )
+                else:
+                    logger.info(f"Reenviando EOF para cliente {client_id}")
+                    return RecoveryAction(
+                        RecoveryState.RESEND_EOF,
+                        client_id=client_id,
+                        batch_type=batch_type
+                    )
+            else:
+                logger.warning(
+                    f"Múltiples clientes pendientes: "
+                    f"{len(pending_eof_completions)} EOFs, {len(pending_eof_resends)} BEFs"
+                )
+                return RecoveryAction(
+                    RecoveryState.MULTIPLE_PENDING,
+                    pending_clients=all_pending
+                )
         
         return RecoveryAction(RecoveryState.PROCESS_NEW)
     
@@ -90,7 +193,7 @@ class RecoveryManager:
         curr_cid = str(current_client_id) if current_client_id else ""
         curr_mid = str(current_message_id) if current_message_id else ""
         
-        # Parse client log: "client_id;message_id"
+        # Parse client log: "client_id:message_id"
         log_cid, log_mid = self._parse_client_log(client_log)
         
         # Parse EOF log: "STATUS:client_id:batch_type"
@@ -119,7 +222,7 @@ class RecoveryManager:
         return RecoveryAction(RecoveryState.PROCESS_NEW)
     
     def _parse_client_log(self, line: str) -> tuple:
-        """Parse: client_id;message_id"""
+        """Parse: client_id:message_id"""
         if not line or self.LOG_DELIMITER not in line:
             return None, None
         try:
@@ -129,13 +232,17 @@ class RecoveryManager:
             return None, None
     
     def _parse_eof_log(self, line: str) -> tuple:
-        """Parse: STATUS:client_id:batch_type"""
+        """Parse: STATUS:client_id:batch_type;"""
         if not line or self.LOG_DELIMITER not in line:
             return None, None, None
         try:
+            # Remover el delimitador final
+            line = line.rstrip(self.LOG_DELIMITER)
             parts = line.split(self.LOG_SPLITTER)
             if len(parts) >= 3:
                 return parts[0], parts[1], parts[2]
+            elif len(parts) == 2:
+                return parts[0], parts[1], None
         except:
             pass
         return None, None, None
@@ -169,7 +276,8 @@ class RecoveryManager:
         if eof_status == "BEF":
             return RecoveryAction(
                 RecoveryState.RESEND_EOF,
-                client_id=eof_cid
+                client_id=eof_cid,
+                batch_type=eof_batch
             )
         
         return RecoveryAction(RecoveryState.PROCESS_NEW)

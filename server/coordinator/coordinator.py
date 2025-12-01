@@ -12,7 +12,7 @@ class PeerCoordinator:
     Helper de coordinación para manejo de EOF multi-cliente.
     """
     
-    def __init__(self, node_id: str, rabbitmq_host: str, total_nodes: int, all_node_ids: list,exchange_name: str = 'coordination_exchange'):
+    def __init__(self, node_id: str, rabbitmq_host: str, total_nodes: int, all_node_ids: list, exchange_name: str = 'coordination_exchange'):
         self.node_id = node_id
         self.rabbitmq_host = rabbitmq_host
         self.total_nodes = total_nodes
@@ -33,7 +33,10 @@ class PeerCoordinator:
         # ACKs pendientes por cliente (cuando soy líder)
         self.pending_acks: Dict[str, Dict] = {}
         
-        # Lock para sincronizar acceso al exchang, tenemos un RC con Rabbit sino
+        # Timers para timeout de ACKs cuando soy líder
+        self.leader_ack_timers: Dict[str, threading.Timer] = {}
+        
+        # Lock para sincronizar acceso al exchange, tenemos un RC con Rabbit sino
         self._exchange_lock = threading.Lock()
         
         # Exchange único para toda la coordinación
@@ -152,9 +155,50 @@ class PeerCoordinator:
         # Si soy el único nodo, llamar callback inmediatamente
         if self.total_nodes == 1:
             logger.info(f"Soy el único nodo, propagando EOF de {client_id} inmediatamente")
-            on_all_acks_callback(client_id,message_id, batch_type)
+            on_all_acks_callback(client_id, message_id, batch_type)
             del self.pending_acks[client_id]
             self.leader_clients.discard(client_id)
+            return
+        
+        leader_timeout_seconds = 15
+        
+        timeout_timer = threading.Timer(
+            leader_timeout_seconds,
+            self._leader_ack_timeout,
+            args=(client_id, message_id, batch_type, on_all_acks_callback)
+        )
+        timeout_timer.daemon = True
+        timeout_timer.start()
+        self.leader_ack_timers[client_id] = timeout_timer
+        
+        logger.warning(f"Timeout de {leader_timeout_seconds}s configurado para ACKs de {client_id}")
+    
+    def _leader_ack_timeout(self, client_id: str, message_id: str, batch_type: str, callback):
+        """
+        Callback cuando expira el timeout esperando ACKs.
+        Avanza de todas formas aunque falten ACKs.
+        """
+        if client_id not in self.pending_acks:
+            logger.debug(f"Timeout expiró pero ya no hay pending_acks para {client_id}")
+            return
+        
+        missing_nodes = self.pending_acks[client_id]['nodes']
+        
+        logger.error(
+            f"TIMEOUT esperando ACKs para cliente {client_id}. "
+            f"Nodos faltantes: {missing_nodes}. "
+            f"Avanzando de todas formas para no bloquear el sistema."
+        )
+        
+        # Propagar EOF downstream aunque falten ACKs
+        callback(client_id, message_id, batch_type)
+        
+        # Limpiar estado
+        del self.pending_acks[client_id]
+        self.leader_clients.discard(client_id)
+        
+        if client_id in self.leader_ack_timers:
+            del self.leader_ack_timers[client_id]
     
     def handle_ack_received(self, client_id: str, node_id: str, batch_type: str):
         """Procesa un ACK recibido"""
@@ -172,15 +216,22 @@ class PeerCoordinator:
         
         if pending_count == 0:
             logger.info(f"Todos los ACKs recibidos para cliente {client_id}. Propagando EOF downstream")
+            
+            # Cancelar el timeout timer
+            if client_id in self.leader_ack_timers:
+                self.leader_ack_timers[client_id].cancel()
+                del self.leader_ack_timers[client_id]
+                logger.debug(f"Timer de timeout cancelado para {client_id}")
+            
             # Llamar al callback
             callback = self.pending_acks[client_id]['callback']
             batch_type_stored = self.pending_acks[client_id]['batch_type']
             message_id_stored = self.pending_acks[client_id]['message_id']
             callback(client_id, message_id_stored, batch_type_stored)
+            
             # Limpiar estado
             del self.pending_acks[client_id]
             self.leader_clients.discard(client_id)
-            
     
     def handle_eof_fanout_received(self, client_id: str, leader_node: str, batch_type: str):
         """Procesa un EOF_FANOUT recibido"""
@@ -226,11 +277,17 @@ class PeerCoordinator:
         """Cierra las conexiones"""
         logger.info("Cerrando PeerCoordinator...")
         
-        # Cancelar todos los timers pendientes
+        # Cancelar todos los timers pendientes (followers)
         for client_id, timer in list(self.ack_timers.items()):
             timer.cancel()
             logger.debug(f"Timer cancelado para cliente {client_id}")
         self.ack_timers.clear()
+        
+        # Cancelar timers de líder
+        for client_id, timer in list(self.leader_ack_timers.items()):
+            timer.cancel()
+            logger.debug(f"Timer de líder cancelado para cliente {client_id}")
+        self.leader_ack_timers.clear()
         
         try:
             if self.coordination_exchange:

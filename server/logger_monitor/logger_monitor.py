@@ -9,6 +9,7 @@ class LoggerMonitor:
     def __init__(self, log_path):
         self.logger = LogWriter(log_path)
         self.lock = threading.Lock()
+        self.log_path = log_path
     
     def write(self, message):
         """Escritura thread-safe"""

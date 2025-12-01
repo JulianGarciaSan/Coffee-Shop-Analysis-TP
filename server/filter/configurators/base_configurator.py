@@ -49,7 +49,11 @@ class NodeConfigurator(ABC):
 
     def create_headers(self, client_id: Optional[int], message_id: Optional[int]) -> Dict[str, Any]:
         headers = {}
-        if client_id is not None and message_id is not None:
+        if client_id is not None and message_id is None:
+            return {'client_id': client_id,
+                    'message_id': 0
+                    }
+        elif client_id is not None and message_id is not None:
             return {'client_id': client_id,
                     'message_id': message_id
                     }
