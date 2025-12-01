@@ -53,12 +53,6 @@ class FilterNode:
         self.client_logger = LoggerMonitor('/app/client_logs.txt')
         self.eof_logger = LoggerMonitor('/app/eof_logs.txt')
         
-        self.recovery = RecoveryManager(
-            self.logger,
-            self.client_logger, 
-            self.eof_logger
-        )
-
         self.is_first_message = True
         
         self.node_configurator = NodeConfiguratorFactory.create_configurator(
@@ -93,6 +87,13 @@ class FilterNode:
         health_port = int(os.getenv('HEALTH_PORT', '9999'))
         self.health_server = HealthChecker(port=health_port)
         self.health_server.start()
+        
+        self.recovery = RecoveryManager(
+            self.logger,
+            self.client_logger, 
+            self.eof_logger
+        )
+
         
 
 
@@ -177,7 +178,6 @@ class FilterNode:
             self.node_configurator.send_data(processed_data, self.middlewares, batch_type, client_id=client_id,message_id=message_id)
             self.logger.write_enqueue()
             # time.sleep(30)
-            self.logger.write_termination()
             return False
 
         except Exception as e:
@@ -236,7 +236,7 @@ class FilterNode:
             logging.info("Mensaje recibido en FilterNode")
             should_stop = self.process_message(body, routing_key, client_id,message_id)
             ch.basic_ack(delivery_tag=method.delivery_tag)
-            self.logger.write_with_timestamp(f"Termine la iteracion")
+            self.logger.write_termination()
 
             
             if should_stop:
@@ -253,6 +253,7 @@ class FilterNode:
             action = self.recovery.check_startup_recovery()
 
             if action.state == RecoveryState.COMPLETE_EOF:
+                logger.info(f"Completando EOF para cliente {action.client_id}")
                 self.node_configurator._on_all_acks_received(
                     action.client_id, 
                     action.batch_type
@@ -260,11 +261,38 @@ class FilterNode:
                 self.is_first_message = False
                 
             elif action.state == RecoveryState.RESEND_EOF:
+                logger.info(f"Reenviando EOF para cliente {action.client_id}")
                 self.node_configurator.process_message(
                     TransactionBatchDTO("EOF:1", BatchType.EOF).to_bytes_fast(),
                     None,
                     action.client_id
                 )
+                self.is_first_message = False
+            
+            elif action.state == RecoveryState.MULTIPLE_PENDING:
+                logger.warning(f"Múltiples clientes pendientes detectados: {len(action.pending_clients)}")
+                
+                eof_count = sum(1 for _, _, is_eof in action.pending_clients if is_eof)
+                bef_count = len(action.pending_clients) - eof_count
+                
+                logger.info(f"Procesando {eof_count} EOFs y {bef_count} BEFs pendientes")
+                
+                for client_id, batch_type, is_eof in action.pending_clients:
+                    if is_eof:
+                        logger.info(f"Completando EOF pendiente para cliente {client_id}")
+                        self.node_configurator._on_all_acks_received(
+                            client_id, 
+                            batch_type
+                        )
+                    else:
+                        logger.info(f"Reenviando EOF pendiente para cliente {client_id}")
+                        self.node_configurator.process_message(
+                            TransactionBatchDTO("EOF:1", BatchType.EOF).to_bytes_fast(),
+                            None,
+                            client_id
+                        )
+                
+                logger.info("Todos los clientes pendientes procesados")
                 self.is_first_message = False
                 
             else:

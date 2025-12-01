@@ -42,11 +42,11 @@ class ChaosMonkey:
             if any(keyword in container.name.lower() for keyword in [
                 # 'groupby_top_customers',
                 # 'top_consumers_aggregator',
-                'groupby_semester',
+                # 'groupby_semester',
                 # 'groupby_best_selling_2024_1',
                 # 'groupby_best_selling_2024_2'
                 # 'filter_year',
-                # 'filter_year_1','filter_year_2','filter_year_3',
+                'filter_year_1','filter_year_2','filter_year_3',
                 # 'filter_amount_1','filter_amount_2','filter_amount_3',
                 # 'filter_hour_1','filter_hour_2','filter_hour_3',
                 # 'dedup_q1',
@@ -109,7 +109,7 @@ class ChaosMonkey:
         logger.info(f"Contenedores protegidos: {self.excluded_containers}")
         
         logger.info("Esperando 30 segundos para que el sistema se estabilice...")
-        time.sleep(30)
+        time.sleep(100)
         
         logger.info("Comenzando el caos...")
         
@@ -167,7 +167,7 @@ def main():
     kill_interval = int(os.getenv("KILL_INTERVAL", "1"))
     min_kills = int(os.getenv("MIN_KILLS", "1"))
     max_kills = int(os.getenv("MAX_KILLS", "9"))
-    max_total_kills = int(os.getenv("MAX_TOTAL_KILLS", "60"))
+    max_total_kills = int(os.getenv("MAX_TOTAL_KILLS", "200"))
     
     chaos = ChaosMonkey(
         kill_interval=kill_interval,
