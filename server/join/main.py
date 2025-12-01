@@ -35,7 +35,7 @@ class JoinNode:
         self.input_exchange = os.getenv('INPUT_EXCHANGE', 'join.exchange')
         self.output_exchange = os.getenv('OUTPUT_EXCHANGE', 'report.exchange')
         self.checkpoint_dir = os.getenv('CHECKPOINT_DIR', f'/app/server/logs/join/checkpoints')
-        
+        self.extra_id = os.getenv('EXTRA_ID', '0')
         self.node_id = int(os.getenv('JOIN_NODE_ID', '0'))
         self.total_join_nodes = int(os.getenv('TOTAL_JOIN_NODES', '3'))
         self.node_name = f"join_node_{self.node_id}"
@@ -43,7 +43,7 @@ class JoinNode:
         self.client_states: Dict[str, ClientProcessingState] = defaultdict(ClientProcessingState)
         self.router: Dict[str, Callable] = {}
         self.q3_joined_data_by_client: Dict[str, List[Dict]] = {}
-        
+        self.outgoing_counter_by_client: Dict[str, int] = defaultdict(int)
         self.join_engine = JoinEngine()
         self.processor_handler = ProcessorsHandler(self)
         
@@ -56,6 +56,7 @@ class JoinNode:
         self.intialize_query_handlers()
         
         self._setup_message_routes()  
+        self._execute_pending_joins_after_recovery()
         
         health_port = int(os.getenv('HEALTH_PORT', '9999'))
         self.health_server = HealthChecker(port=health_port)
@@ -148,6 +149,28 @@ class JoinNode:
         if hasattr(self.input_middleware, 'shutdown'):
             self.input_middleware.shutdown = self.shutdown
         
+    def _execute_pending_joins_after_recovery(self):
+        """
+        Después de la recuperación, verifica si hay joins listos para ejecutar.
+        """
+        logger.info("Verificando joins pendientes después de recuperación...")
+        
+        for client_id in self.client_states.keys():
+            try:
+                state = self.client_states[client_id]
+                logger.info(f"Estado post-recuperación cliente {client_id}: "
+                          f"stores={state.stores_loaded}, users={state.users_loaded}, "
+                          f"menu_items={state.menu_items_loaded}, "
+                          f"top_customers={state.top_customers_loaded}, "
+                          f"best_selling={state.best_selling_loaded}, "
+                          f"most_profit={state.most_profit_loaded}, "
+                          f"groupby_eof_count={state.groupby_eof_count}, "
+                          f"top_customers_eof_count={state.top_customers_eof_count}")
+                
+                self._check_and_execute_joins(client_id)
+                
+            except Exception as e:
+                logger.error(f"Error verificando joins para cliente {client_id}: {e}")
             
     def _setup_output_middleware(self):
         self.output_middleware = MessageMiddlewareExchange(
@@ -165,6 +188,14 @@ class JoinNode:
         if hasattr(self.output_middleware, 'shutdown'):
             self.output_middleware.shutdown = self.shutdown
             
+            
+    def generate_next_message_id(self, client_id: str) -> int:
+        """
+        Genera ID único por mensaje para este cliente.
+        """
+        self.outgoing_counter_by_client[client_id] += 1
+        return int(self.extra_id) * 1000000 + self.outgoing_counter_by_client[client_id]
+            
     
     def _check_and_execute_joins(self, client_id: str):
         state = self.client_states[client_id]
@@ -179,6 +210,12 @@ class JoinNode:
             self.q3_joined_data_by_client[client_id] = joined_data
             self.tpv_query_handler.send_q3_results(client_id, joined_data)
             state.q3_results_sent = True
+            
+            self.checkpoint_handler.save_message_checkpoint(
+                client_id, 
+                f"q3_sent_{client_id}",  
+                [f"SENT:q3"]  
+            )
         
         # Q4: Top Customers + Stores + Users
         if state.is_q4_ready():
@@ -190,6 +227,12 @@ class JoinNode:
             )
             self.top_customers_query_handler.send_q4_results(client_id, joined_data)
             state.q4_results_sent = True
+            
+            self.checkpoint_handler.save_message_checkpoint(
+                client_id, 
+                f"q4_sent_{client_id}",
+                [f"SENT:q4"]
+            )
         
         # Q2 Best Selling
         if state.is_best_selling_ready():
@@ -201,7 +244,13 @@ class JoinNode:
             )
             self.profit_and_selling_query_handler.send_best_selling_results(client_id, joined_data)
             state.best_selling_sent = True
-
+            
+            self.checkpoint_handler.save_message_checkpoint(
+                client_id,
+                f"best_selling_sent_{client_id}",
+                [f"SENT:best_selling"]
+            )
+        
         # Q2 Most Profit
         if state.is_most_profit_ready():
             logger.info(f"Condiciones listas para JOIN Q2 Most Profit de cliente '{client_id}'")
@@ -212,7 +261,12 @@ class JoinNode:
             )
             self.profit_and_selling_query_handler.send_most_profit_results(client_id, joined_data)
             state.most_profit_sent = True
-    
+            
+            self.checkpoint_handler.save_message_checkpoint(
+                client_id,
+                f"most_profit_sent_{client_id}",
+                [f"SENT:most_profit"]
+            )
     def process_message(self, message: bytes, routing_key: str, client_id, message_id) -> bool:
         try:
             handler = self.router.get(routing_key)

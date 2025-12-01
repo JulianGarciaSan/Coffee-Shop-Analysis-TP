@@ -41,21 +41,23 @@ class TPVQueryHandler:
                     csv_lines.append(f"{record['year_half_created_at']},{store_name},{record['tpv']:.1f}")
                 
                 results_csv = '\n'.join(csv_lines)
-                                
+                unique_id = self.join_node.generate_next_message_id(client_id)
                 result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
                 self.output_middleware.send(
                     result_dto.to_bytes_fast(), 
                     routing_key=f'q3.data',
-                    headers={'client_id': int(client_id)}
+                    headers={'client_id': int(client_id), 'message_id': unique_id}
                 )
                 
                 logger.info(f"Batch Q3 enviado para cliente '{client_id}': {len(batch)} registros ({i+1}-{i+len(batch)}/{len(sorted_data)})")
             
             eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
+            unique_id = self.join_node.generate_next_message_id(client_id)
+
             self.output_middleware.send(
                 eof_dto.to_bytes_fast(), 
                 routing_key=f'q3.data',
-                headers={'client_id': int(client_id)}
+                headers={'client_id': int(client_id), 'message_id': unique_id}
             )
             
             logger.info(f"Resultados Q3 completados para cliente '{client_id}': {len(joined_data)} registros en total")
@@ -83,7 +85,14 @@ class TPVQueryHandler:
         dto = TransactionBatchDTO.from_bytes_fast(message)
         
         if dto.batch_type == BatchType.RAW_CSV:
-            csv_lines_with_prefix = [f"tpv:{line}" for line in dto.data.split('\n') if line.strip()]
+            lines = dto.data.split('\n')
+            csv_lines_with_prefix = []
+            
+            for line in lines:
+                if line.strip():
+                    if line.strip() == 'year_half_created_at,store_id,total_payment_value,transaction_count':
+                        continue
+                    csv_lines_with_prefix.append(f"tpv:{line.strip()}")
             
             self.join_node.tpv_processors[client_id].process_batch(dto.data, self._parse_tpv_line)
             self.join_node.checkpoint_handler.save_message_checkpoint(
@@ -95,6 +104,10 @@ class TPVQueryHandler:
             self.join_node.client_states[client_id].groupby_eof_count += 1
             logger.info(f"EOF TPV para '{client_id}': {self.join_node.client_states[client_id].groupby_eof_count}/{self.join_node.client_states[client_id].expected_groupby_nodes}")
             self.join_node._check_and_execute_joins(client_id)
+            lines = [f"EOF:tpv"]
+            self.join_node.checkpoint_handler.save_message_checkpoint(
+                client_id, message_id, lines
+            )
             return (False, True)
         
         return (False, False)

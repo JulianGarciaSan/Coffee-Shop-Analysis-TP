@@ -153,7 +153,7 @@ class BestSellingAggregatorNode:
             if not candidates:
                 continue
             
-            logger.info(f"===== CANDIDATOS SELLING para {year_month}, cliente {client_id} =====")
+            # logger.info(f"===== CANDIDATOS SELLING para {year_month}, cliente {client_id} =====")
             for i, cand in enumerate(candidates):
                 logger.info(f"  Candidato {i}: item_id='{cand['item_id']}', sellings_qty={cand['sellings_qty']}")
             
@@ -162,15 +162,15 @@ class BestSellingAggregatorNode:
             
             best_selling[year_month] = (top['item_id'], top['sellings_qty'])
             
-            logger.info(f"  >>> GANADOR: item_id='{top['item_id']}', sellings_qty={top['sellings_qty']}")
-            logger.info(f"=" * 70)
+            # logger.info(f"  >>> GANADOR: item_id='{top['item_id']}', sellings_qty={top['sellings_qty']}")
+            # logger.info(f"=" * 70)
         
         profit_candidates = self.month_profit_candidates_by_client.get(client_id, {})
         for year_month, candidates in profit_candidates.items():
             if not candidates:
                 continue
             
-            logger.info(f"===== CANDIDATOS PROFIT para {year_month}, cliente {client_id} =====")
+            # logger.info(f"===== CANDIDATOS PROFIT para {year_month}, cliente {client_id} =====")
             for i, cand in enumerate(candidates):
                 logger.info(f"  Candidato {i}: item_id='{cand['item_id']}', profit_sum={cand['profit_sum']}")
             
@@ -179,8 +179,8 @@ class BestSellingAggregatorNode:
             
             most_profit[year_month] = (top['item_id'], top['profit_sum'])
             
-            logger.info(f"  >>> GANADOR: item_id='{top['item_id']}', profit_sum={top['profit_sum']}")
-            logger.info(f"=" * 70)
+            # logger.info(f"  >>> GANADOR: item_id='{top['item_id']}', profit_sum={top['profit_sum']}")
+            # logger.info(f"=" * 70)
         
         return best_selling, most_profit
     
@@ -248,7 +248,6 @@ class BestSellingAggregatorNode:
     def generate_next_message_id(self, client_id: str) -> int:
         """
         Genera ID único por mensaje para este cliente.
-        Determinístico porque el contador se reconstruye desde el checkpoint.
         """
         self.outgoing_counter_by_client[client_id] += 1
         return int(self.node_id) * 1000000 + self.outgoing_counter_by_client[client_id]
@@ -268,7 +267,7 @@ class BestSellingAggregatorNode:
     def send_best_selling_data(self, client_id: str, best_selling: Dict[str, Tuple[str, int]], message_id: str, selling_routing_key: str):
         # Enviar best selling DATA
         selling_csv = self.generate_top1_csv(best_selling, "sellings_qty")
-        unique_id = self.generate_next_message_id(message_id)  # ID 1
+        unique_id = self.generate_next_message_id(client_id)  # ID 1
         headers = self.create_headers(client_id, unique_id)
         
         selling_dto = TransactionItemBatchDTO(selling_csv, BatchType.RAW_CSV)

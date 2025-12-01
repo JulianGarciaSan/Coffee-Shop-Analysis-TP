@@ -194,7 +194,6 @@ class TopCustomersAggregatorNode:
 
     def send_data_to_join_node(self, csv_data: str, client_id: str, node_id: int, original_message_id: str):
         unique_data_id = self.generate_next_message_id(original_message_id)
-        print(f"MESSAGE ID DATA: {unique_data_id}")
         result_dto = TransactionBatchDTO(csv_data, BatchType.RAW_CSV)
         routing_key = f"join_node_{node_id}.top_customers.data"
         
@@ -207,7 +206,6 @@ class TopCustomersAggregatorNode:
         # print("///////////// ENVIANDO EOF A JOIN NODE /////////////")
         # time.sleep(10)
         unique_data_id = self.generate_next_message_id(original_message_id)
-        print(f"MESSAGE ID EOF: {unique_data_id}")
         eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
         routing_key = f"join_node_{node_id}.top_customers.data"
         
