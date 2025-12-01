@@ -19,18 +19,21 @@ class ProcessorsHandler:
         dto = StoreBatchDTO.from_bytes_fast(message)
         
         if dto.batch_type == BatchType.RAW_CSV:
+            lines = dto.data.split('\n')
             csv_lines_with_prefix = []
-            for line in dto.data.split('\n'):
-                if line.strip():
-                    csv_lines_with_prefix.append(f"stores:{line}")
             
+            for line in lines:
+                if line.strip():
+                    if line.strip() == 'store_id,store_name':
+                        continue
+                    csv_lines_with_prefix.append(f"stores:{line.strip()}")
+            
+            self.join_node.store_processors[client_id].process_batch(dto.data)
             self.join_node.checkpoint_handler.save_message_checkpoint(
                 client_id, 
                 message_id, 
                 csv_lines_with_prefix
             )
-            
-            self.join_node.store_processors[client_id].process_batch(dto.data)
             return (False, True)
         
         if dto.batch_type == BatchType.EOF:
@@ -38,6 +41,10 @@ class ProcessorsHandler:
             stores_count = len(self.join_node.store_processors[client_id].get_data())
             logger.info(f"EOF stores para '{client_id}': {stores_count} stores")
             self.join_node._check_and_execute_joins(client_id)
+            lines = [f"EOF:stores"]
+            self.join_node.checkpoint_handler.save_message_checkpoint(
+                client_id, message_id, lines
+            )
             return (False, True)
         
         return (False, False)
@@ -49,13 +56,19 @@ class ProcessorsHandler:
         dto = UserBatchDTO.from_bytes_fast(message)
         
         if dto.batch_type == BatchType.RAW_CSV:
-            csv_lines_with_prefix = [f"users:{line}" for line in dto.data.split('\n') if line.strip()]
+            lines = dto.data.split('\n')
+            csv_lines_with_prefix = []
             
+            for line in lines:
+                if line.strip():
+                    if line.strip() == 'user_id,birthdate':
+                        continue
+                    csv_lines_with_prefix.append(f"users:{line.strip()}")
+            
+            self.join_node.user_processors[client_id].process_batch(dto.data)
             self.join_node.checkpoint_handler.save_message_checkpoint(
                 client_id, message_id, csv_lines_with_prefix
             )
-            
-            self.join_node.user_processors[client_id].process_batch(dto.data)
             return (False, True)
         
         if dto.batch_type == BatchType.EOF:
@@ -63,6 +76,10 @@ class ProcessorsHandler:
             users_count = len(self.join_node.user_processors[client_id].get_data())
             logger.info(f"EOF users para '{client_id}': {users_count} users")
             self.join_node._check_and_execute_joins(client_id)
+            lines = [f"EOF:users"]
+            self.join_node.checkpoint_handler.save_message_checkpoint(
+                client_id, message_id, lines
+            )
             return (False, True)
         
         return (False, False)
@@ -73,14 +90,19 @@ class ProcessorsHandler:
         dto = MenuItemBatchDTO.from_bytes_fast(message)
         
         if dto.batch_type == BatchType.RAW_CSV:
-            # ✅ Prefijo "menu_items:"
-            csv_lines_with_prefix = [f"menu_items:{line}" for line in dto.data.split('\n') if line.strip()]
+            lines = dto.data.split('\n')
+            csv_lines_with_prefix = []
             
+            for line in lines:
+                if line.strip():
+                    if line.strip() == 'item_id,item_name':
+                        continue
+                    csv_lines_with_prefix.append(f"menu_items:{line.strip()}")
+            
+            self.join_node.menu_item_processors[client_id].process_batch(dto.data)
             self.join_node.checkpoint_handler.save_message_checkpoint(
                 client_id, message_id, csv_lines_with_prefix
             )
-            
-            self.join_node.menu_item_processors[client_id].process_batch(dto.data)
             return (False, True)
         
         if dto.batch_type == BatchType.EOF:
@@ -88,6 +110,10 @@ class ProcessorsHandler:
             menu_items_count = len(self.join_node.menu_item_processors[client_id].get_data())
             logger.info(f"EOF menu_items para '{client_id}': {menu_items_count} items")
             self.join_node._check_and_execute_joins(client_id)
+            lines = [f"EOF:menu_items"]
+            self.join_node.checkpoint_handler.save_message_checkpoint(
+                client_id, message_id, lines
+            )
             return (False, True)
         
         return (False, False)

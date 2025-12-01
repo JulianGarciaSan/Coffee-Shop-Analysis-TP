@@ -520,51 +520,57 @@ services:
       - ./server/logs/filter_amount_3/eof_logs.txt:/app/eof_logs.txt
       - ./server/logs/filter_amount_3/message_logs.txt:/app/message_logs.txt
 
-  # join_node_0:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/join/Dockerfile
-  #   container_name: join_node_0
-  #   restart: on-failure
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - INPUT_EXCHANGE=join.exchange
-  #     - OUTPUT_EXCHANGE=report.exchange
-  #     - JOIN_NODE_ID=0
-  #     - TOTAL_JOIN_NODES=2
-  #     - TOTAL_TOPK_AGGREGATORS=2
-  #     - CHECKPOINT_DIR=/app/server/logs/join_node_0/checkpoints
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
-  #     - ./server/logs/join_node_0/checkpoints:/app/server/logs/join_node_0/checkpoints
-  #     - ./server/logs/join_node_0/client_logs.txt:/app/client_logs.txt
+  join_node_0:
+    build:
+      context: .
+      dockerfile: ./server/join/Dockerfile
+    container_name: join_node_0
+    ports:
+      - "29999:9999"
+    restart: on-failure
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - INPUT_EXCHANGE=join.exchange
+      - OUTPUT_EXCHANGE=report.exchange
+      - JOIN_NODE_ID=0
+      - EXTRA_ID=20
+      - TOTAL_JOIN_NODES=2
+      - TOTAL_TOPK_AGGREGATORS=2
+      - CHECKPOINT_DIR=/app/server/logs/join_node_0/checkpoints
+    volumes:
+      - ./server/config.ini:/app/config.ini
+      - ./server/logs/join_node_0/checkpoints:/app/server/logs/join_node_0/checkpoints
+      - ./server/logs/join_node_0/client_logs.txt:/app/client_logs.txt
 
-  # join_node_1:
-  #   build:
-  #     context: .
-  #     dockerfile: ./server/join/Dockerfile
-  #   container_name: join_node_1
-  #   restart: on-failure
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - INPUT_EXCHANGE=join.exchange
-  #     - OUTPUT_EXCHANGE=report.exchange
-  #     - JOIN_NODE_ID=1
-  #     - TOTAL_JOIN_NODES=2
-  #     - TOTAL_TOPK_AGGREGATORS=2
-  #     - CHECKPOINT_DIR=/app/server/logs/join_node_1/checkpoints
-  #   volumes:
-  #     - ./server/config.ini:/app/config.ini
-  #     - ./server/logs/join_node_1/checkpoints:/app/server/logs/join_node_1/checkpoints
-  #     - ./server/logs/join_node_1/client_logs.txt:/app/client_logs.txt
+  join_node_1:
+    build:
+      context: .
+      dockerfile: ./server/join/Dockerfile
+    container_name: join_node_1
+    restart: on-failure
+    ports:
+      - "39999:9999"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - INPUT_EXCHANGE=join.exchange
+      - OUTPUT_EXCHANGE=report.exchange
+      - JOIN_NODE_ID=1
+      - EXTRA_ID=21
+      - TOTAL_JOIN_NODES=2
+      - TOTAL_TOPK_AGGREGATORS=2
+      - CHECKPOINT_DIR=/app/server/logs/join_node_1/checkpoints
+    volumes:
+      - ./server/config.ini:/app/config.ini
+      - ./server/logs/join_node_1/checkpoints:/app/server/logs/join_node_1/checkpoints
+      - ./server/logs/join_node_1/client_logs.txt:/app/client_logs.txt
 
   # # NODOS Q3 TPV
   # groupby_semester_1:
@@ -964,7 +970,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - PYTHONUNBUFFERED=1
-      - KILL_INTERVAL=10  # Segundos entre caídas
+      - KILL_INTERVAL=1  # Segundos entre caídas
     depends_on:
       gateway:
         condition: service_started

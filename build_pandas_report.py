@@ -16,7 +16,7 @@ def get_data_paths(mode='prod'):
     if mode == 'test':
         return {
             'transactions_dir': './data/transactions_test',
-            'transaction_items_dir': './data/transaction_items_test',
+            'transaction_items_dir': './data/transactions_items_test',
             'users_dir': './data/users',
             'menu_items_file': './data/menu_items/menu_items.csv',
             'payment_methods_file': './data/payment_methods/payment_methods.csv',

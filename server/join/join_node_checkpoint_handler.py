@@ -7,75 +7,83 @@ logger = logging.getLogger(__name__)
 
 
 class JoinNodeCheckpointHandler:
-    """
-    Checkpoint handler con estrategia WAL para JoinNode.
-    Persiste el estado de todos los procesadores y estados de clientes.
-    """
-    
     def __init__(self, join_node):
         self.join_node = join_node
 
     def serialize_operation(self, client_id: str, csv_line: str) -> str:
         """
-        Serializa una operación para el WAL.
-        
-        El csv_line viene con prefijo: "TIPO:csv_data"
-        Ejemplo: "stores:store_1,Store Name"
-        
-        Formato salida: "client_id|tipo|csv_data"
+        Serializa una operación para el LOG.
+        Formato LOG: client_id,tipo,data
         """
         try:
-            # Extraer tipo del prefijo
             if ':' not in csv_line:
-                logger.warning(f"Línea sin prefijo de tipo: {csv_line[:50]}...")
+                logger.warning(f"Línea sin prefijo: {csv_line[:50]}...")
                 return None
             
-            tipo, csv_data = csv_line.split(':', 1)
+            prefix, content = csv_line.split(':', 1)
             
-            # Validar tipo
+            if prefix == 'EOF':
+                eof_type = content
+                return f"{client_id},EOF,{eof_type}"
+            
+            if prefix == 'SENT':
+                query_name = content
+                return f"{client_id},SENT,{query_name}"
+            
+            tipo = prefix
+            csv_data = content
+            
             valid_types = ['stores', 'users', 'menu_items', 'tpv', 
                         'top_customers', 'best_selling', 'most_profit']
             if tipo not in valid_types:
                 logger.warning(f"Tipo inválido: {tipo}")
                 return None
             
-            # Escapar pipes
-            escaped_data = csv_data.replace('|', '\\|')
-            
-            return f"{client_id}|{tipo}|{escaped_data}"
+            return f"{client_id},{tipo},{csv_data}"
             
         except Exception as e:
-            logger.error(f"Error serializando operación: {e}")
+            logger.error(f"Error serializando: {e}")
             return None
 
 
     def deserialize_operation(self, operation_str: str) -> dict:
         """
-        Deserializa una operación desde el WAL.
-        
-        Input: "1|stores|store_1,Store Name"
-        Output: {
-            'client_id': '1',
-            'tipo': 'stores',
-            'csv_data': 'store_1,Store Name'
-        }
+        Deserializa desde: "0,stores,1,G Coffee @ USJ 89q"
+        o "0,EOF,stores"
+        o "0,SENT,q3"
         """
         try:
-            parts = operation_str.split('|', 2)
+            parts = operation_str.split(',', 2)
             
-            if len(parts) != 3:
+            if len(parts) < 3:
                 raise ValueError(f"Formato inválido: {operation_str}")
             
-            client_id, tipo, escaped_data = parts
-            csv_data = escaped_data.replace('\\|', '|')
+            client_id, tipo, content = parts
+            
+            if tipo == 'EOF':
+                return {
+                    'client_id': client_id,
+                    'tipo': 'EOF',
+                    'eof_type': content,
+                    'csv_data': ''
+                }
+            
+            if tipo == 'SENT':
+                return {
+                    'client_id': client_id,
+                    'tipo': 'SENT',
+                    'query_name': content,
+                    'csv_data': ''
+                }
             
             return {
                 'client_id': client_id,
                 'tipo': tipo,
-                'csv_data': csv_data
+                'csv_data': content,
+                'eof_type': ''
             }
         except Exception as e:
-            logger.error(f"Error deserializando operación: {e}")
+            logger.error(f"Error deserializando: {e}")
             raise
 
 
@@ -88,37 +96,76 @@ class JoinNodeCheckpointHandler:
             tipo = operation['tipo']
             csv_data = operation['csv_data']
             
-            # Asegurar procesadores
             self.join_node._get_or_create_processors(client_id)
+            state = self.join_node.client_states[client_id]
             
-            # Aplicar según tipo
+            if tipo == 'SENT':
+                query_name = operation.get('query_name', '')
+                if query_name == 'q3':
+                    state.q3_results_sent = True
+                    logger.info(f"[WAL Recovery] Q3 results ya enviados para cliente {client_id}")
+                elif query_name == 'q4':
+                    state.q4_results_sent = True
+                    logger.info(f"[WAL Recovery] Q4 results ya enviados para cliente {client_id}")
+                elif query_name == 'best_selling':
+                    state.best_selling_sent = True
+                    logger.info(f"[WAL Recovery] Best selling results ya enviados para cliente {client_id}")
+                elif query_name == 'most_profit':
+                    state.most_profit_sent = True
+                    logger.info(f"[WAL Recovery] Most profit results ya enviados para cliente {client_id}")
+                else:
+                    logger.warning(f"Query name desconocido: {query_name}")
+                return
+            
+            if tipo == 'EOF':
+                eof_type = operation.get('eof_type', '')
+                if eof_type == 'stores':
+                    state.stores_loaded = True
+                    logger.info(f"[LOG Recovery] EOF stores para cliente {client_id}")
+                elif eof_type == 'users':
+                    state.users_loaded = True
+                    logger.info(f"[LOG Recovery] EOF users para cliente {client_id}")
+                elif eof_type == 'menu_items':
+                    state.menu_items_loaded = True
+                    logger.info(f"[LOG Recovery] EOF menu_items para cliente {client_id}")
+                elif eof_type == 'tpv':
+                    state.groupby_eof_count += 1
+                    logger.info(f"[LOG Recovery] EOF tpv para cliente {client_id}: {state.groupby_eof_count}/{state.expected_groupby_nodes}")
+                elif eof_type == 'top_customers':
+                    state.top_customers_loaded = True
+                    state.top_customers_eof_count += 1
+                    logger.info(f"[LOG Recovery] EOF top_customers para cliente {client_id}: {state.top_customers_eof_count}/{state.expected_top_customers_aggregators}")
+                elif eof_type == 'best_selling':
+                    state.best_selling_loaded = True
+                    logger.info(f"[LOG Recovery] EOF best_selling para cliente {client_id}")
+                elif eof_type == 'most_profit':
+                    state.most_profit_loaded = True
+                    logger.info(f"[LOG Recovery] EOF most_profit para cliente {client_id}")
+                else:
+                    logger.warning(f"Tipo de EOF desconocido: {eof_type}")
+                return
+            
             if tipo == 'stores':
                 self.join_node.store_processors[client_id].process_batch(csv_data)
-                
             elif tipo == 'users':
                 self.join_node.user_processors[client_id].process_batch(csv_data)
-
             elif tipo == 'menu_items':
                 self.join_node.menu_item_processors[client_id].process_batch(csv_data)
-
             elif tipo == 'tpv':
                 self.join_node.tpv_processors[client_id].process_batch(
                     csv_data, 
                     self.join_node.tpv_query_handler._parse_tpv_line
                 )
-                
             elif tipo == 'top_customers':
                 self.join_node.top_customers_processors[client_id].process_batch(
                     csv_data,
                     self.join_node.top_customers_query_handler._parse_top_customers_line
                 )
-                
             elif tipo == 'best_selling':
                 self.join_node.best_selling_processors[client_id].process_batch(
                     csv_data,
                     self.join_node.profit_and_selling_query_handler._parse_best_selling_line
                 )
-                
             elif tipo == 'most_profit':
                 self.join_node.most_profit_processors[client_id].process_batch(
                     csv_data,
@@ -157,8 +204,8 @@ class JoinNodeCheckpointHandler:
                 'best_selling_sent': state.best_selling_sent,
                 'most_profit_sent': state.most_profit_sent,
             }
-        
-        # 2-8. Procesadores
+        serialized['outgoing_counter'] = self.join_node.outgoing_counter_by_client.get(client_id, 0)
+
         if client_id in self.join_node.store_processors:
             serialized['stores'] = self.join_node.store_processors[client_id].get_data()
 
@@ -180,7 +227,6 @@ class JoinNodeCheckpointHandler:
         if client_id in self.join_node.most_profit_processors:
             serialized['most_profit'] = self.join_node.most_profit_processors[client_id].get_data()
 
-        # 9. Q3 joined data
         if client_id in self.join_node.q3_joined_data_by_client:
             serialized['q3_joined_data'] = self.join_node.q3_joined_data_by_client[client_id]
         
@@ -193,7 +239,6 @@ class JoinNodeCheckpointHandler:
         """
         self.join_node._get_or_create_processors(client_id)
         
-        # 1. Estado
         if 'state' in data:
             state_data = data['state']
             state = self.join_node.client_states[client_id]
@@ -205,17 +250,23 @@ class JoinNodeCheckpointHandler:
             state.best_selling_loaded = state_data.get('best_selling_loaded', False)
             state.most_profit_loaded = state_data.get('most_profit_loaded', False)
             state.groupby_eof_count = state_data.get('groupby_eof_count', 0)
+            logger.info(f"Restaurados TPV EOF:{state.groupby_eof_count} para cliente {client_id}    ")
             state.expected_groupby_nodes = state_data.get('expected_groupby_nodes', 2)
             state.expected_top_customers_aggregators = state_data.get('expected_top_customers_aggregators', 2)
             state.top_customers_eof_count = state_data.get('top_customers_eof_count', 0)
+            logger.info(f"Restaurados top_customers EOF:{state.top_customers_eof_count} para cliente {client_id}    ")
             state.q3_results_sent = state_data.get('q3_results_sent', False)
             state.q4_results_sent = state_data.get('q4_results_sent', False)
             state.best_selling_sent = state_data.get('best_selling_sent', False)
+            logger.info(f"Restaurados best_selling EOF:{state.best_selling_sent} para cliente {client_id}    ")
             state.most_profit_sent = state_data.get('most_profit_sent', False)
+            logger.info(f"Restaurados most_profit EOF:{state.most_profit_sent} para cliente {client_id}    ")
+
             
             logger.info(f"Estado restaurado para cliente {client_id}")
         
-        # 2-8. Procesadores
+        self.join_node.outgoing_counter_by_client[client_id] = data.get('outgoing_counter', 0)
+
         if 'stores' in data:
             self.join_node.store_processors[client_id].data = data['stores']
             logger.info(f"Restaurados {len(data['stores'])} stores para cliente {client_id}")

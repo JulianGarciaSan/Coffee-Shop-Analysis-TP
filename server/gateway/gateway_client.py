@@ -44,13 +44,13 @@ class ClientHandler(threading.Thread):
         self.report_data = {
             'q1': [],
             'q3': [],
-            # 'q4': [],
-            # 'q2_most_profit': [],
-            # 'q2_best_selling': []
+            'q4': [],
+            'q2_most_profit': [],
+            'q2_best_selling': []
         }
         self.eof_count = 0
         #self.max_expected_reports = 5
-        self.max_expected_reports = len(self.report_data)
+        self.max_expected_reports = self._calculate_expected_eofs()
         
         # self.reports_config = [
         #     ('q1', self._convert_q1_to_csv, "Q1", "transacciones"),
@@ -161,9 +161,9 @@ class ClientHandler(threading.Thread):
             logger.info(f"Hilo receiver del cliente {self.client_id} finalizó")
             #self._cleanup()      
              
-    def _get_shard_for_user(self, user_id: str) -> int:
-        normalized_user_id = user_id.rstrip('.0') if user_id.endswith('.0') else user_id
-        return int(normalized_user_id) % self.total_join_nodes
+    # def _get_shard_for_user(self, user_id: str) -> int:
+    #     normalized_user_id = user_id.rstrip('.0') if user_id.endswith('.0') else user_id
+    #     return int(normalized_user_id) % self.total_join_nodes
     
     def _handle_batch_message(self, message):
         handlers = {
@@ -302,15 +302,21 @@ class ClientHandler(threading.Thread):
                 serialized_data = batch_dto.to_bytes_fast()
                 
                 for node_id in range(self.total_join_nodes):
+                    # NUEVO: Incrementar message_id para cada envío
+                    self.message_id += 1
+                    
+                    # NUEVO: Crear headers únicos para cada envío
+                    unique_headers = self.create_headers(self.client_id, self.message_id)
+                    
                     routing_key = f"join_node_{node_id}.users.data"
                     
                     self._join_middleware.send(
                         serialized_data,  
                         routing_key=routing_key,
-                        headers=headers
+                        headers=unique_headers  # Usar headers únicos
                     )
                     
-                    logger.debug(f"Chunk {chunk_start//CHUNK_SIZE + 1}: Users → join_node_{node_id}: {len(lines_to_send)-1} líneas (COPIA COMPLETA)")
+                    logger.debug(f"Chunk {chunk_start//CHUNK_SIZE + 1}: Users → join_node_{node_id}: {len(lines_to_send)-1} líneas (msg_id: {self.message_id})")
                 
                 if hasattr(self._join_middleware, 'connection') and self._join_middleware.connection:
                     try:
@@ -416,6 +422,25 @@ class ClientHandler(threading.Thread):
                 logger.error(f"Error enviando EXIT al cliente {self.client_id}")
         except Exception as e:
             logger.error(f"Error enviando EXIT: {e}")
+            
+        
+    def _calculate_expected_eofs(self):
+        """
+        Calcula el número total de EOFs esperados basándose en la arquitectura:
+        - Q1: 1 EOF (aggregators)
+        - Q2_most_profit: 1 EOF (join nodes) 
+        - Q2_best_selling: 1 EOF (join nodes)
+        - Q3: 1 EOF (join nodes)
+        - Q4: total_join_nodes EOFs (cada join node envía Q4)
+        """
+        base_reports = 4  # Q1, Q2_most_profit, Q2_best_selling, Q3
+        q4_reports = self.total_join_nodes  # Q4 viene de cada join node
+        
+        expected = base_reports + q4_reports
+        logger.info(f"Cliente {self.client_id}: Esperando {expected} EOFs total "
+                   f"(4 base + {q4_reports} Q4 de {self.total_join_nodes} join nodes)")
+        
+        return expected
             
     def _remove_headers_from_data(self, data):
         """Remueve la primera línea si contiene headers conocidos."""
