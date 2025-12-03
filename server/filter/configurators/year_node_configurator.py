@@ -155,6 +155,16 @@ class YearNodeConfigurator(NodeConfigurator):
         message_id_str = str(message_id) if message_id is not None else "default"
         
         if decoded_data.startswith("EOF:"):
+            if decoded_data.startswith("EOF:2"):
+                logger.info(f"EOF tipo 2 recibido para cliente {client_id_str}, no se procesará EOF completo")
+                self.coordinator.clean_client_data(client_id_str)
+                if self.file_mode == 'transactions':
+                    dto = TransactionBatchDTO(decoded_data, BatchType.EOF)
+                else:
+                    dto = TransactionItemBatchDTO(decoded_data, BatchType.EOF)
+                    
+                return (False, batch_type, dto, True)
+            
             logger.info(f"EOF recibido para cliente {client_id_str}")
 
             batch_type = 'transactions' if self.file_mode == 'transactions' else 'transaction_items'

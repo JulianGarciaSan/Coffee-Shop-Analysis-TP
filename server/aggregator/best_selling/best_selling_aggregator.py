@@ -148,10 +148,63 @@ class BestSellingAggregatorNode:
             return False
         
     def clean_client(self, client_id: str):
-        del self.eof_selling_count_by_client[client_id]
-        del self.eof_profit_count_by_client[client_id]
-        del self.month_selling_candidates_by_client[client_id]
-        del self.month_profit_candidates_by_client[client_id]
+        logger.info(f"Limpiando estado para cliente {client_id}")
+        try:
+            if client_id in self.eof_selling_count_by_client:
+                del self.eof_selling_count_by_client[client_id]
+                logger.debug(f"eoF selling eliminado para cliente {client_id}")
+            else:
+                logger.debug(f"No había EOF selling para cliente {client_id}")
+        except Exception as e:
+            logger.warning(f"Error eliminando eof_selling_count_by_client[{client_id}]: {e}")
+
+        try:
+            if client_id in self.eof_profit_count_by_client:
+                del self.eof_profit_count_by_client[client_id]
+                logger.debug(f"eoF profit eliminado para cliente {client_id}")
+            else:
+                logger.debug(f"No había EOF profit para cliente {client_id}")
+        except Exception as e:
+            logger.warning(f"Error eliminando eof_profit_count_by_client[{client_id}]: {e}")
+
+        try:
+            if client_id in self.month_selling_candidates_by_client:
+                del self.month_selling_candidates_by_client[client_id]
+                logger.debug(f"month_selling_candidates eliminado para cliente {client_id}")
+            else:
+                logger.debug(f"No había month_selling_candidates para cliente {client_id}")
+        except Exception as e:
+            logger.warning(f"Error eliminando month_selling_candidates_by_client[{client_id}]: {e}")
+
+        try:
+            if client_id in self.month_profit_candidates_by_client:
+                del self.month_profit_candidates_by_client[client_id]
+                logger.debug(f"month_profit_candidates eliminado para cliente {client_id}")
+            else:
+                logger.debug(f"No había month_profit_candidates para cliente {client_id}")
+        except Exception as e:
+            logger.warning(f"Error eliminando month_profit_candidates_by_client[{client_id}]: {e}")
+
+        try:
+            if client_id in self.outgoing_counter_by_client:
+                del self.outgoing_counter_by_client[client_id]
+                logger.debug(f"outgoing_counter eliminado para cliente {client_id}")
+            else:
+                logger.debug(f"No había outgoing_counter para cliente {client_id}")
+        except Exception as e:
+            logger.warning(f"Error eliminando outgoing_counter_by_client[{client_id}]: {e}")
+
+        try:
+            if client_id in self.pending_rollbacks:
+                del self.pending_rollbacks[client_id]
+                logger.debug(f"pending_rollback eliminado para cliente {client_id}")
+            else:
+                logger.debug(f"No había pending_rollback para cliente {client_id}")
+        except Exception as e:
+            logger.warning(f"Error eliminando pending_rollbacks[{client_id}]: {e}")
+
+        logger.info(f"Limpieza completada para cliente {client_id}")
+        
     def create_headers(self, client_id: Optional[int], message_id: Optional[int]) -> Dict[str, Any]:
         headers = {}
         if client_id is not None and message_id is not None:
@@ -188,9 +241,14 @@ class BestSellingAggregatorNode:
         logger.info(f"Enviado Data {metric} (ID={unique_id})")
         time.sleep(10) 
         
-    def _send_eof(self, client_id: str, routing_key: str):
-        unique_id = self.checkpoint_handler.get_next_id_in_memory(client_id)
-        dto = TransactionItemBatchDTO(f"EOF:{client_id}", BatchType.EOF)
+    def _send_eof(self, client_id: str, routing_key: str, eof_type: Optional[int] = 1):
+        
+        if eof_type == 2:
+            dto = TransactionItemBatchDTO(f"EOF:2", BatchType.EOF)
+            unique_id = 0
+        elif eof_type == 1:
+            dto = TransactionItemBatchDTO(f"EOF:1", BatchType.EOF)
+            unique_id = self.checkpoint_handler.get_next_id_in_memory(client_id)
         
         self.output_middleware.send(
             dto.to_bytes_fast(),
@@ -198,7 +256,6 @@ class BestSellingAggregatorNode:
             headers={'client_id': client_id, 'message_id': unique_id}
         )
         logger.info(f"Enviado EOF {routing_key} (ID={unique_id})")
-        time.sleep(10)
 
     def process_message(self, message: bytes, routing_key: str, client_id: str, message_id: str) -> bool:
         try:
@@ -209,6 +266,15 @@ class BestSellingAggregatorNode:
             dto = TransactionItemBatchDTO.from_bytes_fast(message)
             
             if dto.batch_type == BatchType.EOF:
+                if dto.data.startswith("EOF:2"):
+                    routing_key = self.client_router.get_routing_key(client_id, 'q2_best_selling.data')
+                    self._send_eof(client_id, routing_key, eof_type=2)
+                    
+                    routing_key = self.client_router.get_routing_key(client_id, 'q2_most_profit.data')
+                    self._send_eof(client_id, routing_key, eof_type=2)
+                    self.clean_client(client_id)
+                    return (False, True)
+                
                 self.handle_eof(routing_key, client_id, message_id)
 
                 lines = [f"EOF:{routing_key}"]

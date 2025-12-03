@@ -64,30 +64,30 @@ services:
       - ./report_client_1:/app/report_client_1
       - ./data/transactions_items_test:/data/transactions_items_test
 
-  client_2:
-    build:
-      context: .
-      dockerfile: ./client/Dockerfile
-    restart: on-failure
-    environment:
-      - PYTHONUNBUFFERED=1
-      - RABBITMQ_HOST=rabbitmq
-      - CLIENT_ID=client_2
-    depends_on:
-      gateway:
-        condition: service_started
-    volumes:
-      - ./client/config.ini:/config.ini
-      - ./data/transaction_items:/data/transaction_items
-      - ./data/users:/data/users
-      - ./data/stores:/data/stores
-      - ./data/menu_items:/data/menu_items
-      - ./data/payment_methods:/data/payment_methods
-      - ./data/vouchers:/data/vouchers
-      - ./data/transactions:/data/transactions
-      - ./data/transactions_test:/data/transactions_test
-      - ./report_client_2:/app/report_client_2
-      - ./data/transactions_items_test:/data/transactions_items_test
+  # client_2:
+  #   build:
+  #     context: .
+  #     dockerfile: ./client/Dockerfile
+  #   restart: on-failure
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #     - RABBITMQ_HOST=rabbitmq
+  #     - CLIENT_ID=client_2
+  #   depends_on:
+  #     gateway:
+  #       condition: service_started
+  #   volumes:
+  #     - ./client/config.ini:/config.ini
+  #     - ./data/transaction_items:/data/transaction_items
+  #     - ./data/users:/data/users
+  #     - ./data/stores:/data/stores
+  #     - ./data/menu_items:/data/menu_items
+  #     - ./data/payment_methods:/data/payment_methods
+  #     - ./data/vouchers:/data/vouchers
+  #     - ./data/transactions:/data/transactions
+  #     - ./data/transactions_test:/data/transactions_test
+  #     - ./report_client_2:/app/report_client_2
+  #     - ./data/transactions_items_test:/data/transactions_items_test
   
   # client_3:
   #   build:
@@ -562,7 +562,7 @@ services:
       - ./server/logs/join_node_1/checkpoints:/app/server/logs/join_node_1/checkpoints
       - ./server/logs/join_node_1/client_logs.txt:/app/client_logs.txt
 
-  # NODOS Q3 TPV
+  # # NODOS Q3 TPV
   groupby_semester_1:
     build:
       context: .
@@ -618,7 +618,7 @@ services:
       - ./server/logs/groupby_semester_2/client_logs.txt:/app/client_logs.txt
       - ./server/logs/groupby_semester_2/checkpoints:/app/server/logs/groupby_semester_2/checkpoints
   
-  ##NODOS Q4 TOP CONSUMERS
+  # ##NODOS Q4 TOP CONSUMERS
   top_consumers_aggregator_1:
     build:
       context: .
@@ -950,66 +950,66 @@ services:
       - ./server/logs/aggregator_best_selling_final/checkpoints:/app/server/logs/aggregator_best_selling_final/checkpoints
       - ./server/logs/aggregator_best_selling_final/client_logs.txt:/app/client_logs.txt
       
-  chaos_monkey:
-    build:
-      context: ./server/chaos_monkey
-      dockerfile: Dockerfile
-    container_name: chaos_monkey
-    restart: "no"  # No reiniciar automáticamente
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      - PYTHONUNBUFFERED=1
-      - KILL_INTERVAL=10  # Segundos entre caídas
-    depends_on:
-      gateway:
-        condition: service_started
-      filter_year_1:
-        condition: service_started
-      filter_year_2:
-        condition: service_started  
-      filter_year_3:
-        condition: service_started
-      filter_hour_1:
-        condition: service_started
-      filter_hour_2:
-        condition: service_started 
-      filter_hour_3:
-        condition: service_started
-      filter_amount_1:
-        condition: service_started
-      filter_amount_2:
-        condition: service_started
-      filter_amount_3:
-        condition: service_started 
-      client_1:
-        condition: service_started
-      groupby_top_customers:
-        condition: service_started
-      groupby_semester_1:
-        condition: service_started
-      groupby_semester_2:
-        condition: service_started
-      groupby_best_selling_2025_3:
-        condition: service_started
-      groupby_best_selling_2025_2:
-        condition: service_started
-      groupby_best_selling_2025_1:
-        condition: service_started
-      groupby_best_selling_2025_0:
-        condition: service_started
-      groupby_best_selling_2024_3:
-        condition: service_started
-      groupby_best_selling_2024_2:
-        condition: service_started
-      groupby_best_selling_2024_1:
-        condition: service_started
-      top_consumers_aggregator_1:
-        condition: service_started
-      top_consumers_aggregator_2:
-        condition: service_started
-      aggregator_best_selling_final:
-        condition: service_started
+  # chaos_monkey:
+  #   build:
+  #     context: ./server/chaos_monkey
+  #     dockerfile: Dockerfile
+  #   container_name: chaos_monkey
+  #   restart: "no"  # No reiniciar automáticamente
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock:ro
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #     - KILL_INTERVAL=10  # Segundos entre caídas
+  #   depends_on:
+  #     gateway:
+  #       condition: service_started
+  #     filter_year_1:
+  #       condition: service_started
+  #     filter_year_2:
+  #       condition: service_started  
+  #     filter_year_3:
+  #       condition: service_started
+  #     filter_hour_1:
+  #       condition: service_started
+  #     filter_hour_2:
+  #       condition: service_started 
+  #     filter_hour_3:
+  #       condition: service_started
+  #     filter_amount_1:
+  #       condition: service_started
+  #     filter_amount_2:
+  #       condition: service_started
+  #     filter_amount_3:
+  #       condition: service_started 
+  #     client_1:
+  #       condition: service_started
+  #     groupby_top_customers:
+  #       condition: service_started
+  #     groupby_semester_1:
+  #       condition: service_started
+  #     groupby_semester_2:
+  #       condition: service_started
+  #     groupby_best_selling_2025_3:
+  #       condition: service_started
+  #     groupby_best_selling_2025_2:
+  #       condition: service_started
+  #     groupby_best_selling_2025_1:
+  #       condition: service_started
+  #     groupby_best_selling_2025_0:
+  #       condition: service_started
+  #     groupby_best_selling_2024_3:
+  #       condition: service_started
+  #     groupby_best_selling_2024_2:
+  #       condition: service_started
+  #     groupby_best_selling_2024_1:
+  #       condition: service_started
+  #     top_consumers_aggregator_1:
+  #       condition: service_started
+  #     top_consumers_aggregator_2:
+  #       condition: service_started
+  #     aggregator_best_selling_final:
+  #       condition: service_started
 
 
 networks:

@@ -348,6 +348,45 @@ class JoinNode:
             
         except Exception as e:
             logger.error(f"Error durante cleanup: {e}", exc_info=True)
+            
+    def clean_client_data(self, client_id: str):
+        logger.info(f"Limpiando estado para cliente {client_id} en JoinNode")
+        try:
+            # Remove client state
+            if client_id in self.client_states:
+                del self.client_states[client_id]
+                logger.info(f"Estado de cliente {client_id} limpiado en JoinNode")
+
+            # Remove all processors for the client
+            processor_attrs = [
+                "store_processors",
+                "user_processors",
+                "menu_item_processors",
+                "tpv_processors",
+                "top_customers_processors",
+                "best_selling_processors",
+                "most_profit_processors",
+            ]
+            for attr in processor_attrs:
+                proc_dict = getattr(self, attr, None)
+                if proc_dict and client_id in proc_dict:
+                    del proc_dict[client_id]
+                    logger.info(f"Procesador '{attr}' eliminado para cliente {client_id}")
+
+            # Clean joined data and counters
+            if client_id in self.q3_joined_data_by_client:
+                del self.q3_joined_data_by_client[client_id]
+                logger.info(f"q3_joined_data eliminado para cliente {client_id}")
+
+            if client_id in self.outgoing_counter_by_client:
+                del self.outgoing_counter_by_client[client_id]
+                logger.info(f"outgoing_counter eliminado para cliente {client_id}")
+
+            if client_id in self.pending_rollbacks:
+                del self.pending_rollbacks[client_id]
+                logger.info(f"pending_rollbacks eliminado para cliente {client_id}")
+        except Exception as e:
+            logger.error(f"Error limpiando estado de cliente {client_id}: {e}", exc_info=True)
 
 
 if __name__ == "__main__":

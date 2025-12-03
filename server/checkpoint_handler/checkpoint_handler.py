@@ -141,6 +141,10 @@ class CheckpointHandler:
 
         msg_id_int = self._safe_int(message_id)
         
+        if message_id == "0":
+            logger.info(f"Mensaje de EOF Desconexion/Reset detectado: {client_id}.")
+            return False
+        
         if self._is_processed(client_id, msg_id_int):
             logger.info(f"DUPLICADO DETECTADO: {client_id}:{message_id}. Enviando ACK.")
             ch.basic_ack(delivery_tag=method.delivery_tag)

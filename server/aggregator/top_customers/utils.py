@@ -176,7 +176,7 @@ class TopCustomersAggregatorUtils:
             user_id = parts[1]
             purchases_qty = int(parts[2])
             
-            self.store_user_purchases_by_client[client_id][store_id][user_id] += purchases_qty
+            self.node.store_user_purchases_by_client[client_id][store_id][user_id] += purchases_qty
             
         except (ValueError, IndexError) as e:
             logger.warning(f"Error procesando línea: {csv_line}, error: {e}")
@@ -184,7 +184,7 @@ class TopCustomersAggregatorUtils:
     def generate_top3_by_store(self, client_id: str) -> Dict[str, list]:
         top_3_by_store = {}
         
-        client_data = self.store_user_purchases_by_client.get(client_id, {})
+        client_data = self.node.store_user_purchases_by_client.get(client_id, {})
         
         for store_id in sorted(client_data.keys()):
             user_purchases = client_data[store_id]

@@ -2,7 +2,7 @@ from collections import defaultdict
 import logging
 import os
 import time
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Optional, Tuple
 from rabbitmq.middleware import MessageMiddlewareExchangeManual,MessageMiddlewareExchange
 from dtos.dto import TransactionBatchDTO, BatchType
 from .base_configurators import GroupByConfigurator
@@ -55,9 +55,12 @@ class TPVConfigurator(GroupByConfigurator):
         logger.info(f"  Routing keys: {all_routing_keys}")
         
         return {"output": output_middleware}
-    
-    def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict, strategy,client_id: str, message_id: str) -> bool:
-        # client_id = getattr(dto, 'client_id', 'default_client')
+
+    def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict, strategy, client_id: str, message_id: str, eof_type: Optional[int]=1) -> bool:
+        if eof_type == 2:
+            logger.info(f"EOF tipo 2 recibido de cliente '{client_id}', no se envían resultados TPV")
+            self._send_cleaning_eof_client(client_id, middlewares, strategy, message_id, eof_type=2)
+            return False
         
         if self.eof_received_by_client.get(client_id, False):
             logger.warning(f"EOF duplicado de cliente '{client_id}', ignorando")
@@ -88,11 +91,10 @@ class TPVConfigurator(GroupByConfigurator):
             routing_key=routing_key,
             headers={'client_id': client_id, 'message_id': outgoing_message_id}
         )
-        # print("///////////// ENVIANDO EOF A JOIN NODE /////////////")
-        # time.sleep(10)
+
         outgoing_message_id = self.generate_next_message_id(original_message_id) + 1
         print(f"MESSAGE ID EOF: {outgoing_message_id}")
-        eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
+        eof_dto = TransactionBatchDTO(f"EOF:1", BatchType.EOF)
         middlewares["output"].send(
             eof_dto.to_bytes_fast(),
             routing_key=routing_key,
@@ -100,24 +102,23 @@ class TPVConfigurator(GroupByConfigurator):
         )
         
         logger.info(f"Resultados TPV enviados para cliente '{client_id}'")
-    
+        
+
+    def _send_cleaning_eof_client(self, client_id: str, middlewares: dict, strategy, original_message_id: str, eof_type: Optional[int]=2):
+        routing_key = self.client_router.get_routing_key(client_id, 'tpv.data')
+        logger.info(f"EOF:2 - Cliente '{client_id}'  Routing key: {routing_key}")
+
+        eof_dto = TransactionBatchDTO(f"EOF:2", BatchType.EOF)
+        middlewares["output"].send(
+            eof_dto.to_bytes_fast(),
+            routing_key=routing_key,
+            headers={'client_id': client_id, 'message_id': "0"}
+        )
+        
+        logger.info(f"EOF:2 TPV enviados para cliente '{client_id}'")
+        strategy.clean_client_data(client_id)
+        
     def get_strategy_config(self) -> dict:
         return {
             'semester': self.semester,
         }
-
-    # def process_message(self, body: bytes, headers: dict = None) -> tuple:
-    #     dto = TransactionBatchDTO.from_bytes_fast(body)
-        
-    #     client_id = 'default_client'
-    #     if headers and 'client_id' in headers:
-    #         client_id = headers['client_id']
-    #         if isinstance(client_id, bytes):
-    #             client_id = client_id.decode('utf-8')
-        
-    #     dto.client_id = client_id
-                
-    #     is_eof = (dto.batch_type == BatchType.EOF)
-    #     should_stop = False
-        
-    #     return (should_stop, dto, is_eof)

@@ -24,9 +24,10 @@ class ClientHandler(threading.Thread):
         self.protocol = ProtocolNew(client_socket)
         self.rabbitmq_host = rabbitmq_host
         self.input_reports = input_reports
-      
+        self.lock = threading.Lock()
         self._is_running = False
-        
+        self.disconnected_EOF_sent = False
+                
         self._output_middleware = gateway.get_output_middleware()
         self._join_middleware = gateway.get_join_middleware()
 
@@ -49,16 +50,7 @@ class ClientHandler(threading.Thread):
             'q2_best_selling': []
         }
         self.eof_count = 0
-        #self.max_expected_reports = 5
         self.max_expected_reports = self._calculate_expected_eofs()
-        
-        # self.reports_config = [
-        #     ('q1', self._convert_q1_to_csv, "Q1", "transacciones"),
-        #     ('q3', self._convert_q3_to_csv, "Q3", "registros"),
-        #     ('q4', self._convert_q4_to_csv, "Q4", "cumpleanos"),
-        #     ('q2_most_profit', self._convert_q2_most_profit_to_csv, "Q2_MOST_PROFIT", "items"),
-        #     ('q2_best_selling', self._convert_q2_best_selling_to_csv, "Q2_BEST_SELLING", "items")
-        # ]
         
         self.client_router = ClientRouter(total_join_nodes=total_join_nodes)
         self.assigned_join_node = self.client_router.get_node_for_client(self.client_id)
@@ -70,7 +62,7 @@ class ClientHandler(threading.Thread):
         self.lines_sent_per_client = 0
         
         self.gateway.register_client(self)
-        # Lista de headers conocidos que deben ser filtrados
+
         self.known_headers = [
             'transaction_id,final_amount',
             'year_month_created_at,item_name,profit_sum',
@@ -112,6 +104,96 @@ class ClientHandler(threading.Thread):
             logger.error(f"Cliente {self.client_id}: Error configurando reportes: {e}")
             
             raise
+        
+    def _send_cleanup_eof(self):
+        """Envía EOF:2 (cleanup) cuando el cliente se desconecta abruptamente"""
+        with self.lock:
+            if self.disconnected_EOF_sent:
+                logger.info(f"EOF:2 ya enviado para cliente {self.client_id}")
+                return
+            else: 
+                self.disconnected_EOF_sent = True
+        
+        if self.shutdown and self.shutdown.is_shutting_down():
+            logger.info("Shutdown activo, no enviando EOF:2")
+            return
+        
+        logger.info(f"Enviando EOF:2 para cliente {self.client_id}")
+        headers = self.create_headers(self.client_id, self.message_id)
+        
+        # NUEVO: Crear middlewares frescos para enviar EOF:2
+        try:
+            output_mw = self.gateway.get_output_middleware()
+            join_mw = self.gateway.get_join_middleware()
+        except Exception as e:
+            logger.error(f"Error creando middlewares para EOF:2: {e}")
+            return
+        
+        try:
+            # EOF:2 para transactions
+            eof_transactions = TransactionBatchDTO("EOF:2", batch_type=BatchType.EOF)
+            output_mw.send(  # ← Usar el middleware fresco
+                eof_transactions.to_bytes_fast(), 
+                routing_key='transactions', 
+                headers=headers
+            )
+            logger.info(f"EOF:2 enviado a transactions para cliente {self.client_id}")
+            
+            # EOF:2 para transaction_items
+            eof_items = TransactionItemBatchDTO("EOF:2", batch_type=BatchType.EOF)
+            output_mw.send(  # ← Usar el middleware fresco
+                eof_items.to_bytes_fast(), 
+                routing_key='transaction_items', 
+                headers=headers
+            )
+            logger.info(f"EOF:2 enviado a transaction_items para cliente {self.client_id}")
+            
+            # EOF:2 para stores en todos los join nodes
+            routing_keys_stores = self.client_router.get_all_routing_keys('stores.data')
+            for routing_key in routing_keys_stores:
+                eof_stores = StoreBatchDTO("EOF:2", batch_type=BatchType.EOF)
+                join_mw.send(  # ← Usar el middleware fresco
+                    eof_stores.to_bytes_fast(), 
+                    routing_key=routing_key, 
+                    headers=headers
+                )
+            logger.info(f"EOF:2 stores enviado a {len(routing_keys_stores)} join nodes")
+            
+            # EOF:2 para users en todos los join nodes
+            routing_keys_users = self.client_router.get_all_routing_keys('users.data')
+            for routing_key in routing_keys_users:
+                eof_users = UserBatchDTO("EOF:2", batch_type=BatchType.EOF)
+                join_mw.send(  # ← Usar el middleware fresco
+                    eof_users.to_bytes_fast(), 
+                    routing_key=routing_key, 
+                    headers=headers
+                )
+            logger.info(f"EOF:2 users enviado a {len(routing_keys_users)} join nodes")
+            
+            # EOF:2 para menu_items en todos los join nodes
+            routing_keys_menu = self.client_router.get_all_routing_keys('menu_items.data')
+            for routing_key in routing_keys_menu:
+                eof_menu = MenuItemBatchDTO("EOF:2", batch_type=BatchType.EOF)
+                join_mw.send(  # ← Usar el middleware fresco
+                    eof_menu.to_bytes_fast(), 
+                    routing_key=routing_key, 
+                    headers=headers
+                )
+            logger.info(f"EOF:2 menu_items enviado a {len(routing_keys_menu)} join nodes")
+            
+            logger.info(f"EOF:2 completado para cliente {self.client_id}")
+            
+        except Exception as e:
+            logger.error(f"Error enviando EOF:2 para cliente {self.client_id}: {e}")
+        finally:
+            # Cerrar los middlewares frescos
+            try:
+                output_mw.close()
+                join_mw.close()
+            except Exception as e:
+                logger.error(f"Error cerrando middlewares temporales: {e}")
+            
+            
     def run(self):
         self._is_running = True
         self._start_receiver_and_sender_threads()
@@ -139,10 +221,8 @@ class ClientHandler(threading.Thread):
                     logger.info(f"Shutdown detectado, cerrando conexión con cliente {self.client_id}")
                     break
                 
-                
                 if message.action == "EXIT":
                     logger.info(f"EXIT received from client {self.client_id}")
-                    # self._wait_and_send_report()
                     break
                 
                 elif message.action == "FINISH": 
@@ -153,17 +233,15 @@ class ClientHandler(threading.Thread):
                     self._handle_batch_message(message)
                 else:
                     logger.warning(f"Unknown action from client {self.client_id}: {message.action}")
-                    
+        except (BrokenPipeError, ConnectionResetError, OSError) as e:
+            logger.warning(f"Cliente {self.client_id} desconectado: {e}")
+            self._is_running = False           
+            self._send_cleanup_eof() 
         except Exception as e:
             logger.error(f"Error procesando conexión del cliente {self.client_id}: {e}")
             self._send_error_to_client(f"Error processing connection: {e}")
         finally:
             logger.info(f"Hilo receiver del cliente {self.client_id} finalizó")
-            #self._cleanup()      
-             
-    # def _get_shard_for_user(self, user_id: str) -> int:
-    #     normalized_user_id = user_id.rstrip('.0') if user_id.endswith('.0') else user_id
-    #     return int(normalized_user_id) % self.total_join_nodes
     
     def _handle_batch_message(self, message):
         handlers = {
@@ -286,7 +364,6 @@ class ClientHandler(threading.Thread):
                     data_lines.append(line)
             
             total_users = len(data_lines)
-            # logger.info(f"[USERS] Cliente {self.client_id}: Procesando {total_users} users para enviar a TODOS los nodos")
             
             CHUNK_SIZE = 5000
             
@@ -302,10 +379,8 @@ class ClientHandler(threading.Thread):
                 serialized_data = batch_dto.to_bytes_fast()
                 
                 for node_id in range(self.total_join_nodes):
-                    # NUEVO: Incrementar message_id para cada envío
                     self.message_id += 1
                     
-                    # NUEVO: Crear headers únicos para cada envío
                     unique_headers = self.create_headers(self.client_id, self.message_id)
                     
                     routing_key = f"join_node_{node_id}.users.data"
@@ -324,7 +399,6 @@ class ClientHandler(threading.Thread):
                     except Exception:
                         pass
             
-            # logger.info(f"[USERS] Cliente {self.client_id}: {total_users} users enviados a {self.total_join_nodes} nodos (SIN SHARDING)")
             
         except Exception as e:
             logger.error(f"Error procesando mensaje de tipo 'U': {e}")
@@ -348,12 +422,11 @@ class ClientHandler(threading.Thread):
         
     def collect_data_for_reports(self):
         logger.info(f"Reports collector started for client {self.client_id}")
-        # total_lines_sent = 0
-        # total_messages_sent = 0
+
         
         while self._is_running and not (self.shutdown and self.shutdown.is_shutting_down()):
             try:
-                item = self._report_queue.get()  
+                item = self._report_queue.get(timeout=0.5) 
                 routing_key, body = item
                 parts = routing_key.split('.') if routing_key else []
                 query_name = parts[0] if parts else routing_key
@@ -362,31 +435,22 @@ class ClientHandler(threading.Thread):
                 if dto.batch_type == BatchType.EOF:
                     self.eof_count += 1
                     logger.info(f"EOF {self.eof_count}/{self.max_expected_reports} recibido")
-                    # logger.info(f"TOTAL ENVIADO AL CLIENTE: {total_messages_sent} mensajes, {total_lines_sent} líneas")
                     
                     if self.validate_eofs():
                         self._send_end_of_reports()
                         break
                 else:
-                    # filtered_data = self._remove_headers_from_data(dto.data)
-                    # lines_in_batch = len([l for l in filtered_data.strip().split('\n') if l.strip()])
-                    
-                    # Enviar al cliente
-                    self._send_report_data_to_client(dto.data, query_name)
-                    
-                    # total_messages_sent += 1
-                    # total_lines_sent += lines_in_batch
-                    
-                    # if total_messages_sent % 100 == 0:  # Log cada 100 mensajes
-                    #     logger.info(f"Cliente {self.client_id}: {total_messages_sent} mensajes, {total_lines_sent} líneas enviadas")
 
+                    self._send_report_data_to_client(dto.data, query_name)
+
+            except queue.Empty:
+                continue  
             finally:
                 try:
                     self._report_queue.task_done()
                 except Exception:
                     pass
                     
-        # logger.info(f"RESUMEN FINAL Cliente {self.client_id}: {total_messages_sent} mensajes, {total_lines_sent} líneas enviadas")
         self._is_running = False
         self._cleanup()
 
@@ -406,20 +470,41 @@ class ClientHandler(threading.Thread):
     
     
     def _send_report_data_to_client(self, data, query_name):
+        if self._is_running == False:
+            logger.info(f"Cliente {self.client_id} no está corriendo, no enviando datos")
+            return
         try:            
             filtered_data = self._remove_headers_from_data(data)
-            self.protocol.send_report_data_to_client(filtered_data, query_name)
-
+            success = self.protocol.send_report_data_to_client(filtered_data, query_name)
+            
+            if not success:
+                logger.warning(f"Fallo enviando reporte a cliente {self.client_id}")
+                self._is_running = False
+                self._send_cleanup_eof()
+                
+        except (BrokenPipeError, ConnectionResetError, OSError) as e:
+            logger.warning(f"Cliente {self.client_id} desconectado: {e}")
+            self._send_cleanup_eof()  # ← Enviar EOF:2 inmediatamente
+            self._is_running = False
         except Exception as e:
             logger.error(f"Error enviando datos de reporte al cliente {self.client_id}: {e}")
 
     def _send_end_of_reports(self):
+        if self._is_running == False:
+            logger.info(f"Cliente {self.client_id} no está corriendo, no enviando EXIT")
+            return
         try:
             success = self.protocol.send_reports_exit_message()
             if success:
                 logger.info(f"EXIT enviado al cliente {self.client_id}")
             else:
-                logger.error(f"Error enviando EXIT al cliente {self.client_id}")
+                logger.warning(f"Fallo enviando EXIT a cliente {self.client_id}")
+                self._is_running = False
+                self._send_cleanup_eof()
+        except (BrokenPipeError, ConnectionResetError, OSError) as e:
+            logger.warning(f"Cliente {self.client_id} desconectado: {e}")
+            self._send_cleanup_eof()  # ← Enviar EOF:2 inmediatamente
+            self._is_running = False
         except Exception as e:
             logger.error(f"Error enviando EXIT: {e}")
             
@@ -453,142 +538,17 @@ class ClientHandler(threading.Thread):
                 return data
                 
             first_line = lines[0].strip()
-            
 
-            
-            # Si la primera línea es un header conocido, la removemos
             if first_line in self.known_headers:
                 logger.debug(f"Removiendo header: {first_line}")
                 return '\n'.join(lines[1:]) if len(lines) > 1 else ""
             
-            # Si no es un header conocido, devolver todo
             return data
             
         except Exception as e:
             logger.error(f"Error filtrando headers: {e}")
             return data
         
-
-    # def process_report_batch(self, data, query_name):
-    #     print(f"Processing report batch for {query_name}")
-
-    #     lines = data.strip().split('\n')
-        
-    #     for line in lines:
-    #         if not line.strip():
-    #             continue
-                
-    #         values = line.split(',')
-            
-    #         if query_name == "q1" and len(values) >= 2:
-    #             self.report_data['q1'].append({
-    #                 "transaction_id": values[0],
-    #                 "final_amount": values[1]
-    #             })
-    #         elif query_name == "q3" and len(values) >= 3:
-    #             self.report_data['q3'].append({
-    #                 "year_half": values[0],
-    #                 "store_name": values[1],
-    #                 "tpv": values[2]
-    #             })
-    #         elif query_name == "q4" and len(values) >= 2:
-    #             self.report_data['q4'].append({
-    #                 "store_name": values[0],
-    #                 "birthdate": values[1],
-    #             })
-    #         elif query_name == "q2_most_profit" and len(values) >= 3:
-    #             self.report_data['q2_most_profit'].append({
-    #                 "year_month_created_at": values[0],
-    #                 "item_name": values[1],
-    #                 "profit_sum": values[2]
-    #             })
-    #         elif query_name == "q2_best_selling" and len(values) >= 3:
-    #             self.report_data['q2_best_selling'].append({
-    #                 "year_month_created_at": values[0],
-    #                 "item_name": values[1],
-    #                 "sellings_qty": values[2]
-    #             })
-
-    # def _send_reports_to_client(self, report_data):
-
-    #     for query_key, converter_func, report_name, unit_name in self.reports_config:
-    #         transactions = report_data[query_key]
-          
-    #         if self.shutdown and self.shutdown.is_shutting_down():
-    #             logger.info("Shutdown detectado, deteniendo envío de reportes")
-    #             break
-              
-    #         if transactions:
-    #             csv_content = converter_func(transactions)
-    #             self._send_report_via_protocol(csv_content, report_name)
-    #             logger.info(f"Reporte {report_name} enviado: {len(transactions)} {unit_name}")
-    #         else:
-    #             logger.warning(f"No se encontraron datos para {report_name}")
-            
-    # def _convert_q1_to_csv(self, transactions):
-    #     try:
-    #         csv_lines = []
-    #         for transaction in transactions:
-    #             csv_lines.append(f"{transaction['transaction_id']},{transaction['final_amount']}")
-            
-    #         return '\n'.join(csv_lines)
-    #     except Exception as e:
-    #         logger.error(f"Error convirtiendo transacciones a CSV: {e}")
-    #         return "ERROR,0"
-
-    # def _convert_q3_to_csv(self, records):
-    #     """Convierte registros Q3 a formato CSV SIN HEADERS."""
-    #     try:
-    #         csv_lines = []
-    #         for record in records:
-    #             csv_lines.append(f"{record['year_half']},{record['store_name']},{record['tpv']}")
-    #         return '\n'.join(csv_lines)
-    #     except Exception as e:
-    #         logger.error(f"Error convirtiendo Q3 a CSV: {e}")
-    #         return "ERROR,ERROR,0"
-
-    # def _convert_q4_to_csv(self, records):
-    #     """Convierte registros Q4 a formato CSV SIN HEADERS."""
-    #     try:
-    #         csv_lines = []
-    #         for record in records:
-    #             csv_lines.append(f"{record['store_name']},{record['birthdate']}")
-    #         return '\n'.join(csv_lines)
-    #     except Exception as e:
-    #         logger.error(f"Error convirtiendo Q4 a CSV: {e}")
-    #         return "ERROR,0,0"
-    # def _convert_q2_most_profit_to_csv(self, records):
-    #     try:
-    #         csv_lines = []
-    #         for record in records:
-    #             csv_lines.append(f"{record['year_month_created_at']},{record['item_name']},{record['profit_sum']}")
-    #         return '\n'.join(csv_lines)
-    #     except Exception as e:
-    #         logger.error(f"Error convirtiendo Q2 Most Profit a CSV: {e}")
-    #         return "ERROR,ERROR,0"
-
-    # def _convert_q2_best_selling_to_csv(self, records):
-    #     try:
-    #         csv_lines = []
-    #         logger.info(f"Convirtiendo {len(records)} registros de Q2 Best Selling a CSV")
-    #         for record in records:
-    #             logger.info(f"Procesando registro: {record}")
-    #             csv_lines.append(f"{record['year_month_created_at']},{record['item_name']},{record['sellings_qty']}")
-    #         return '\n'.join(csv_lines)
-    #     except Exception as e:
-    #         logger.error(f"Error convirtiendo Q2 Best Selling a CSV: {e}")
-    #         return "ERROR,ERROR,0"
-
-    # def _send_report_via_protocol(self, csv_content, report_name="RPRT"):
-    #     try:
-    #         success = self.protocol.send_response_batches(f"RPRT_{report_name}", "R", csv_content)
-    #         if success:
-    #             logger.info(f"Reporte {report_name} enviado exitosamente: {len(csv_content)} bytes")
-    #         else:
-    #             logger.error(f"Error enviando reporte {report_name}")
-    #     except Exception as e:
-    #         logger.error(f"Error enviando reporte {report_name}: {e}")
-
     def _send_error_to_client(self, error_message):
         try:
             self.protocol.send_response_message("ERRO", "E", error_message)
@@ -610,7 +570,11 @@ class ClientHandler(threading.Thread):
 
     def _cleanup(self):
         logger.info(f"Limpiando ClientHandler {self.client_id}")
-        #self._is_running = False
+        self._is_running = False
+        try:
+            self._send_cleanup_eof()
+        except Exception as e:
+            logger.error(f"Error enviando EOF:2 en cleanup: {e}")
         try:
             self.gateway.unregister_client(self.client_id)
         except Exception as e:
@@ -630,11 +594,7 @@ class ClientHandler(threading.Thread):
             self.receiver_thread.join(timeout=5.0)
         except Exception as e:
             logger.error(f"Error esperando receiver_thread: {e}")
-        # try:
-        #     self.sender_thread.join(timeout=5.0) 
-        # except Exception as e:
-        #     logger.error(f"Error esperando sender_thread: {e}")
-                
+
         try:
             if self.report_middleware:
                 self.report_middleware.close()

@@ -181,6 +181,21 @@ class TopCustomersAggregatorNode:
             dto = TransactionBatchDTO.from_bytes_fast(message)
             
             if dto.batch_type == BatchType.EOF:
+                if dto.data.startswith("EOF:2"):
+                    for node_id in range(self.total_join_nodes):
+                        self.output_middleware.send(
+                            TransactionBatchDTO(f"EOF:2", BatchType.EOF).to_bytes_fast(),
+                            routing_key=f"join_node_{node_id}.top_customers.data",
+                            headers={'client_id': client_id, 'message_id': 0}
+                        )
+                        logger.info(f"Enviado EOF:2 a join_node_{node_id} (ID=0) por EOF tipo 2 recibido")                    
+                        if client_id in self.store_user_purchases_by_client:
+                            del self.store_user_purchases_by_client[client_id]
+                            logger.info(f"Datos del cliente {client_id} limpiados tras EOF tipo 2")
+                        else:
+                            logger.info(f"No se encontraron datos para limpiar del cliente {client_id} tras EOF tipo 2")
+                    return False, True
+                
                 success = self.handle_eof(dto, client_id, message_id)
                 if success:
                     self.checkpoint_handler.save_eof_checkpoint(client_id, message_id)
