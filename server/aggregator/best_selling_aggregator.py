@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+import time
 from typing import Any, Dict, Optional, Tuple
 from collections import defaultdict
 from rabbitmq.middleware import MessageMiddlewareExchangeManual, MessageMiddlewareQueueManual
@@ -50,7 +51,9 @@ class BestSellingAggregatorNode:
         self.checkpoint_handler = CheckpointHandler(
             checkpoint_dir=self.checkpoint_dir,
             strategy=self,
-            checkpont_interval=4
+            checkpont_interval=4,
+            outgoing_counter_by_client=self.outgoing_counter_by_client,
+            extra_id=int(self.node_id)
         )
         self.eof_selling_count_by_client: Dict[str, int] = defaultdict(int)
         self.eof_profit_count_by_client: Dict[str, int] = defaultdict(int)
@@ -153,7 +156,6 @@ class BestSellingAggregatorNode:
             if not candidates:
                 continue
             
-            # logger.info(f"===== CANDIDATOS SELLING para {year_month}, cliente {client_id} =====")
             for i, cand in enumerate(candidates):
                 logger.info(f"  Candidato {i}: item_id='{cand['item_id']}', sellings_qty={cand['sellings_qty']}")
             
@@ -161,16 +163,12 @@ class BestSellingAggregatorNode:
                     key=lambda x: (x['sellings_qty'], -int(x['item_id']) if x['item_id'].isdigit() else 0))
             
             best_selling[year_month] = (top['item_id'], top['sellings_qty'])
-            
-            # logger.info(f"  >>> GANADOR: item_id='{top['item_id']}', sellings_qty={top['sellings_qty']}")
-            # logger.info(f"=" * 70)
         
         profit_candidates = self.month_profit_candidates_by_client.get(client_id, {})
         for year_month, candidates in profit_candidates.items():
             if not candidates:
                 continue
             
-            # logger.info(f"===== CANDIDATOS PROFIT para {year_month}, cliente {client_id} =====")
             for i, cand in enumerate(candidates):
                 logger.info(f"  Candidato {i}: item_id='{cand['item_id']}', profit_sum={cand['profit_sum']}")
             
@@ -178,9 +176,6 @@ class BestSellingAggregatorNode:
                     key=lambda x: (x['profit_sum'], -int(x['item_id']) if x['item_id'].isdigit() else 0))
             
             most_profit[year_month] = (top['item_id'], top['profit_sum'])
-            
-            # logger.info(f"  >>> GANADOR: item_id='{top['item_id']}', profit_sum={top['profit_sum']}")
-            # logger.info(f"=" * 70)
         
         return best_selling, most_profit
     
@@ -211,14 +206,12 @@ class BestSellingAggregatorNode:
             selling_count = self.eof_selling_count_by_client[client_id]
             profit_count = self.eof_profit_count_by_client[client_id]
             
-            # SOLO cuando recibimos TODOS los EOFs, enviamos resultados
             if selling_count == self.expected_sources and profit_count == self.expected_sources:
                 logger.info(f"✓ TODOS los EOFs recibidos para cliente {client_id} ({selling_count} selling + {profit_count} profit)")
                 logger.info(f"Calculando top 1 global y enviando resultados")
                 
                 self._send_final_results(client_id, message_id)
                 
-                # AHORA SÍ guardamos checkpoint con eof_processed=True
                 self.checkpoint_handler.save_eof_checkpoint(client_id, message_id)
                 
                 # Cleanup
@@ -227,7 +220,7 @@ class BestSellingAggregatorNode:
                 del self.month_selling_candidates_by_client[client_id]
                 del self.month_profit_candidates_by_client[client_id]
                 
-                logger.info(f"✓ Cliente {client_id} completado y limpiado")
+                logger.info(f"Cliente {client_id} completado y limpiado")
             else:
                 logger.info(f"Esperando más EOFs: {selling_count}/{self.expected_sources} selling, {profit_count}/{self.expected_sources} profit")
             
@@ -267,7 +260,7 @@ class BestSellingAggregatorNode:
     def send_best_selling_data(self, client_id: str, best_selling: Dict[str, Tuple[str, int]], message_id: str, selling_routing_key: str):
         # Enviar best selling DATA
         selling_csv = self.generate_top1_csv(best_selling, "sellings_qty")
-        unique_id = self.generate_next_message_id(client_id)  # ID 1
+        unique_id = self.generate_next_message_id(client_id) 
         headers = self.create_headers(client_id, unique_id)
         
         selling_dto = TransactionItemBatchDTO(selling_csv, BatchType.RAW_CSV)
@@ -277,9 +270,12 @@ class BestSellingAggregatorNode:
             routing_key=selling_routing_key,
             headers=headers
         )
-        
+        self.checkpoint_handler.save_counter_update(client_id, self.outgoing_counter_by_client[client_id],"")
+
+        # print("///////////// ENVIANDO EOF /////////////")
+        # time.sleep(10)
         # Enviar best selling EOF
-        unique_id = self.generate_next_message_id(client_id)  # ID 2
+        unique_id = self.generate_next_message_id(client_id)  
         headers = self.create_headers(client_id, unique_id)
         selling_eof = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
         self.output_middleware.send(
@@ -288,23 +284,29 @@ class BestSellingAggregatorNode:
             headers=headers
         )
         logger.info(f"Enviando best selling EOF (ID={unique_id})")
+        self.checkpoint_handler.save_counter_update(client_id, self.outgoing_counter_by_client[client_id],"")
+
+        # print("///////////// ENVIANDO EOF /////////////")
+        # time.sleep(10)
         
     def send_most_profit_data(self, client_id: str, most_profit: Dict[str, Tuple[str, float]], message_id: str, profit_routing_key: str):
         # Enviar most profit DATA
-        unique_id = self.generate_next_message_id(client_id)  # ID 3
+        unique_id = self.generate_next_message_id(client_id)
         profit_csv = self.generate_top1_csv(most_profit, "profit_sum")
         headers = self.create_headers(client_id, unique_id)
         
         profit_dto = TransactionItemBatchDTO(profit_csv, BatchType.RAW_CSV)
+        self.checkpoint_handler.save_counter_update(client_id, self.outgoing_counter_by_client[client_id],"")
         logger.info(f"Enviando most profit (ID={unique_id}): {len(profit_csv)} bytes")
         self.output_middleware.send(
             profit_dto.to_bytes_fast(),
             routing_key=profit_routing_key,
             headers=headers
         )
-        
+        print("///////////// ENVIANDO EOF /////////////")
+        time.sleep(10)
         # Enviar most profit EOF
-        unique_id = self.generate_next_message_id(client_id)  # ID 4
+        unique_id = self.generate_next_message_id(client_id)  
         headers = self.create_headers(client_id, unique_id)
         profit_eof = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
         self.output_middleware.send(
@@ -313,6 +315,8 @@ class BestSellingAggregatorNode:
             headers=headers
         )
         logger.info(f"Enviando most profit EOF (ID={unique_id})")
+        time.sleep(10)
+        self.checkpoint_handler.save_counter_update(client_id, self.outgoing_counter_by_client[client_id],"")
         
     def process_message(self, message: bytes, routing_key: str, client_id: str, message_id: str) -> bool:
         try:
@@ -416,8 +420,15 @@ class BestSellingAggregatorNode:
         Ejemplo: 0,S,2024-01,item_123,50
                 0,P,2024-01,item_456,125.50
                 0,EOF,top_selling.data
+                0,COUNTER,5
         """
         try:
+            # Manejar COUNTER
+            if csv_line.startswith(f'{client_id},COUNTER,'):
+                parts = csv_line.split(',')
+                counter_value = parts[2]
+                return f"{client_id},COUNTER,{counter_value}"
+        
             # Manejar EOF
             if csv_line.startswith('EOF:'):
                 routing_key = csv_line.split(':', 1)[1]
@@ -464,7 +475,13 @@ class BestSellingAggregatorNode:
             
             client_id = parts[0]
             op_type = parts[1]
-            
+            if op_type == 'COUNTER':
+                counter_value = int(parts[2])
+                return {
+                    'client_id': client_id,
+                    'type': 'counter',
+                    'counter_value': counter_value
+                }
             # Manejar EOF
             if op_type == 'EOF':
                 routing_key = parts[2]
@@ -512,6 +529,10 @@ class BestSellingAggregatorNode:
         try:
             client_id = operation['client_id']
             op_type = operation['type']
+            if op_type == 'counter':
+                counter_value = operation['counter_value']
+                self.outgoing_counter_by_client[client_id] = counter_value
+                logger.debug(f"[WAL Recovery] Contador restaurado: {counter_value} para cliente {client_id}")
             
             if op_type == 'eof':
                 # Actualizar contador de EOF

@@ -1,124 +1,47 @@
-
 from collections import defaultdict
 import logging
-from typing import Dict
+from typing import Dict, Callable, Tuple, List
+from abc import ABC, abstractmethod
 from processors.data_processor import DataProcessor
 from dtos.dto import BatchType, MenuItemBatchDTO, StoreBatchDTO, TransactionBatchDTO, TransactionItemBatchDTO, UserBatchDTO
 from client_processing_state import ClientProcessingState
-
+from processors.message_processor import MessageProcessor
 logger = logging.getLogger(__name__)
 
 class ProcessorsHandler:
     def __init__(self, join_node):
         self.join_node = join_node
         self.client_states: Dict[str, ClientProcessingState] = defaultdict(ClientProcessingState)
-    
-    
-    def handle_stores_message(self, message: bytes, client_id, message_id) -> bool:
-        self.join_node._get_or_create_processors(client_id)
-        dto = StoreBatchDTO.from_bytes_fast(message)
         
-        if dto.batch_type == BatchType.RAW_CSV:
-            lines = dto.data.split('\n')
-            csv_lines_with_prefix = []
-            
-            for line in lines:
-                if line.strip():
-                    if line.strip() == 'store_id,store_name':
-                        continue
-                    csv_lines_with_prefix.append(f"stores:{line.strip()}")
-            
-            self.join_node.store_processors[client_id].process_batch(dto.data)
-            self.join_node.checkpoint_handler.save_message_checkpoint(
-                client_id, 
-                message_id, 
-                csv_lines_with_prefix
+        self.processors = {
+            'stores': MessageProcessor(
+                join_node=join_node,
+                data_type='stores',
+                dto_class=StoreBatchDTO,
+                header_line='store_id,store_name',
+                state_setter=lambda state: setattr(state, 'stores_loaded', True)
+            ),
+            'users': MessageProcessor(
+                join_node=join_node,
+                data_type='users',
+                dto_class=UserBatchDTO,
+                header_line='user_id,birthdate',
+                state_setter=lambda state: setattr(state, 'users_loaded', True)
+            ),
+            'menu_items': MessageProcessor(
+                join_node=join_node,
+                data_type='menu_items',
+                dto_class=MenuItemBatchDTO,
+                header_line='item_id,item_name',
+                state_setter=lambda state: setattr(state, 'menu_items_loaded', True)
             )
-            return (False, True)
-        
-        if dto.batch_type == BatchType.EOF:
-            self.join_node.client_states[client_id].stores_loaded = True
-            stores_count = len(self.join_node.store_processors[client_id].get_data())
-            logger.info(f"EOF stores para '{client_id}': {stores_count} stores")
-            self.join_node._check_and_execute_joins(client_id)
-            lines = [f"EOF:stores"]
-            self.join_node.checkpoint_handler.save_message_checkpoint(
-                client_id, message_id, lines
-            )
-            return (False, True)
-        
-        return (False, False)
+        }
     
-
-    def handle_users_message(self, message: bytes, client_id, message_id) -> bool:
-        self.join_node._get_or_create_processors(client_id)
-        
-        dto = UserBatchDTO.from_bytes_fast(message)
-        
-        if dto.batch_type == BatchType.RAW_CSV:
-            lines = dto.data.split('\n')
-            csv_lines_with_prefix = []
-            
-            for line in lines:
-                if line.strip():
-                    if line.strip() == 'user_id,birthdate':
-                        continue
-                    csv_lines_with_prefix.append(f"users:{line.strip()}")
-            
-            self.join_node.user_processors[client_id].process_batch(dto.data)
-            self.join_node.checkpoint_handler.save_message_checkpoint(
-                client_id, message_id, csv_lines_with_prefix
-            )
-            return (False, True)
-        
-        if dto.batch_type == BatchType.EOF:
-            self.join_node.client_states[client_id].users_loaded = True
-            users_count = len(self.join_node.user_processors[client_id].get_data())
-            logger.info(f"EOF users para '{client_id}': {users_count} users")
-            self.join_node._check_and_execute_joins(client_id)
-            lines = [f"EOF:users"]
-            self.join_node.checkpoint_handler.save_message_checkpoint(
-                client_id, message_id, lines
-            )
-            return (False, True)
-        
-        return (False, False)
-
-    def handle_menu_items_message(self, message: bytes, client_id, message_id) -> bool:
-        self.join_node._get_or_create_processors(client_id)
-        
-        dto = MenuItemBatchDTO.from_bytes_fast(message)
-        
-        if dto.batch_type == BatchType.RAW_CSV:
-            lines = dto.data.split('\n')
-            csv_lines_with_prefix = []
-            
-            for line in lines:
-                if line.strip():
-                    if line.strip() == 'item_id,item_name':
-                        continue
-                    csv_lines_with_prefix.append(f"menu_items:{line.strip()}")
-            
-            self.join_node.menu_item_processors[client_id].process_batch(dto.data)
-            self.join_node.checkpoint_handler.save_message_checkpoint(
-                client_id, message_id, csv_lines_with_prefix
-            )
-            return (False, True)
-        
-        if dto.batch_type == BatchType.EOF:
-            self.join_node.client_states[client_id].menu_items_loaded = True
-            menu_items_count = len(self.join_node.menu_item_processors[client_id].get_data())
-            logger.info(f"EOF menu_items para '{client_id}': {menu_items_count} items")
-            self.join_node._check_and_execute_joins(client_id)
-            lines = [f"EOF:menu_items"]
-            self.join_node.checkpoint_handler.save_message_checkpoint(
-                client_id, message_id, lines
-            )
-            return (False, True)
-        
-        return (False, False)
+    def handle_stores_message(self, message: bytes, client_id: str, message_id: str) -> Tuple[bool, bool]:
+        return self.processors['stores'].handle_message(message, client_id, message_id)
     
-
+    def handle_users_message(self, message: bytes, client_id: str, message_id: str) -> Tuple[bool, bool]:
+        return self.processors['users'].handle_message(message, client_id, message_id)
     
-
-    
+    def handle_menu_items_message(self, message: bytes, client_id: str, message_id: str) -> Tuple[bool, bool]:
+        return self.processors['menu_items'].handle_message(message, client_id, message_id)

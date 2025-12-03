@@ -1,5 +1,6 @@
 
 import logging
+import time
 from typing import Dict, List
 
 from dtos.dto import BatchType, TransactionBatchDTO
@@ -17,55 +18,43 @@ class TPVQueryHandler:
             if not joined_data:
                 logger.warning(f"No hay datos para Q3 de cliente '{client_id}'")
                 return
-            
-            sorted_data = sorted(joined_data, 
-                               key=lambda x: (x['year_half_created_at'], int(x['store_id'])))
-            print(f"\n=== RESULTADOS Q3 PARA CLIENTE '{client_id}' ===")
-            print("year_half_created_at,store_name,tpv")
-            for record in sorted_data:
-                store_name = str(record['store_name']).replace(',', '_')
-                print(f"{record['year_half_created_at']},{store_name},{record['tpv']:.1f}")
-            print(f"=== FIN RESULTADOS Q3 PARA CLIENTE '{client_id}' ===\n")
-            
-            BATCH_SIZE = 150
-            header = "year_half_created_at,store_name,tpv"
-            
-            logger.info(f"Enviando Q3 para cliente '{client_id}': {len(sorted_data)} registros en {(len(sorted_data) + BATCH_SIZE - 1) // BATCH_SIZE} batches")
-            
-            for i in range(0, len(sorted_data), BATCH_SIZE):
-                batch = sorted_data[i:i + BATCH_SIZE]
-                csv_lines = [header]
-                
-                for record in batch:
-                    store_name = str(record['store_name']).replace(',', '_')
-                    csv_lines.append(f"{record['year_half_created_at']},{store_name},{record['tpv']:.1f}")
-                
-                results_csv = '\n'.join(csv_lines)
-                unique_id = self.join_node.generate_next_message_id(client_id)
-                result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
-                self.output_middleware.send(
-                    result_dto.to_bytes_fast(), 
-                    routing_key=f'q3.data',
-                    headers={'client_id': int(client_id), 'message_id': unique_id}
-                )
-                
-                logger.info(f"Batch Q3 enviado para cliente '{client_id}': {len(batch)} registros ({i+1}-{i+len(batch)}/{len(sorted_data)})")
-            
-            eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
-            unique_id = self.join_node.generate_next_message_id(client_id)
+            self.join_node.checkpoint_handler.start_batch_transaction(client_id, "q3")                
+            self.send_data(client_id, joined_data)
+            self.send_eof(client_id)
+            self.join_node.checkpoint_handler.commit_batch_transaction(client_id, "q3")
 
-            self.output_middleware.send(
-                eof_dto.to_bytes_fast(), 
-                routing_key=f'q3.data',
-                headers={'client_id': int(client_id), 'message_id': unique_id}
-            )
-            
-            logger.info(f"Resultados Q3 completados para cliente '{client_id}': {len(joined_data)} registros en total")
-            
         except Exception as e:
             logger.error(f"Error enviando resultados Q3 para cliente '{client_id}': {e}", exc_info=True)
             
-            
+    def send_data(self, client_id: str, joined_data: List[Dict]):
+        sorted_data = sorted(joined_data, key=lambda x: (x['year_half_created_at'], int(x['store_id'])))
+        header = "year_half_created_at,store_name,tpv"
+        csv_lines = [header]
+
+        for record in sorted_data:
+            store_name = str(record['store_name']).replace(',', '_')
+            csv_lines.append(f"{record['year_half_created_at']},{store_name},{record['tpv']:.1f}")
+        
+        results_csv = '\n'.join(csv_lines)
+        unique_id = self.join_node.checkpoint_handler.get_next_id_in_memory(client_id)
+        result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
+        self.output_middleware.send(
+            result_dto.to_bytes_fast(), 
+            routing_key=f'q3.data',
+            headers={'client_id': int(client_id), 'message_id': unique_id}
+        )
+        print(f"///////////// ENVIANDO QUERY Q3 MESSAGE ID: {unique_id} /////////////")
+        # time.sleep(10)
+    def send_eof(self, client_id: str):    
+        eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
+        unique_id = self.join_node.checkpoint_handler.get_next_id_in_memory(client_id)
+        self.output_middleware.send(
+            eof_dto.to_bytes_fast(), 
+            routing_key=f'q3.data',
+            headers={'client_id': int(client_id), 'message_id': unique_id}
+        )
+        print(f"///////////// ENVIANDO EOF Q3 MESSAGE ID: {unique_id} /////////////")
+        # time.sleep(10)
     def _parse_tpv_line(self, line: str) -> Dict:
         if line.startswith('year_half_created_at'):
             return None
@@ -111,3 +100,4 @@ class TPVQueryHandler:
             return (False, True)
         
         return (False, False)
+    

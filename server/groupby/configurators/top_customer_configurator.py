@@ -11,14 +11,15 @@ logger = logging.getLogger(__name__)
 
 
 class TopCustomerConfigurator(GroupByConfigurator):
-    def __init__(self, rabbitmq_host: str, output_exchange: str):
+    def __init__(self, rabbitmq_host: str, output_exchange: str, outgoing_counter_by_client: Dict[str, int] = None):
         super().__init__(rabbitmq_host, output_exchange)
         self.input_queue_name = os.getenv('INPUT_QUEUE', 'year_filtered_q4')
         self.total_groupby_nodes = int(os.getenv('TOTAL_GROUPBY_NODES', '3'))
         self.topk_node_id = int(os.getenv('TOPK_NODE_ID', '1'))
         aggregator_ids_str = os.getenv('TOPK_AGGREGATORS_IDS', '3,4')
         self.topk_aggregators_ids: List[int] = [int(x.strip()) for x in aggregator_ids_str.split(',')]
-        
+        self.outgoing_counter_by_client = outgoing_counter_by_client or defaultdict(int)
+
         
         logger.info(f"TopCustomerConfigurator inicializado:")
         logger.info(f"  Input Queue: {self.input_queue_name}")
@@ -68,8 +69,13 @@ class TopCustomerConfigurator(GroupByConfigurator):
         aggregator_index = store_num % len(self.topk_aggregators_ids)
         return self.topk_aggregators_ids[aggregator_index]
 
-    def generate_next_message_id(self, message_id):
-        return int(self.topk_node_id) * 1000000 + int(message_id)
+    def generate_next_message_id(self, client_id: str) -> int:
+        """
+        Genera ID único por mensaje para este cliente.
+        Determinístico porque el contador se reconstruye desde el checkpoint.
+        """
+        self.outgoing_counter_by_client[client_id] += 1
+        return int(self.topk_node_id) * 1000000 + self.outgoing_counter_by_client[client_id]
     
     def _send_data_by_aggregator(self, output_middleware, strategy, client_id, original_message_id):
         """
@@ -129,4 +135,5 @@ class TopCustomerConfigurator(GroupByConfigurator):
     def get_strategy_config(self) -> dict:
         return {
             'input_queue_name': self.input_queue_name,
+            'outgoing_counter_by_client': self.outgoing_counter_by_client
         }

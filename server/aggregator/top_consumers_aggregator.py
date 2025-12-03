@@ -36,30 +36,11 @@ class TopCustomersAggregatorNode:
         self.outgoing_counter_by_client: Dict[str, int] = defaultdict(int)
         
         self.client_states: Dict[str, ClientState] = {}
-        # total_stores = 10
-        # stores_per_node = total_stores // self.total_nodes
-        # extra_stores = total_stores % self.total_nodes
-        
-        # self.client_logger = LoggerMonitor('/app/client_logs.txt')
-        
-        # self.message_id = 0
-        
-        # self.is_first_message = True
-        
-        # try:
-        #     node_num = int(self.node_id)
-        # except ValueError:
-        #     node_num = int(str(self.node_id).split('_')[-1])
-        
-        # start_store = (node_num - 1) * stores_per_node + min(node_num - 1, extra_stores)
-        # end_store = start_store + stores_per_node + (1 if node_num <= extra_stores else 0)
-        
-        # self.expected_eof_per_client = end_store - start_store
-        
+
         self.store_user_purchases_by_client: Dict[str, Dict[str, Dict[str, int]]] = defaultdict(
             lambda: defaultdict(lambda: defaultdict(int))
         )
-        # self.eof_count_by_client: Dict[str, int] = defaultdict(int)
+
         
         health_port = int(os.getenv('HEALTH_PORT', '9999'))
         self.health_server = HealthChecker(port=health_port)
@@ -68,10 +49,11 @@ class TopCustomersAggregatorNode:
         self.checkpoint_handler = CheckpointHandler(
             checkpoint_dir=self.checkpoint_dir,
             strategy=self,
-            checkpont_interval=1
+            checkpont_interval=1,
+            outgoing_counter_by_client=self.outgoing_counter_by_client,
+            extra_id=int(self.node_id)
         )
         
-        #self._setup_input_middleware(start_store, end_store)
         self._setup_input_middleware()
         self._setup_output_middleware()
         
@@ -81,7 +63,6 @@ class TopCustomersAggregatorNode:
             self.output_middleware.shutdown = self.shutdown
         
         logger.info(f"TopCustomersAggregatorNode {self.node_id} inicializado")
-        # logger.info(f"  Espera {self.expected_eof_per_client} EOF por cliente")
         logger.info(f"  Enviará a {self.total_join_nodes} join nodes")
     
     def _setup_input_middleware(self):
@@ -185,6 +166,7 @@ class TopCustomersAggregatorNode:
                 csv_lines.append(f"{record['store_id']},{record['user_id']},{record['purchases_qty']}")
             
             csv_data = '\n'.join(csv_lines)
+            
             self.send_data_to_join_node(csv_data, client_id, node_id, original_message_id)
                     
         for node_id in range(self.total_join_nodes):
@@ -202,6 +184,8 @@ class TopCustomersAggregatorNode:
             routing_key=routing_key,
             headers={'client_id': client_id, 'message_id': unique_data_id}
         )
+        self.checkpoint_handler.save_counter_update(client_id, self.outgoing_counter_by_client[client_id],"")
+
     def send_eof_to_join_node(self, client_id: str, node_id: int, original_message_id: str):
         # print("///////////// ENVIANDO EOF A JOIN NODE /////////////")
         # time.sleep(10)
@@ -214,7 +198,8 @@ class TopCustomersAggregatorNode:
             routing_key=routing_key,
             headers={'client_id': client_id, 'message_id': unique_data_id}
         )
-        
+        self.checkpoint_handler.save_counter_update(client_id, self.outgoing_counter_by_client[client_id],"")
+
     def handle_eof(self, dto: TransactionBatchDTO, client_id: str, message_id: str) -> bool:
             """
             Maneja EOF con estado del cliente.
@@ -265,6 +250,8 @@ class TopCustomersAggregatorNode:
                     
             if dto.batch_type == BatchType.EOF:
                 self.handle_eof(dto, client_id, message_id)
+                print("///////////// GUARDANDO EOF /////////////")
+                time.sleep(10)
                 self.checkpoint_handler.save_eof_checkpoint(client_id, message_id)
                 return (False, True) 
             
@@ -352,6 +339,15 @@ class TopCustomersAggregatorNode:
         Ejemplo: 0,store_1,user_123,5
         """
         try:
+            if csv_line.startswith(f'{client_id},COUNTER,'):
+                parts = csv_line.split(',')
+                counter_value = parts[2]
+                return f"{client_id},COUNTER,{counter_value}"
+        
+            if csv_line.startswith('EOF:'):
+                routing_key = csv_line.split(':', 1)[1]
+                return f"{client_id},EOF,{routing_key}"
+            
             parts = csv_line.split(',')
             
             if len(parts) < 3 or parts[0] == 'store_id':
@@ -376,23 +372,42 @@ class TopCustomersAggregatorNode:
         Deserializa una operación desde el WAL.
         
         Input: "0,store_1,user_123,5"
-        Output: {
-            'client_id': '0',
-            'store_id': 'store_1',
-            'user_id': 'user_123',
-            'purchases_qty': 5
-        }
+            "0,EOF,top_customers.data"
+            "0,COUNTER,3"
         """
         try:
             parts = operation_str.split(',')
             
+            if len(parts) < 3:
+                raise ValueError(f"Formato inválido: {operation_str}")
+            
+            client_id = parts[0]
+            op_type = parts[1]
+            
+            if op_type == 'COUNTER':
+                counter_value = int(parts[2])
+                return {
+                    'client_id': client_id,
+                    'type': 'counter',
+                    'counter_value': counter_value
+                }
+            
+            if op_type == 'EOF':
+                routing_key = parts[2]
+                return {
+                    'client_id': client_id,
+                    'type': 'eof',
+                    'routing_key': routing_key
+                }
+            
             if len(parts) != 4:
-                raise ValueError(f"Formato inválido, esperaba 4 campos, encontró {len(parts)}: {operation_str}")
+                raise ValueError(f"Formato inválido para datos, esperaba 4 campos: {operation_str}")
             
             client_id, store_id, user_id, purchases_qty_str = parts
             
             return {
                 'client_id': client_id,
+                'type': 'data',
                 'store_id': store_id,
                 'user_id': user_id,
                 'purchases_qty': int(purchases_qty_str)
@@ -405,15 +420,27 @@ class TopCustomersAggregatorNode:
     def apply_operation(self, operation: dict):
         """
         Aplica una operación al estado en memoria.
-        Similar a process_csv_line pero desde dict ya parseado.
         """
         try:
             client_id = operation['client_id']
-            store_id = operation['store_id']
-            user_id = operation['user_id']
-            purchases_qty = operation['purchases_qty']
+            op_type = operation['type']
             
-            self.store_user_purchases_by_client[client_id][store_id][user_id] += purchases_qty
+            if op_type == 'counter':
+                counter_value = operation['counter_value']
+                self.outgoing_counter_by_client[client_id] = counter_value
+                logger.debug(f"[WAL Recovery] Contador restaurado: {counter_value} para cliente {client_id}")
+            
+            elif op_type == 'eof':
+                routing_key = operation['routing_key']
+                logger.debug(f"[WAL Recovery] EOF para cliente {client_id}: {routing_key}")
+            
+            elif op_type == 'data':
+                store_id = operation['store_id']
+                user_id = operation['user_id']
+                purchases_qty = operation['purchases_qty']
+                
+                self.store_user_purchases_by_client[client_id][store_id][user_id] += purchases_qty
+                logger.debug(f"[WAL Recovery] Datos: cliente {client_id}, store {store_id}, user {user_id}, qty {purchases_qty}")
             
         except Exception as e:
             logger.error(f"Error aplicando operación: {e}")

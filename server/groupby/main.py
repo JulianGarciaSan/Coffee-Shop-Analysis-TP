@@ -45,7 +45,7 @@ class GroupByNode:
         self.checkpoint_handler = CheckpointHandler(
             checkpoint_dir=self.checkpoint_dir,
             strategy=self.strategy,
-            checkpont_interval=1000
+            checkpont_interval=1000,
         )
         self.input_middleware = self.configurator.create_input_middleware()
         if hasattr(self.input_middleware, 'shutdown'):

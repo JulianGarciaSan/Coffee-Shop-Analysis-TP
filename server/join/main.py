@@ -2,11 +2,12 @@
 import logging
 import os
 import sys
+import time
 from typing import Callable, Dict, List
 from collections import defaultdict
 
 from common.graceful_shutdown import GracefulShutdown
-from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueueManual
+from rabbitmq.middleware import MessageMiddlewareExchangeManual, MessageMiddlewareQueueManual
 from dtos.dto import BatchType, MenuItemBatchDTO, StoreBatchDTO, TransactionBatchDTO, TransactionItemBatchDTO, UserBatchDTO
 from processors.aggregated_data_processor import AggregatedDataProcessor
 from join_engine import JoinEngine
@@ -44,11 +45,12 @@ class JoinNode:
         self.router: Dict[str, Callable] = {}
         self.q3_joined_data_by_client: Dict[str, List[Dict]] = {}
         self.outgoing_counter_by_client: Dict[str, int] = defaultdict(int)
+        self.pending_rollbacks: Dict[str, int] = {} 
         self.join_engine = JoinEngine()
         self.processor_handler = ProcessorsHandler(self)
         
-        self.checkpoint_handler = JoinNodeCheckpointHandler(join_node=self)
-        self.checkpoint_handler = CheckpointHandler(checkpoint_dir=self.checkpoint_dir,strategy=self.checkpoint_handler, checkpont_interval=3000)
+        self.join_checkpoint_handler = JoinNodeCheckpointHandler(join_node=self)
+        self.checkpoint_handler = CheckpointHandler(checkpoint_dir=self.checkpoint_dir,strategy=self.join_checkpoint_handler, checkpont_interval=3000, outgoing_counter_by_client=self.outgoing_counter_by_client, extra_id=int(self.extra_id))
         self._setup_input_middleware()
         self._setup_output_middleware()
         
@@ -150,30 +152,17 @@ class JoinNode:
             self.input_middleware.shutdown = self.shutdown
         
     def _execute_pending_joins_after_recovery(self):
-        """
-        Después de la recuperación, verifica si hay joins listos para ejecutar.
-        """
-        logger.info("Verificando joins pendientes después de recuperación...")
+        logger.info("Verificando consistencia transaccional...")
         
-        for client_id in self.client_states.keys():
-            try:
-                state = self.client_states[client_id]
-                logger.info(f"Estado post-recuperación cliente {client_id}: "
-                          f"stores={state.stores_loaded}, users={state.users_loaded}, "
-                          f"menu_items={state.menu_items_loaded}, "
-                          f"top_customers={state.top_customers_loaded}, "
-                          f"best_selling={state.best_selling_loaded}, "
-                          f"most_profit={state.most_profit_loaded}, "
-                          f"groupby_eof_count={state.groupby_eof_count}, "
-                          f"top_customers_eof_count={state.top_customers_eof_count}")
-                
-                self._check_and_execute_joins(client_id)
-                
-            except Exception as e:
-                logger.error(f"Error verificando joins para cliente {client_id}: {e}")
+        if self.pending_rollbacks:
+            for client_id, reset_value in self.pending_rollbacks.items():
+                current = self.outgoing_counter_by_client.get(client_id, 0)
+                logger.warning(f"ROLLBACK: Restaurando contador de {current} a {reset_value} para reintentar transacción.")
+                self.outgoing_counter_by_client[client_id] = reset_value
+            self.pending_rollbacks.clear()
             
     def _setup_output_middleware(self):
-        self.output_middleware = MessageMiddlewareExchange(
+        self.output_middleware = MessageMiddlewareExchangeManual(
             host=self.rabbitmq_host,
             #exchange_name=self.output_exchange,
             exchange_name='reports_exchange',
@@ -187,16 +176,28 @@ class JoinNode:
         
         if hasattr(self.output_middleware, 'shutdown'):
             self.output_middleware.shutdown = self.shutdown
-            
-            
-    def generate_next_message_id(self, client_id: str) -> int:
-        """
-        Genera ID único por mensaje para este cliente.
-        """
-        self.outgoing_counter_by_client[client_id] += 1
-        return int(self.extra_id) * 1000000 + self.outgoing_counter_by_client[client_id]
-            
-    
+
+
+    # def start_batch_transaction(self, client_id: str, query_name: str):
+    #     current_counter = self.outgoing_counter_by_client.get(client_id, 0)
+        
+    #     op = f"{client_id},START_TRANSACTION,{current_counter},{query_name}"
+    #     self.checkpoint_handler.save_counter_update(client_id, current_counter, [op])
+
+    # def get_next_id_in_memory(self, client_id: str) -> int:
+    #     self.outgoing_counter_by_client[client_id] += 1
+    #     return int(self.extra_id) * 1_000_000 + self.outgoing_counter_by_client[client_id]
+
+    # def commit_batch_transaction(self, client_id: str, query_name: str):
+    #     current_counter = self.outgoing_counter_by_client.get(client_id, 0)
+        
+    #     ops = [
+    #         f"{client_id},COMMIT_TRANSACTION,{current_counter}",
+    #         f"{client_id},SENT,{query_name}"
+    #     ]
+    #     self.checkpoint_handler.save_counter_update(client_id, current_counter, ops)
+
+
     def _check_and_execute_joins(self, client_id: str):
         state = self.client_states[client_id]
         
@@ -210,13 +211,11 @@ class JoinNode:
             self.q3_joined_data_by_client[client_id] = joined_data
             self.tpv_query_handler.send_q3_results(client_id, joined_data)
             state.q3_results_sent = True
-            
             self.checkpoint_handler.save_message_checkpoint(
                 client_id, 
                 f"q3_sent_{client_id}",  
                 [f"SENT:q3"]  
             )
-        
         # Q4: Top Customers + Stores + Users
         if state.is_q4_ready():
             logger.info(f"Condiciones listas para JOIN Q4 de cliente '{client_id}'")
@@ -227,13 +226,11 @@ class JoinNode:
             )
             self.top_customers_query_handler.send_q4_results(client_id, joined_data)
             state.q4_results_sent = True
-            
             self.checkpoint_handler.save_message_checkpoint(
                 client_id, 
                 f"q4_sent_{client_id}",
                 [f"SENT:q4"]
             )
-        
         # Q2 Best Selling
         if state.is_best_selling_ready():
             logger.info(f"Condiciones listas para JOIN Q2 Best Selling de cliente '{client_id}'")
@@ -244,13 +241,12 @@ class JoinNode:
             )
             self.profit_and_selling_query_handler.send_best_selling_results(client_id, joined_data)
             state.best_selling_sent = True
-            
             self.checkpoint_handler.save_message_checkpoint(
                 client_id,
                 f"best_selling_sent_{client_id}",
                 [f"SENT:best_selling"]
             )
-        
+
         # Q2 Most Profit
         if state.is_most_profit_ready():
             logger.info(f"Condiciones listas para JOIN Q2 Most Profit de cliente '{client_id}'")
@@ -261,12 +257,12 @@ class JoinNode:
             )
             self.profit_and_selling_query_handler.send_most_profit_results(client_id, joined_data)
             state.most_profit_sent = True
-            
             self.checkpoint_handler.save_message_checkpoint(
                 client_id,
                 f"most_profit_sent_{client_id}",
                 [f"SENT:most_profit"]
             )
+            
     def process_message(self, message: bytes, routing_key: str, client_id, message_id) -> bool:
         try:
             handler = self.router.get(routing_key)
@@ -316,8 +312,6 @@ class JoinNode:
             
             if self.checkpoint_handler.analyze_first_message(client_id, message_id, ch, method, body):
                 return
-
-            # self.checkpoint_handler.register_incoming_message(client_id, message_id)
             
             should_stop, should_ack = self.process_message(body, base_routing_key, client_id, message_id)
 
