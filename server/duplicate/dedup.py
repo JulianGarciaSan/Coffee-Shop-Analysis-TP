@@ -1,16 +1,15 @@
-# filter_duplicate_node.py
 import logging
 import os
 import sys
 from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueueManual
 from common.graceful_shutdown import GracefulShutdown
 from healthchecker.healthchecker import HealthChecker
-from checkpoint_handler.checkpoint_handler import CheckpointHandler
-from dedup_strategy import DedupStrategy
+from logger_monitor.logger_monitor import LoggerMonitor
+from logger_monitor.logger_recovery import RecoveryManager
+from typing import Set, Tuple, Optional
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 class FilterDuplicateNode:
     def __init__(self):
@@ -19,20 +18,29 @@ class FilterDuplicateNode:
         
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.input_queue = os.getenv('INPUT_QUEUE', 'to_gateway_queue')
-        self.checkpoint_dir = os.getenv('CHECKPOINT_DIR', '/app/dedup/checkpoints')
+        self.output_exchange = os.getenv('OUTPUT_EXCHANGE', 'reports_exchange')
         
         logger.info(f"FilterDuplicateNode inicializado:")
         logger.info(f"  Input queue: {self.input_queue}")
-        logger.info(f"  Checkpoint dir: {self.checkpoint_dir}")
+        logger.info(f"  Output exchange: {self.output_exchange}")
         
-        self.strategy = DedupStrategy()
+        # UN SOLO LOG para todo (mensajes y EOFs)
+        self.dedup_logger = LoggerMonitor('/app/dedup_log.txt')
         
-        self.checkpoint_handler = CheckpointHandler(
-            checkpoint_dir=self.checkpoint_dir,
-            strategy=self.strategy,
-            checkpont_interval=1000
+        # Recovery manager para cargar estado inicial
+        self.recovery = RecoveryManager(
+            main_logger=self.dedup_logger,
+            client_logger=self.dedup_logger,
+            eof_logger=self.dedup_logger  # Mismo log para todo
         )
         
+        # Cargar estado desde logs
+        self.processed_messages, self.eof_clients = self.recovery.load_dedup_state()
+        
+        logger.info(f"Estado recuperado: {len(self.processed_messages)} mensajes procesados, "
+                   f"{len(self.eof_clients)} clientes finalizados")
+        
+        # Middleware de entrada
         self.input_middleware = MessageMiddlewareQueueManual(
             host=self.rabbitmq_host,
             queue_name=self.input_queue,
@@ -43,6 +51,7 @@ class FilterDuplicateNode:
         if hasattr(self.input_middleware, 'shutdown'):
             self.input_middleware.shutdown = self.shutdown
         
+        # Middleware de salida
         self.output_middleware = MessageMiddlewareExchange(
             host=self.rabbitmq_host,
             exchange_name='reports_exchange',
@@ -51,183 +60,150 @@ class FilterDuplicateNode:
         
         if hasattr(self.output_middleware, 'shutdown'):
             self.output_middleware.shutdown = self.shutdown
-        
-        health_port = int(os.getenv('HEALTH_PORT', '9999'))
-        self.health_server = HealthChecker(port=health_port)
-        self.health_server.start()
-
+    
     def _on_shutdown_signal(self):
-        logger.info("FilterDuplicateNode: Señal de shutdown recibida, deteniendo consumo...")
+        """Callback para manejar señal de shutdown"""
+        logger.info("FilterDuplicateNode: Señal de shutdown recibida")
         try:
             if self.input_middleware:
                 self.input_middleware.stop_consuming()
         except Exception as e:
             logger.error(f"Error deteniendo consumo: {e}")
-
-    def is_eof_message(self, body: bytes) -> bool:
-        """
-        Verifica si el mensaje es un EOF.
-        """
+    
+    def _extract_headers(self, properties) -> Tuple[Optional[int], Optional[int]]:
+        """Extrae client_id y message_id de los headers"""
+        client_id = None
+        message_id = None
+        
+        if properties and properties.headers:
+            client_id = properties.headers.get('client_id')
+            message_id = properties.headers.get('message_id')
+        
+        return client_id, message_id
+    
+    def _is_eof_message(self, body: bytes) -> bool:
+        """Verifica si el mensaje es un EOF"""
         try:
             decoded = body.decode('utf-8').strip()
             return decoded.startswith("EOF:")
         except:
             return False
-
-    def process_message(self, body: bytes, client_id: int, message_id: int) -> bool:
+    
+    def is_duplicate(self, client_id: int, message_id: int) -> bool:
+        """Verifica si un mensaje ya fue procesado"""
+        return (client_id, message_id) in self.processed_messages
+    
+    def is_client_finished(self, client_id: int) -> bool:
+        """Verifica si un cliente ya finalizó (basado en haber procesado su EOF)"""
+        return client_id in self.eof_clients
+    
+    def mark_processed(self, client_id: int, message_id: int, is_eof: bool = False):
         """
-        Procesa un mensaje y lo reenvía si no es duplicado.
-        
-        Args:
-            body: Cuerpo del mensaje
-            client_id: ID del cliente
-            message_id: ID del mensaje
-            
-        Returns:
-            True si se debe detener el consumo, False en caso contrario
+        Marca un mensaje como procesado usando LoggerMonitor.
+        Formato simple: CLIENT_ID:MSG_ID;
         """
-        if self.shutdown.is_shutting_down():
-            logger.warning("Shutdown en progreso, ignorando mensaje")
-            return True
-        
-        try:
-            client_id_str = str(client_id)
+        if (client_id, message_id) not in self.processed_messages:
+            self.processed_messages.add((client_id, message_id))
+            self.dedup_logger.write(f"{client_id}:{message_id}")
             
-            is_eof = self.is_eof_message(body)
-            
+            # Si es EOF, también marcamos el cliente como finalizado
             if is_eof:
-                if self.strategy.is_eof_received(client_id_str):
-                    logger.info(f"EOF duplicado para cliente {client_id}, ignorando")
-                    return False
-                
-                self.strategy.mark_eof(client_id_str)
-                
-                self.checkpoint_handler.save_eof_checkpoint(
-                    client_id=client_id_str,
-                    message_id=str(message_id)
-                )
-                
-                logger.info(f"EOF recibido para cliente {client_id}, reenviando")
-                
-                headers = {'client_id': client_id, 'message_id': message_id}
-                self.output_middleware.send(body, headers=headers)
-                
-                stats = self.strategy.get_stats(client_id_str)
-                logger.info(f"Estadísticas finales cliente {client_id}: {stats}")
-                
-                return False
-            
-            if self.strategy.is_duplicate(client_id_str, message_id):
-                logger.info(f"Mensaje duplicado ignorado: {client_id}:{message_id}")
-                return False
-            
-            self.strategy.mark_as_processed(client_id_str, message_id)
-            
-            self.checkpoint_handler.save_message_checkpoint(
-                client_id=client_id_str,
-                message_id=str(message_id),
-                csv_lines=[str(message_id)]
-            )
-            
-            headers = {'client_id': client_id, 'message_id': message_id}
-            self.output_middleware.send(body, headers=headers)
-            
-            logger.debug(f"Mensaje reenviado: {client_id}:{message_id}")
-            return False
-            
-        except Exception as e:
-            logger.error(f"Error procesando mensaje: {e}")
-            return False
-
+                self.eof_clients.add(client_id)
+    
     def on_message_callback(self, ch, method, properties, body):
-        """
-        Callback para mensajes recibidos de RabbitMQ.
-        """
+        """Callback para mensajes entrantes"""
         try:
             if self.shutdown.is_shutting_down():
-                logger.warning("Shutdown solicitado, deteniendo consumo")
+                logger.warning("Shutdown en progreso, rechazando mensaje")
+                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
                 ch.stop_consuming()
                 return
             
-            client_id = None
-            message_id = None
-            if properties and properties.headers:
-                client_id = properties.headers.get('client_id')
-                message_id = properties.headers.get('message_id')
+            # Extraer headers
+            client_id, message_id = self._extract_headers(properties)
             
             if client_id is None or message_id is None:
-                logger.warning(f"Mensaje sin headers válidos: client_id={client_id}, message_id={message_id}")
+                logger.warning(f"Mensaje sin client_id o message_id en headers, rechazando")
+                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+                return
+            
+            logger.debug(f"Mensaje recibido: client={client_id}, msg={message_id}")
+            
+            # Detectar si es EOF
+            is_eof = self._is_eof_message(body)
+            
+            # ============ VERIFICACIONES COMUNES ============
+            
+            # Verificar si el cliente ya finalizó
+            if not is_eof and self.is_client_finished(client_id):
+                logger.info(f"Mensaje de cliente finalizado {client_id}, ignorando")
                 ch.basic_ack(delivery_tag=method.delivery_tag)
                 return
             
-            if self.checkpoint_handler.analyze_first_message(
-                str(client_id), 
-                str(message_id), 
-                ch, 
-                method, 
-                body
-            ):
+            # Verificar duplicación (tanto para EOF como para mensajes normales)
+            if self.is_duplicate(client_id, message_id):
+                logger.info(f"Mensaje duplicado detectado: client={client_id}, msg={message_id}, is_eof={is_eof}")
+                ch.basic_ack(delivery_tag=method.delivery_tag)
                 return
             
-            should_stop = self.process_message(body, client_id, message_id)
+            # ============ PROCESAMIENTO ============
             
+            # Mensaje nuevo (EOF o normal) - enviar primero
+            headers = {'client_id': client_id, 'message_id': message_id}
+            self.output_middleware.send(body, routing_key='q1.data', headers=headers)
+            
+            if is_eof:
+                logger.info(f"EOF enviado downstream: client={client_id}, msg={message_id}")
+            else:
+                logger.debug(f"Mensaje enviado downstream: client={client_id}, msg={message_id}")
+            
+            # Marcar como procesado (indicando si es EOF)
+            self.mark_processed(client_id, message_id, is_eof=is_eof)
+            
+            # ACK
             ch.basic_ack(delivery_tag=method.delivery_tag)
-            
-            if should_stop:
-                logger.info("Shutdown solicitado - deteniendo consuming")
-                ch.stop_consuming()
-                
+        
         except Exception as e:
-            logger.error(f"Error en callback: {e}")
+            logger.error(f"Error procesando mensaje: {e}", exc_info=True)
+            # En caso de error, rechazar con requeue para reintentar
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
-
+    
     def start(self):
-        """
-        Inicia el consumo de mensajes.
-        """
+        """Inicia el consumo de mensajes"""
         try:
-            logger.info("Iniciando consumo de mensajes en FilterDuplicateNode...")
-            
-            stats = self.strategy.get_stats()
-            logger.info(f"Estadísticas iniciales: {stats}")
+            logger.info("Iniciando consumo de mensajes...")
+            logger.info(f"Estado inicial: {len(self.processed_messages)} mensajes procesados, "
+                       f"{len(self.eof_clients)} clientes finalizados")
             
             self.input_middleware.start_consuming(self.on_message_callback)
-            
+        
         except KeyboardInterrupt:
-            logger.info("FilterDuplicateNode detenido manualmente")
+            logger.info("Detenido manualmente")
+        
         except Exception as e:
-            logger.error(f"Error durante el consumo: {e}")
+            logger.error(f"Error durante consumo: {e}", exc_info=True)
             raise
+        
         finally:
             self._cleanup()
-
+    
     def _cleanup(self):
-        """
-        Limpieza ordenada de recursos.
-        """
-        logger.info("Iniciando cleanup del FilterDuplicateNode...")
+        """Limpieza de recursos"""
+        logger.info("Iniciando cleanup...")
         
         try:
-            stats = self.strategy.get_stats()
-            logger.info(f"Estadísticas finales: {stats}")
-            
-            if self.checkpoint_handler:
-                self.checkpoint_handler.close()
-                logger.info("CheckpointHandler cerrado")
-            
             if self.input_middleware:
                 self.input_middleware.close()
-                logger.info("Middleware de entrada cerrado")
+                logger.info("Input middleware cerrado")
             
             if self.output_middleware:
                 self.output_middleware.close()
-                logger.info("Middleware de salida cerrado")
+                logger.info("Output middleware cerrado")
             
-            if self.health_server:
-                self.health_server.stop()
-                self.health_server.join(timeout=5.0)
-                logger.info("HealthChecker detenido")
-            
+            # Cerrar logger
+            if self.dedup_logger:
+                self.dedup_logger.close()
+        
         except Exception as e:
             logger.error(f"Error durante cleanup: {e}")
         
@@ -236,10 +212,11 @@ class FilterDuplicateNode:
 
 if __name__ == "__main__":
     try:
-        duplicate_filter = FilterDuplicateNode()
-        duplicate_filter.start()
+        node = FilterDuplicateNode()
+        node.start()
         logger.info("FilterDuplicateNode terminado exitosamente")
         sys.exit(0)
+    
     except Exception as e:
-        logger.error(f"Error fatal: {e}")
+        logger.error(f"Error fatal: {e}", exc_info=True)
         sys.exit(1)

@@ -12,6 +12,8 @@ COPY ./server/coordinator/ ./coordinator/
 COPY ./server/healthchecker/ ./healthchecker/
 COPY ./server/checkpoint_handler/ ./checkpoint_handler/
 COPY ./server/message_range_tracker/ ./message_range_tracker/
+COPY ./server/logger_monitor/ ./logger_monitor/
+
 
 COPY ./server/duplicate/ .
 
