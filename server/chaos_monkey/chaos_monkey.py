@@ -165,7 +165,7 @@ def main():
     kill_interval = int(os.getenv("KILL_INTERVAL", "1"))
     min_kills = int(os.getenv("MIN_KILLS", "1"))
     max_kills = int(os.getenv("MAX_KILLS", "9"))
-    max_total_kills = int(os.getenv("MAX_TOTAL_KILLS", "200"))
+    max_total_kills = int(os.getenv("MAX_TOTAL_KILLS", "100"))
     
     chaos = ChaosMonkey(
         kill_interval=kill_interval,
