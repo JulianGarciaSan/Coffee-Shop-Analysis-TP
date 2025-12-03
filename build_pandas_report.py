@@ -214,22 +214,25 @@ print(f"  Query 3 completado: {len(q3_tpv_with_name)} registros")
 # Query 4
 
 print("Procesando Query 4...")
+# Query 4
+
+print("Procesando Query 4...")
 transactions_by_store_user = transactions.dropna(subset=['user_id']).groupby(["store_id", "user_id"])
 stores_names_only = stores[["store_id", "store_name"]]
 users_birthdates_only = users[["user_id", "birthdate"]]
 
 q4_groups_with_most_purchases = transactions_by_store_user["transaction_id"].count().reset_index(drop=False).rename(columns={"transaction_id":"purchases_qty"})
-q4_most_purchases = q4_groups_with_most_purchases.sort_values(by=["store_id", "purchases_qty"], ascending=[True, False]).groupby(["store_id"]).head(35)
+q4_most_purchases = q4_groups_with_most_purchases.sort_values(by=["store_id", "purchases_qty"], ascending=[True, False]).groupby(["store_id"]).head(3)
+
 q4_most_purchases_with_store = pd.merge(q4_most_purchases, stores_names_only, on="store_id")
 q4_most_purchases_with_store_and_user = pd.merge(q4_most_purchases_with_store, users_birthdates_only, on="user_id")
 pd.set_option('display.max_rows', None)
 
 q4_most_purchases_with_store_and_user_filename = os.path.join(paths['reports_dir'], 'generated_query4.csv')
-q4_most_purchases_with_store_and_user[["store_name", "birthdate", "purchases_qty"]].sort_values(by=["store_name", "purchases_qty", "birthdate"]).to_csv(q4_most_purchases_with_store_and_user_filename, index=False, lineterminator='\n')
+q4_most_purchases_with_store_and_user[["store_name", "birthdate"]].sort_values(by=["store_name", "birthdate"]).to_csv(q4_most_purchases_with_store_and_user_filename, index=False, lineterminator='\n')
 
 remove_last_newline(q4_most_purchases_with_store_and_user_filename)
 print(f"  Query 4 completado: {len(q4_most_purchases_with_store_and_user)} registros")
-
 print("=" * 50)
 print(f"Todos los reportes generados exitosamente en: {paths['reports_dir']}")
 print("=" * 50)

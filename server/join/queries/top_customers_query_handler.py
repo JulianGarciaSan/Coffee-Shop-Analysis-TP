@@ -2,6 +2,7 @@
 
 
 import logging
+import time
 from typing import Dict, List
 
 from dtos.dto import BatchType, TransactionBatchDTO
@@ -13,58 +14,54 @@ class TopCustomersQueryHandler:
     def __init__(self, output_middleware, join_node):
         self.output_middleware = output_middleware
         self.join_node = join_node
-
+        
+        
     def send_q4_results(self, client_id: str, joined_data: List[Dict]):
         try:
             if not joined_data:
                 logger.warning(f"No hay datos para Q4 de cliente '{client_id}'")
                 return
-            
-            print(f"\n=== RESULTADOS Q4 PARA CLIENTE {client_id} ===")
-            print(f"Total registros: {len(joined_data)}")
-            print("store_name,birthdate")
-            for record in joined_data:
-                print(f"{record['store_name']},{record['birthdate']}")
-            print(f"=== FIN RESULTADOS Q4 CLIENTE {client_id} ===\n")
-            
-            sorted_data = sorted(joined_data, key=lambda x: int(x['store_id']))
-            
-            BATCH_SIZE = 1000
-            header = "store_name,birthdate"
-            
-            for i in range(0, len(sorted_data), BATCH_SIZE):
-                batch = sorted_data[i:i + BATCH_SIZE]
-                csv_lines = [header]
-                
-                for record in batch:
-                    csv_lines.append(f"{record['store_name']},{record['birthdate']}")
-                
-                results_csv = '\n'.join(csv_lines)
-                unique_id = self.join_node.generate_next_message_id(client_id)
-
-                result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
-                self.output_middleware.send(
-                    result_dto.to_bytes_fast(), 
-                    routing_key=f'q4.data',
-                    headers={'client_id': int(client_id), 'message_id': unique_id}
-                )
-                
-                logger.info(f"Batch Q4 enviado para cliente '{client_id}': {len(batch)} registros ({i+1}-{i+len(batch)}/{len(sorted_data)})")
-            
-            eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
-            unique_id = self.join_node.generate_next_message_id(client_id)
-
-            self.output_middleware.send(
-                eof_dto.to_bytes_fast(), 
-                routing_key=f'q4.data',
-                headers={'client_id': int(client_id), 'message_id': unique_id}
-            )
-            
+            self.join_node.checkpoint_handler.start_batch_transaction(client_id, "q4")                
+            self.send_data(client_id, joined_data)
+            self.send_eof(client_id)
+            self.join_node.checkpoint_handler.commit_batch_transaction(client_id, "q4")
             logger.info(f"Resultados Q4 completados para cliente '{client_id}': {len(joined_data)} registros en total")
             
         except Exception as e:
             logger.error(f"Error enviando resultados Q4 para cliente '{client_id}': {e}", exc_info=True)
+
             
+    def send_data(self, client_id: str, joined_data: List[Dict]):
+        sorted_data = sorted(joined_data, key=lambda x: int(x['store_id']))
+
+        header = "store_name,birthdate"
+        csv_lines = [header]
+            
+        for record in sorted_data:
+            csv_lines.append(f"{record['store_name']},{record['birthdate']}")
+        results_csv = '\n'.join(csv_lines)
+        unique_id = self.join_node.checkpoint_handler.get_next_id_in_memory(client_id)
+        result_dto = TransactionBatchDTO(results_csv, BatchType.RAW_CSV)
+        self.output_middleware.send(
+            result_dto.to_bytes_fast(), 
+            routing_key=f'q4.data',
+            headers={'client_id': int(client_id), 'message_id': unique_id}
+        )
+        logger.info(f"Batch Q4 enviado para cliente '{client_id}')")
+        print(f"///////////// ENVIANDO QUERY Q4 MESSAGE ID: {unique_id} /////////////")
+        # time.sleep(10)
+        
+    def send_eof(self, client_id: str):
+        eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
+        unique_id = self.join_node.checkpoint_handler.get_next_id_in_memory(client_id)
+
+        self.output_middleware.send(
+            eof_dto.to_bytes_fast(), 
+            routing_key=f'q4.data',
+            headers={'client_id': int(client_id), 'message_id': unique_id}
+        )
+        print(f"///////////// ENVIANDO EOF Q4 MESSAGE ID: {unique_id} /////////////")
+        # time.sleep(10)            
     
        
     def _parse_top_customers_line(self, line: str) -> Dict:
@@ -119,3 +116,4 @@ class TopCustomersQueryHandler:
             return (False, True)
         
         return (False, False)
+    

@@ -30,9 +30,10 @@ class GroupByStrategyFactory:
 
         elif groupby_mode == 'top_customers':
             input_queue_name = config.get('input_queue_name')
+            outgoing_counter_by_client = config.get('outgoing_counter_by_client')
             if not input_queue_name:
                 raise ValueError("input_queue_name is required for top_customers")
-            return strategy_class(input_queue_name)
+            return strategy_class(input_queue_name, outgoing_counter_by_client)
 
         
         elif groupby_mode == 'best_selling':

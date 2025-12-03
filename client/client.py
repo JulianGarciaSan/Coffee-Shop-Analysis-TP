@@ -263,6 +263,24 @@ class Client:
                     f.writelines(data_lines)
                 
                 logger.info(f"Q1 ordenado: {len(data_lines)} registros")
+                
+            q4_file = f"{report_dir}/report_q4.csv"
+            if os.path.exists(q4_file):
+                logger.info("Ordenando Q4 por store_name alfabéticamente...")
+                
+                with open(q4_file, 'r') as f:
+                    lines = f.readlines()
+                
+                header = lines[0]
+                data_lines = lines[1:]
+                
+                data_lines.sort(key=lambda line: line.split(',')[0])
+                
+                with open(q4_file, 'w') as f:
+                    f.write(header)
+                    f.writelines(data_lines)
+                
+                logger.info(f"Q4 ordenado: {len(data_lines)} registros por store_name")
             
             self.report_files.clear()
             

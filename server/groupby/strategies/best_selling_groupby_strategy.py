@@ -67,6 +67,7 @@ class BestSellingGroupByStrategy(GroupByStrategy):
         Ejemplo: 0,item_123,2024-01-15,5,50.00
         """
         try:
+            
             item_id = self.dto_helper.get_column_value(csv_line, 'item_id')
             created_at = self.dto_helper.get_column_value(csv_line, 'created_at')
             quantity = self.dto_helper.get_column_value(csv_line, 'quantity')

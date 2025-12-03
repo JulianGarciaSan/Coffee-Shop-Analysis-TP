@@ -40,17 +40,16 @@ class ChaosMonkey:
                 continue
             
             if any(keyword in container.name.lower() for keyword in [
-                # 'groupby_top_customers',
-                # 'top_consumers_aggregator',
-                # 'groupby_semester_1',
-                # 'groupby_best_selling_2024',
-                # 'filter_year',
+                'groupby_top_customers',
+                'top_consumers_aggregator',
+                'groupby_semester_1',
+                'groupby_best_selling_2024',
+                'aggregator_best_selling_final',
                 'filter_year_1','filter_year_2','filter_year_3',
                 'filter_amount_1','filter_amount_2','filter_amount_3',
-                'filter_hour_1','filter_hour_2','filter_hour_3',
+                'filter_hour_1','filter_hour_2','filter_hour_3'
                 'dedup_q1',
-                # 'groupby', 'join_node', 'aggregator'
-                # 'join_node'
+                'join_node'
             ]):
                 killable.append(container)
         
@@ -164,8 +163,8 @@ def main():
     
     kill_interval = int(os.getenv("KILL_INTERVAL", "1"))
     min_kills = int(os.getenv("MIN_KILLS", "1"))
-    max_kills = int(os.getenv("MAX_KILLS", "9"))
-    max_total_kills = int(os.getenv("MAX_TOTAL_KILLS", "100"))
+    max_kills = int(os.getenv("MAX_KILLS", "3"))
+    max_total_kills = int(os.getenv("MAX_TOTAL_KILLS", "2000000"))
     
     chaos = ChaosMonkey(
         kill_interval=kill_interval,

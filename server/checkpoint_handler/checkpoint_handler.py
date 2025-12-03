@@ -10,12 +10,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class CheckpointHandler:
-    def __init__(self, checkpoint_dir: str = None, strategy = None, checkpont_interval: int = 1000):
+    def __init__(self, checkpoint_dir: str = None, strategy = None, checkpont_interval: int = 1000, outgoing_counter_by_client: Dict[str, int] = None, extra_id: int = 0):
         self.strategy = strategy
         self.checkpoint_interval = checkpont_interval
         
         self.checkpoint_dir = checkpoint_dir or '/app/server/logs/checkpoints'
         os.makedirs(self.checkpoint_dir, exist_ok=True)
+
+        self.outgoing_counter_by_client = outgoing_counter_by_client or defaultdict(int)
+        self.extra_id = extra_id
         
         self.message_trackers: Dict[str, MessageRangeTracker] = {}
         self.message_count = defaultdict(int)
@@ -220,6 +223,46 @@ class CheckpointHandler:
                 
                 logger.info(f"Cliente {client_id}: Replay finalizado. {ops_applied} mensajes recuperados del log.")
 
+
+    def save_counter_update(self, client_id: str, counter_value : int, transaction : str):
+        """
+        Guarda la actualización del contador en el LOG.
+        """
+        try:
+            log_entry = {
+                "msg_id": counter_value,
+                "ops": transaction
+            }
+            log_line = json.dumps(log_entry) + "\n"
+            
+            f = self._get_or_create_log(client_id)
+            f.write(log_line)
+            f.flush()
+            os.fsync(f.fileno()) 
+            
+        except Exception as e:
+            logger.error(f"FATAL: Error guardando contador para {client_id}: {e}")
+            raise
+        
+    def start_batch_transaction(self, client_id: str, query_name: str):
+        current_counter = self.outgoing_counter_by_client.get(client_id, 0)
+        
+        op = f"{client_id},START_TRANSACTION,{current_counter},{query_name}"
+        self.save_counter_update(client_id, current_counter, [op])
+
+    def get_next_id_in_memory(self, client_id: str) -> int:
+        self.outgoing_counter_by_client[client_id] += 1
+        return int(self.extra_id) * 1_000_000 + self.outgoing_counter_by_client[client_id]
+
+    def commit_batch_transaction(self, client_id: str, query_name: str):
+        current_counter = self.outgoing_counter_by_client.get(client_id, 0)
+        
+        ops = [
+            f"{client_id},COMMIT_TRANSACTION,{current_counter}",
+            f"{client_id},SENT,{query_name}"
+        ]
+        self.save_counter_update(client_id, current_counter, ops)
+    
     def close(self):
         for f in self.log_files.values():
             try:
