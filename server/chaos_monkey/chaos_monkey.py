@@ -40,17 +40,17 @@ class ChaosMonkey:
                 continue
             
             if any(keyword in container.name.lower() for keyword in [
-                'groupby_top_customers',
-                'top_consumers_aggregator',
-                'groupby_semester_1',
-                'groupby_best_selling_2024',
+                # 'groupby_top_customers',
+                # 'top_consumers_aggregator',
+                # 'groupby_semester_1',
+                # 'groupby_best_selling_2024',
                 # 'filter_year',
                 'filter_year_1','filter_year_2','filter_year_3',
-                # 'filter_amount_1','filter_amount_2','filter_amount_3',
-                # 'filter_hour_1','filter_hour_2','filter_hour_3',
-                # 'dedup_q1',
+                'filter_amount_1','filter_amount_2','filter_amount_3',
+                'filter_hour_1','filter_hour_2','filter_hour_3',
+                'dedup_q1',
                 # 'groupby', 'join_node', 'aggregator'
-                'join_node'
+                # 'join_node'
             ]):
                 killable.append(container)
         
