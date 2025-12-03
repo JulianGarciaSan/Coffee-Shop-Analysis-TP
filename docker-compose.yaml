@@ -30,9 +30,11 @@ services:
       - PYTHONUNBUFFERED=1
       - CHECK_INTERVAL=10
       - MAX_FAILURES=3
-      - PING_TIMEOUT=2.0
-      - STARTUP_DELAY=15
-      - MONITORED_NODES=filter_year_1:9999,filter_year_2:9999,filter_year_3:9999,filter_hour_1:9999,filter_hour_2:9999,filter_hour_3:9999,filter_amount_1:9999,filter_amount_2:9999,filter_amount_3:9999,groupby_top_customers:9999, groupby_semester_1:9999,groupby_semester_2:9999,groupby_best_selling_2025_3:9999,groupby_best_selling_2025_2:9999,groupby_best_selling_2025_1:9999,groupby_best_selling_2025_0:9999,groupby_best_selling_2024_3:9999,groupby_best_selling_2024_2:9999,groupby_best_selling_2024_1:9999,groupby_best_selling_2024_0:9999, top_consumers_aggregator_1:9999,top_consumers_aggregator_2:9999,aggregator_best_selling_final:9999,dedup_q1:9999,join_node_0:9999,join_node_1:9999
+      - RESTART_GRACE_PERIOD=10
+      - RESTART_CHECK_INTERVAL=5
+      - STARTUP_DELAY=20
+      - PING_TIMEOUT=5.0
+      - MONITORED_NODES=filter_year_1,filter_year_2,filter_year_3,filter_hour_1,filter_hour_2,filter_hour_3,filter_amount_1,filter_amount_2,filter_amount_3,groupby_top_customers, groupby_semester_1,groupby_semester_2,groupby_best_selling_2025_3,groupby_best_selling_2025_2,groupby_best_selling_2025_1,groupby_best_selling_2025_0,groupby_best_selling_2024_3,groupby_best_selling_2024_2,groupby_best_selling_2024_1,groupby_best_selling_2024_0, top_consumers_aggregator_1,top_consumers_aggregator_2,aggregator_best_selling_final,dedup_q1,join_node_0,join_node_1
     depends_on:
       gateway:
         condition: service_started
@@ -136,7 +138,6 @@ services:
       context: .
       dockerfile: ./server/duplicate/Dockerfile
     container_name: dedup_q1
-    restart: on-failure
     ports:
       - "20000:9999"
     depends_on:
@@ -148,7 +149,7 @@ services:
       - INPUT_QUEUE=amount_filtered
     volumes:
       - ./server/config.ini:/app/config.ini
-      - ./dedup_checkpoints:/app/dedup/checkpoints  # Persistir checkpoints
+      - ./server/logs/dedup_q1/logs.txt:/app/dedup_log.txt 
       # - ./server/logs/filter_amount_1/logs.txt:/app/logs.txt
       # - ./server/logs/filter_amount_1/client_logs.txt:/app/client_logs.txt
       # - ./server/logs/filter_amount_1/eof_logs.txt:/app/eof_logs.txt
@@ -159,7 +160,6 @@ services:
       context: .
       dockerfile: ./server/filter/Dockerfile
     container_name: filter_year_1
-    restart: on-failure
     ports:
       - "19991:9999"
     depends_on:
@@ -190,7 +190,6 @@ services:
       context: .
       dockerfile: ./server/filter/Dockerfile
     container_name: filter_year_2
-    restart: on-failure
     ports:
       - "19992:9999"
     depends_on:
@@ -221,7 +220,6 @@ services:
       context: .
       dockerfile: ./server/filter/Dockerfile
     container_name: filter_year_3
-    restart: on-failure
     ports:
       - "19993:9999"
     depends_on:
@@ -332,7 +330,6 @@ services:
       context: .
       dockerfile: ./server/filter/Dockerfile
     container_name: filter_hour_1
-    restart: on-failure
     ports:
       - "19994:9999"
     depends_on:
@@ -367,7 +364,6 @@ services:
       context: .
       dockerfile: ./server/filter/Dockerfile
     container_name: filter_hour_2
-    restart: on-failure
     ports:
       - "19995:9999"
     depends_on:
@@ -404,7 +400,6 @@ services:
     container_name: filter_hour_3
     ports:
       - "19996:9999"
-    restart: on-failure
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -436,7 +431,6 @@ services:
       context: .
       dockerfile: ./server/filter/Dockerfile
     container_name: filter_amount_1
-    restart: on-failure
     ports:
       - "19997:9999"
     depends_on:
@@ -466,7 +460,6 @@ services:
       context: .
       dockerfile: ./server/filter/Dockerfile
     container_name: filter_amount_2
-    restart: on-failure
     ports:
       - "19998:9999"
     depends_on:
@@ -498,7 +491,6 @@ services:
     container_name: filter_amount_3
     ports:
       - "19999:9999"
-    restart: on-failure
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -527,7 +519,6 @@ services:
     container_name: join_node_0
     ports:
       - "29999:9999"
-    restart: on-failure
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -551,7 +542,6 @@ services:
       context: .
       dockerfile: ./server/join/Dockerfile
     container_name: join_node_1
-    restart: on-failure
     ports:
       - "39999:9999"
     depends_on:
@@ -1033,7 +1023,7 @@ networks:
     #   context: .
     #   dockerfile: ./server/report_generator/Dockerfile
     # container_name: report_generator
-    # restart: on-failure
+  
     # ports:
     #   - "19990:9999"
     # depends_on:
@@ -1054,7 +1044,7 @@ networks:
   #     context: .
   #     dockerfile: ./server/aggregator/Dockerfile
   #   container_name: top_consumers_aggregator_final
-  #   restart: on-failure
+  #
   #   depends_on:
   #     rabbitmq:
   #       condition: service_healthy

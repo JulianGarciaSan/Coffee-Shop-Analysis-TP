@@ -182,6 +182,9 @@ stop:
 	echo -n > server/logs/filter_amount_3/logs.txt
 	echo -n > server/logs/filter_amount_3/eof_logs.txt
 
+	sudo cp server/logs/dedup_q1/logs.txt server/logs/dedup_q1/logs_backup.txt || true
+	echo -n > server/logs/dedup_q1/logs.txt
+
 	sudo rm -rf dedup_checkpoints/*
 
 .PHONY: stop

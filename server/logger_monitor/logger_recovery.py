@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, NamedTuple, Dict, Set, List
+from typing import Optional, NamedTuple, Dict, Set, List, Tuple
 from enum import Enum
 from logger_monitor.logger_monitor import LoggerMonitor
 
@@ -64,6 +64,71 @@ class RecoveryManager:
         
         self.LOG_DELIMITER = ';'
         self.LOG_SPLITTER = ':'
+    
+    def load_dedup_state(self) -> Tuple[Set[Tuple[int, int]], Set[int]]:
+        """
+        NUEVO MÉTODO: Carga el estado de deduplicación desde UN SOLO LOG.
+        
+        El log contiene todas las entradas en formato: CLIENT_ID:MSG_ID;
+        
+        Los clientes finalizados se detectan porque sus EOFs también son mensajes
+        que vienen con el payload "EOF:X", pero en el log solo guardamos client_id:message_id.
+        
+        Para saber qué clientes finalizaron, necesitamos trackear qué client_ids
+        procesamos sus EOFs. Esto lo hacemos en memoria en el FilterDuplicateNode,
+        acá solo cargamos los mensajes procesados.
+        
+        Returns:
+            Tuple de (processed_messages, eof_clients)
+            - processed_messages: Set[(client_id, message_id)]
+            - eof_clients: Set[client_id] - VACÍO porque no lo guardamos en log
+        """
+        processed_messages: Set[Tuple[int, int]] = set()
+        eof_clients: Set[int] = set()  # Siempre vacío, se reconstruye en runtime
+        
+        # Cargar mensajes procesados desde dedup_log
+        try:
+            with open(self.main_logger.log_path, 'r') as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    # Verificar delimitador
+                    if not line.endswith(self.LOG_DELIMITER):
+                        logger.warning(f"Dedup log línea {line_num}: sin delimitador, ignorando")
+                        continue
+                    
+                    # Remover delimitador
+                    line = line[:-1]
+                    
+                    # Parse: CLIENT_ID:MSG_ID
+                    try:
+                        parts = line.split(self.LOG_SPLITTER)
+                        if len(parts) == 2:
+                            client_id = int(parts[0])
+                            message_id = int(parts[1])
+                            processed_messages.add((client_id, message_id))
+                        else:
+                            logger.warning(f"Dedup log línea {line_num}: formato inválido: {line}")
+                    except ValueError as e:
+                        logger.warning(f"Dedup log línea {line_num}: error parseando: {e}")
+        
+        except FileNotFoundError:
+            logger.info("No existe dedup_log.txt, comenzando desde cero")
+        except Exception as e:
+            logger.error(f"Error cargando dedup_log: {e}")
+        
+        logger.info(f"Dedup state cargado: {len(processed_messages)} mensajes procesados")
+        
+        # NOTA: eof_clients se reconstruirá en runtime cuando lleguen nuevos mensajes
+        # Si un cliente ya envió EOF y crasheamos, al reiniciar:
+        # 1. El EOF está en processed_messages como (client_id, eof_message_id)
+        # 2. Si llega un mensaje normal de ese cliente, NO está en eof_clients
+        # 3. Lo procesaremos y enviaremos (duplicado aceptable)
+        # 4. Cuando llegue el EOF de nuevo (duplicado), lo detectaremos y no lo procesaremos
+        
+        return processed_messages, eof_clients
     
     def _parse_all_eof_logs(self) -> Dict[str, ClientState]:
         """
