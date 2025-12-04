@@ -3,8 +3,8 @@ from collections import defaultdict
 import logging
 import os
 import threading
+from typing import Dict, Any, Optional
 import time
-from typing import Dict, Any
 from rabbitmq.middleware import MessageMiddlewareExchangeManual, MessageMiddlewareQueue,MessageMiddlewareQueueManual
 from dtos.dto import TransactionItemBatchDTO, BatchType, CoordinationMessageDTO
 from .base_configurators import GroupByConfigurator
@@ -62,10 +62,17 @@ class BestSellingConfigurator(GroupByConfigurator):
         
         return {"output": output_middleware}
     
-    def handle_eof(self, dto: TransactionItemBatchDTO, middlewares: dict, strategy, client_id: str, message_id: str,checkpoint_handler) -> bool:
+
+    def handle_eof(self, dto: TransactionItemBatchDTO, middlewares: dict, strategy, client_id: str, message_id: str,checkpoint_handler, eof_type: Optional[int]=1) -> bool:
         logger.info(f"EOF recibido para cliente '{client_id}'")
         
         try:
+            if eof_type == 2:
+                logger.info(f"EOF tipo 2 recibido para cliente '{client_id}', no se envían datos agregados")
+                self._send_eof_to_aggregator(middlewares["output"], client_id, message_id,checkpoint_handler, eof_type=2)
+                strategy.clean_client_data(client_id)
+                return False
+            
             checkpoint_handler.start_batch_transaction(client_id, "q2")
 
             self._calculate_and_send_top1(middlewares["output"], strategy, client_id, message_id,checkpoint_handler)
@@ -85,22 +92,23 @@ class BestSellingConfigurator(GroupByConfigurator):
         except Exception as e:
             logger.error(f"Error manejando EOF para client_id={client_id}: {e}")
             return False
-    
-    # def generate_next_message_id(self, client_id: str) -> int:
-    #     """
-    #     Genera ID único por mensaje para este cliente.
-    #     Determinístico porque el contador se reconstruye desde el checkpoint.
-    #     """
-    #     self.outgoing_counter_by_client[client_id] += 1
-    #     return int(self.node_id) * 1000000 + self.outgoing_counter_by_client[client_id]
 
-    def _send_eof_to_aggregator(self, output_middleware, client_id, message_id, checkpoint_handler):
+    def _send_eof_to_aggregator(self, output_middleware, client_id, message_id,checkpoint_handler, eof_type: Optional[int]=1):
         """Envía EOF al Aggregator Final"""
         
-        eof_dto = TransactionItemBatchDTO(f"EOF:{self.node_name}", BatchType.EOF)
+        if eof_type == 2:
+            logger.info(f"Enviando EOF:2 al Aggregator Final")
+            eof_dto = TransactionItemBatchDTO(f"EOF:2", BatchType.EOF)
+        else:
+            logger.info(f"Enviando EOF al Aggregator Final")
+            eof_dto = TransactionItemBatchDTO(f"EOF:1", BatchType.EOF)
         
         # EOF para top_selling.data
-        unique_id = checkpoint_handler.get_next_id_in_memory(client_id)
+        if eof_type == 2:
+            unique_id = 0
+        else:
+            unique_id = checkpoint_handler.get_next_id_in_memory(client_id)
+
         headers = self.create_headers(client_id, unique_id)
         output_middleware.send(
             eof_dto.to_bytes_fast(),
@@ -110,7 +118,10 @@ class BestSellingConfigurator(GroupByConfigurator):
         logger.info(f"EOF top_selling enviado (ID={unique_id} para cliente {client_id})")
         time.sleep(5)
         # EOF para top_profit.data
-        unique_id = checkpoint_handler.get_next_id_in_memory(client_id)
+        if eof_type == 2:
+            unique_id = 0
+        else:
+            unique_id = checkpoint_handler.get_next_id_in_memory(client_id)
         headers = self.create_headers(client_id, unique_id)
         output_middleware.send(
             eof_dto.to_bytes_fast(),

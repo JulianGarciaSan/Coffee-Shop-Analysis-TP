@@ -107,8 +107,8 @@ class Client:
                 if not self.shutdown.is_shutting_down():
                     self.protocol.send_finish_message(file_type)
                                 
-            if self.protocol and not self.shutdown.is_shutting_down():
-                self.protocol.send_exit_message()
+            # if self.protocol and not self.shutdown.is_shutting_down():
+                # self.protocol.send_exit_message()
                 #self.receive_reports()
 
         except Exception as e:

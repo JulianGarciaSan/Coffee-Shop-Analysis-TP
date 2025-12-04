@@ -170,16 +170,22 @@ class HourNodeConfigurator(NodeConfigurator):
         message_id_str = str(message_id) if message_id is not None else "default"
         
         if decoded_data.startswith("EOF:"):
-            logger.info(f"EOF recibido para cliente {client_id_str}")
-            self.logger.write_with_timestamp(f"EOF:{client_id_str}")
-            self.eof_logger.write(f"BEF:{client_id_str}:transactions")
+            if decoded_data.startswith("EOF:1"):
+                logger.info(f"EOF recibido para cliente {client_id_str}")
+                self.logger.write_with_timestamp(f"EOF:{client_id_str}")
+                self.eof_logger.write(f"BEF:{client_id_str}:transactions")
 
-            self.coordinator.take_leadership(
-                client_id_str, 
-                message_id_str,
-                'transactions',
-                self._on_all_acks_received
-            )
+                self.coordinator.take_leadership(
+                    client_id_str, 
+                    message_id_str,
+                    'transactions',
+                    self._on_all_acks_received
+                )
+            elif decoded_data.startswith("EOF:2"):
+                logger.info(f"EOF:2 recibido para cliente {client_id_str}")
+                self.logger.write_with_timestamp(f"EOF:2:{client_id_str}")
+                self.eof_logger.write(f"EOF:2:{client_id_str}:transactions")
+                self.send_eof(self.output_middlewares, "transactions", client_id,message_id,eof_type=2)
             
             dto = TransactionBatchDTO(decoded_data, BatchType.EOF)
             return (False, 'transactions', dto, False)
@@ -220,9 +226,15 @@ class HourNodeConfigurator(NodeConfigurator):
         self.send_eof(self.output_middlewares, "transactions", client_id=client_id_int,message_id=message_id_int)
         self.eof_logger.write(f"END:{client_id}:{batch_type}")
 
-    def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None,message_id:Optional[int]=None):
-        headers = self.create_headers(client_id,message_id)
-        eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
+    def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None,message_id:Optional[int]=None, eof_type: Optional[int] = 1):
+        if eof_type == 2:
+            headers = self.create_headers(client_id,0)
+            eof_dto = TransactionBatchDTO("EOF:2", BatchType.EOF)
+        elif eof_type == 1:
+            headers = self.create_headers(client_id,message_id)
+            eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
+
+        logger.info("EOF de tipo 2 enviado a filtros downstream" if eof_type == 2 else "EOF de tipo 1 enviado a filtros downstream")
         
         if 'q1' in middlewares:
             middlewares['q1'].send(eof_dto.to_bytes_fast(), headers=headers)

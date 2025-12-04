@@ -268,3 +268,10 @@ class BestSellingGroupByStrategy(GroupByStrategy):
             # Compatibilidad con checkpoints antiguos
             self.outgoing_counter_by_client[client_id] = 0
             logger.info(f"Contador inicializado para {client_id}: 0 (checkpoint sin counter)")
+
+    def clean_client_data(self, client_id: str):
+        if client_id in self.month_item_aggregations_by_client:
+            del self.month_item_aggregations_by_client[client_id]
+            logger.info(f"Estado BestSelling limpiado para cliente {client_id}")
+        else:
+            logger.info(f"No se encontró estado BestSelling para limpiar del cliente {client_id}")

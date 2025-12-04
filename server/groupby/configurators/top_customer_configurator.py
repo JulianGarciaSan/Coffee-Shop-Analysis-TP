@@ -2,7 +2,7 @@ from collections import defaultdict
 import logging
 import os
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from rabbitmq.middleware import MessageMiddlewareQueueManual, MessageMiddlewareExchangeManual
 from dtos.dto import TransactionBatchDTO, BatchType
 from .base_configurators import GroupByConfigurator
@@ -45,7 +45,24 @@ class TopCustomerConfigurator(GroupByConfigurator):
         logger.info(f"  Output exchange: {self.output_exchange}")
         logger.info(f"  Routing keys: {route_keys}")
         return {"output": output_middleware}
-    
+
+    def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict, strategy, client_id: str, message_id: str,checkpoint_handler, eof_type: Optional[int]=1) -> bool:
+        logger.info(f"EOF recibido de cliente '{client_id}' con message_id '{message_id}'")
+        try:
+            if eof_type == 2:
+                logger.info(f"EOF tipo 2 recibido de cliente '{client_id}', no se envían datos agregados")
+                self._send_eof_broadcast(middlewares["output"], client_id, message_id,checkpoint_handler,eof_type=2)
+                strategy.clean_client_data(client_id)
+                return False
+            checkpoint_handler.start_batch_transaction(client_id, "top_customers_sharding")
+            self._send_data_by_aggregator(middlewares["output"], strategy, client_id, message_id,checkpoint_handler)
+            self._send_eof_broadcast(middlewares["output"], client_id, message_id,checkpoint_handler)
+            checkpoint_handler.commit_batch_transaction(client_id, "top_customers_sharding")
+        except Exception as e:
+            logger.error(f"Error procesando EOF para cliente {client_id}: {e}")
+            raise
+        
+        return False
 
     def _shard_store_to_aggregator(self, store_id: str) -> int:
         """Sharding determinístico: store_id % cantidad_de_aggregators, mapeado a IDs específicos"""
@@ -58,21 +75,21 @@ class TopCustomerConfigurator(GroupByConfigurator):
         return self.topk_aggregators_ids[aggregator_index]
 
     
-    def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict, strategy, client_id: str, message_id: str, checkpoint_handler) -> bool:
-        logger.info(f"EOF recibido de cliente '{client_id}' con message_id '{message_id}'")
+#     def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict, strategy, client_id: str, message_id: str, checkpoint_handler) -> bool:
+#         logger.info(f"EOF recibido de cliente '{client_id}' con message_id '{message_id}'")
         
-        try:
-            checkpoint_handler.start_batch_transaction(client_id, "top_customers_sharding")
+#         try:
+#             checkpoint_handler.start_batch_transaction(client_id, "top_customers_sharding")
 
-            self._send_data_by_aggregator(middlewares["output"], strategy, client_id, message_id, checkpoint_handler)
-            self._send_eof_broadcast(middlewares["output"], client_id, message_id, checkpoint_handler)
+#             self._send_data_by_aggregator(middlewares["output"], strategy, client_id, message_id, checkpoint_handler)
+#             self._send_eof_broadcast(middlewares["output"], client_id, message_id, checkpoint_handler)
             
-            checkpoint_handler.commit_batch_transaction(client_id, "top_customers_sharding")
-        except Exception as e:
-            logger.error(f"Error procesando EOF para cliente {client_id}: {e}")
-            raise
+#             checkpoint_handler.commit_batch_transaction(client_id, "top_customers_sharding")
+#         except Exception as e:
+#             logger.error(f"Error procesando EOF para cliente {client_id}: {e}")
+#             raise
         
-        return False
+#         return False
 
     def _send_data_by_aggregator(self, output_middleware, strategy, client_id, original_message_id, checkpoint_handler):
         """
@@ -112,16 +129,24 @@ class TopCustomerConfigurator(GroupByConfigurator):
                 routing_key,
                 headers={'client_id': client_id, 'message_id': outgoing_message_id}
             )
-            logger.info(f"Datos enviados (ID={outgoing_message_id})  para cliente {client_id}")
-            # time.sleep(5)
-    def _send_eof_broadcast(self, output_middleware, client_id, original_message_id, checkpoint_handler):
+
+
+    def _send_eof_broadcast(self, output_middleware, client_id, original_message_id,checkpoint_handler, eof_type: Optional[int]=1):
         """Envía UN EOF a todos los aggregators."""
-        logger.info(f"Enviando EOF a {len(self.topk_aggregators_ids)} aggregators")
+        if eof_type == 2:
+            logger.info(f"Enviando EOF:2 a {len(self.topk_aggregators_ids)} aggregators")
+        else:
+            logger.info(f"Enviando EOF a {len(self.topk_aggregators_ids)} aggregators")
         
         for aggregator_id in self.topk_aggregators_ids:
-            eof_message_id = checkpoint_handler.get_next_id_in_memory(client_id)
+            if eof_type == 2:
+                eof_message_id = 0
+                eof_dto = TransactionBatchDTO(f"EOF:2", BatchType.EOF)
+            elif eof_type == 1:
+                eof_message_id = checkpoint_handler.get_next_id_in_memory(client_id)
+                eof_dto = TransactionBatchDTO(f"EOF:1", BatchType.EOF)  
+                
             routing_key = f'top_customers_aggregator_{aggregator_id}'
-            eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
             output_middleware.send(
                 eof_dto.to_bytes_fast(),
                 routing_key,

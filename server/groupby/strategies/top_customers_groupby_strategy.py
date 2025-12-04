@@ -238,3 +238,10 @@ class TopCustomersGroupByStrategy(GroupByStrategy):
                 self.store_user_purchases_by_client[client_id][store_id][user_id].purchases_qty = count
         
         logger.info(f"Restaurado estado TopCustomers: {len(stores_data)} stores para cliente {client_id}")
+        
+    def clean_client_data(self, client_id: str):
+        if client_id in self.store_user_purchases_by_client:
+            del self.store_user_purchases_by_client[client_id]
+            logger.info(f"Estado TopCustomers limpiado para cliente {client_id}")
+        else:
+            logger.info(f"No se encontró estado TopCustomers para limpiar del cliente {client_id}")

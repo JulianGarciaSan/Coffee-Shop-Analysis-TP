@@ -165,3 +165,13 @@ class TPVGroupByStrategy(GroupByStrategy):
             aggregation.transaction_count = aggregation_data.get('transaction_count', 0)
         
         logger.info(f"TPV deserializado para cliente {client_id}: {len(data)} agregaciones")
+
+    def clean_client_data(self, client_id: str):
+        """
+        Limpia los datos almacenados para un cliente específico.
+        """
+        if client_id in self.tpv_aggregations_by_client:
+            del self.tpv_aggregations_by_client[client_id]
+            logger.info(f"Datos TPV limpiados para cliente '{client_id}'")
+        else:
+            logger.info(f"No hay datos TPV para limpiar para cliente '{client_id}'")

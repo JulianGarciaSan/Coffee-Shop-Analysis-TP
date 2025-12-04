@@ -85,7 +85,13 @@ class GroupByNode:
         dto = TransactionBatchDTO.from_bytes_fast(message)
 
         if dto.batch_type == BatchType.EOF:
-            self.configurator.handle_eof(dto, self.output_middlewares, self.strategy, client_id, message_id, self.checkpoint_handler)
+            if dto.data.startswith("EOF:2"):
+                logger.info(f"EOF tipo 2 recibido para cliente {client_id}")
+                self.configurator.handle_eof(dto, self.output_middlewares, self.strategy, client_id, message_id,self.checkpoint_handler, eof_type=2)
+                return (False, True)
+            
+            self.configurator.handle_eof(dto, self.output_middlewares, self.strategy, client_id, message_id,self.checkpoint_handler)
+
             self.checkpoint_handler.save_eof_checkpoint(client_id, message_id)
             return (False, True) 
 

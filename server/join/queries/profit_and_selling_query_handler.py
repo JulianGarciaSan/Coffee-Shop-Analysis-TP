@@ -146,6 +146,11 @@ class ProfitAndSellingQueryHandler:
             return (False, True)
         
         if dto.batch_type == BatchType.EOF:
+            if dto.data.startswith("EOF:2"):
+                client_id = str(client_id)
+                logger.info(f"EOF tipo 2 recibido para '{client_id}'")
+                self.join_node.clean_client_data(client_id)
+                return (False, True)
             if client_id not in self.join_node.client_states:
                 self.join_node.client_states[client_id] = ClientProcessingState()
             
@@ -182,6 +187,12 @@ class ProfitAndSellingQueryHandler:
             return (False, True)
         
         if dto.batch_type == BatchType.EOF:
+            if dto.data.startswith("EOF:2"):
+                client_id = str(client_id)
+                logger.info(f"EOF tipo 2 recibido para '{client_id}'")
+                self.join_node.clean_client_data(client_id)
+                return (False, True)
+            
             self.join_node.client_states[client_id].most_profit_loaded = True
             logger.info(f"EOF most_profit para '{client_id}'")
             self.join_node._check_and_execute_joins(client_id)
