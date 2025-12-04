@@ -338,7 +338,6 @@ class YearNodeConfigurator(NodeConfigurator):
                     
                     year = created_at[:4]
                     
-                    # Usar los IDs reales de los nodos según el año
                     if year == '2024':
                         available_nodes = self.groupby_node_ids_2024
                     elif year == '2025':
@@ -347,13 +346,11 @@ class YearNodeConfigurator(NodeConfigurator):
                         logger.warning(f"Año desconocido: {year}, skipping")
                         continue
                     
-                    # Sharding basado en item_id
                     try:
                         item_hash = int(item_id) % len(available_nodes)
                     except (ValueError, TypeError):
                         item_hash = hash(str(item_id)) % len(available_nodes)
                     
-                    # Obtener el ID real del nodo
                     actual_node_id = available_nodes[item_hash]
                     node_distribution[actual_node_id] += 1
                     

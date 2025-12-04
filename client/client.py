@@ -152,35 +152,24 @@ class Client:
                 return
             
             logger.info("Esperando reportes del servidor...")
-            
-            # total_messages_received = 0
-            # total_lines_received = 0
-            
+
             for message in self.protocol.receive_reports():
-                # logger.info(f"Mensaje recibido: acción={message.action}, tipo_archivo={message.file_type}")
                 
                 if self.shutdown.is_shutting_down():
                     logger.info("Shutdown detectado, deteniendo recepción")
                     break
                 
-                if message.action == "L":
-                    # lines_in_message = len([l for l in message.data.strip().split('\n') if l.strip()])
-                    # total_messages_received += 1
-                    # total_lines_received += lines_in_message
-                    
+                if message.action == "L":                    
                     self._process_report_data(message.file_type, message.data)
                     
                 elif message.action == "EXIT":
                     logger.info("EXIT recibido, cerrando archivos de reportes")
-                    #logger.info(f"TOTAL RECIBIDO: {total_messages_received} mensajes, {total_lines_received} líneas")
                     self._sort_and_close_reports()
                     break
                 
                 else:
                     logger.warning(f"Mensaje inesperado: {message.action}")
-            
-            #logger.info(f"Recepción completada: {total_messages_received} mensajes, {total_lines_received} líneas")
-            
+                        
         except Exception as e:
             logger.error(f"Error recibiendo reportes: {e}")
             raise
@@ -196,9 +185,6 @@ class Client:
             file_handle.write(data)
             if not data.endswith('\n'):
                 file_handle.write('\n')
-            
-            #lines_count = data.count('\n') + (1 if data and not data.endswith('\n') else 0)
-            #logger.info(f"Datos de {query_name} escritos: {lines_count} líneas")
             file_handle.flush()
             
         except Exception as e:
@@ -255,7 +241,6 @@ class Client:
                 header = lines[0]
                 data_lines = lines[1:]
                 
-                # Ordenar por transaction_id (primera columna)
                 data_lines.sort(key=lambda line: line.split(',')[0])
                 
                 with open(q1_file, 'w') as f:
@@ -300,10 +285,5 @@ class Client:
             self.protocol.close()
         elif self.client_socket:
             self.client_socket.close()
-            
-        # try:
-        #     self.receiver_thread.join(timeout=5.0)
-        # except Exception as e:
-        #     logger.error(f"Error esperando el hilo receptor: {e}") 
-            
+                
         logger.info("Cliente cerrado completamente")

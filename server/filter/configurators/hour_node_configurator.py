@@ -8,7 +8,6 @@ from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchang
 from dtos.dto import TransactionBatchDTO, BatchType, CoordinationMessageDTO
 from .base_configurator import NodeConfigurator
 from coordinator.coordinator import PeerCoordinator 
-from consensus_node import ConsensusNode
 logger = logging.getLogger(__name__)
 
 
@@ -29,13 +28,6 @@ class HourNodeConfigurator(NodeConfigurator):
             self.node_addresses_str,
             all_node_ids
         )              
-        self.consensus_node = ConsensusNode(
-            node_id=self.node_id,
-            leader_id=self.leader_id,
-            nodes_addresses=nodes_addresses,
-            log_path=f'/app/message_logs.txt',
-            max_entries=10
-        )
         
         self.coordinator = PeerCoordinator(
             node_id=self.node_id,

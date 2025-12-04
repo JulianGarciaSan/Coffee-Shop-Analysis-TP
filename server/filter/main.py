@@ -13,7 +13,6 @@ from strategies import FilterStrategyFactory
 from configurators import NodeConfiguratorFactory
 from dtos.dto import TransactionBatchDTO, TransactionItemBatchDTO, BatchType, FileType
 from common.graceful_shutdown import GracefulShutdown  
-from consensus_node import ConsensusNode
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -145,9 +144,6 @@ class FilterNode:
                 should_stop, batch_type, dto, is_eof = result
                 is_dup = False 
                 
-            # if is_eof:
-            #     return self._handle_eof_message(dto, batch_type, client_id)
-            
             if is_eof:
                 self.logger.write_with_timestamp(f"END:{client_id}")
                 return False
@@ -233,7 +229,6 @@ class FilterNode:
                     pass
 
             self.client_logger.write(f"{client_id}:{message_id}")
-            # logging.info("Mensaje recibido en FilterNode")
             should_stop = self.process_message(body, routing_key, client_id,message_id)
             ch.basic_ack(delivery_tag=method.delivery_tag)
             self.logger.write_termination()
@@ -315,12 +310,10 @@ class FilterNode:
         try:
             if hasattr(self.node_configurator, 'close'):
                 self.node_configurator.close()
-            # Cerrar middleware de entrada
             if self.input_middleware:
                 self.input_middleware.close()
                 logger.info("Middleware de entrada cerrado")
             
-            # Cerrar todos los middlewares de salida
             for name, middleware in self.middlewares.items():
                 if middleware:
                     try:

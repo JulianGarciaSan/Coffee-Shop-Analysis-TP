@@ -12,7 +12,8 @@ logger = logging.getLogger(__name__)
 
 class ChaosMonkey:
     def __init__(self, kill_interval: int = 1, excluded_containers: Set[str] = None,
-                 min_kills: int = 1, max_kills: int = 3, max_total_kills: int = None):
+                 min_kills: int = 1, max_kills: int = 3, max_total_kills: int = None,
+                 initial_wait: int = 20):
         """
         Args:
             kill_interval: Segundos entre cada ronda de caídas
@@ -29,7 +30,8 @@ class ChaosMonkey:
         self.max_total_kills = max_total_kills
         self.running = True
         self.total_kills = 0
-        
+        self.initial_wait = initial_wait
+
     def get_killable_containers(self):
         """Obtiene contenedores que pueden ser detenidos"""
         all_containers = self.client.containers.list(filters={"status": "running"})
@@ -40,14 +42,11 @@ class ChaosMonkey:
                 continue
             
             if any(keyword in container.name.lower() for keyword in [
-                'groupby_top_customers',
-                'top_consumers_aggregator',
-                'groupby_semester_1',
-                'groupby_best_selling',
-                'aggregator_best_selling_final',
-                'filter_year_1','filter_year_2','filter_year_3',
-                'filter_amount_1','filter_amount_2','filter_amount_3',
-                'filter_hour_1','filter_hour_2','filter_hour_3'
+                'aggregator',
+                'groupby',
+                'filter_year',
+                'filter_amount',
+                'filter_hour',
                 'dedup_q1',
                 'join_node'
             ]):
@@ -63,12 +62,12 @@ class ChaosMonkey:
             logger.warning("No hay contenedores disponibles para matar")
             return 0
         
-        # Decidir cuántos matar (aleatorio entre min y max)
-        # Pero no más de los disponibles
-        num_to_kill = random.randint(self.min_kills, 
+        if len(killable) < self.min_kills:
+            num_to_kill = len(killable)
+        else:
+            num_to_kill = random.randint(self.min_kills, 
                                       min(self.max_kills, len(killable)))
         
-        # Si hay límite máximo, no excederlo
         if self.max_total_kills:
             remaining = self.max_total_kills - self.total_kills
             if remaining <= 0:
@@ -76,7 +75,6 @@ class ChaosMonkey:
                 return 0
             num_to_kill = min(num_to_kill, remaining)
         
-        # Seleccionar víctimas al azar
         victims = random.sample(killable, num_to_kill)
         
         killed_count = 0
@@ -107,14 +105,13 @@ class ChaosMonkey:
             logger.info(f"Límite total de kills: {self.max_total_kills}")
         logger.info(f"Contenedores protegidos: {self.excluded_containers}")
         
-        logger.info("Esperando 30 segundos para que el sistema se estabilice...")
-        time.sleep(100)
+        logger.info("Esperando 20 segundos para que el sistema se estabilice...")
+        time.sleep(self.initial_wait)
         
         logger.info("Comenzando el caos...")
         
         while self.running:
             try:
-                # Verificar si alcanzamos el límite
                 if self.max_total_kills and self.total_kills >= self.max_total_kills:
                     logger.info(f"Límite de {self.max_total_kills} kills alcanzado. Deteniendo Chaos Monkey.")
                     break
@@ -124,7 +121,6 @@ class ChaosMonkey:
                 if self.total_kills % 10 == 0 and self.total_kills > 0:
                     logger.info(f"Estadística: {self.total_kills} contenedores caídos en total")
                 
-                # Verificar nuevamente después de la ronda
                 if self.max_total_kills and self.total_kills >= self.max_total_kills:
                     logger.info(f"Límite de {self.max_total_kills} kills alcanzado. Deteniendo Chaos Monkey.")
                     break
@@ -163,15 +159,17 @@ def main():
     
     kill_interval = int(os.getenv("KILL_INTERVAL", "1"))
     min_kills = int(os.getenv("MIN_KILLS", "1"))
-    max_kills = int(os.getenv("MAX_KILLS", "3"))
+    max_kills = int(os.getenv("MAX_KILLS", "1"))
     max_total_kills = int(os.getenv("MAX_TOTAL_KILLS", "2000000"))
+    initial_wait = int(os.getenv("INITIAL_WAIT", "20"))
     
     chaos = ChaosMonkey(
         kill_interval=kill_interval,
         excluded_containers=protected,
         min_kills=min_kills,
         max_kills=max_kills,
-        max_total_kills=max_total_kills
+        max_total_kills=max_total_kills,
+        initial_wait=initial_wait
     )
     
     try:

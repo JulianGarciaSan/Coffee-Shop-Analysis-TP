@@ -61,7 +61,6 @@ def main():
 
         initialize_log(logging_level)
 
-        #signal.signal(signal.SIGTERM, signal_handler) GRACEFUL SHUTDOWN
         client = Client(server_port, max_batch_size, client_id)
         client.run()
         sys.exit(0) 

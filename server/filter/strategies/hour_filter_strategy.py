@@ -26,9 +26,6 @@ class HourFilterStrategy(FilterStrategy):
             hour_minute = time_part[:5] 
             
             if self.start_time.strftime("%H:%M") <= hour_minute <= self.end_time.strftime("%H:%M"):
-                # self.count += 1
-                # if self.count % 1000 == 0:
-                #     logger.info(f"HourFilter: {self.count} transacciones pasaron el filtro")
                 return True
             return False
             
