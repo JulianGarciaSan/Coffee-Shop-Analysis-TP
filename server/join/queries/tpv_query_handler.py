@@ -90,10 +90,14 @@ class TPVQueryHandler:
             return (False, True)
         
         if dto.batch_type == BatchType.EOF:
-            if dto.data.startswith("EOF:2"):
+            if dto.data.startswith("EOF:2") or dto.data.startswith("EOF:3"):
+                eof_type = 2 if dto.data.startswith("EOF:2") else 3
                 client_id = str(client_id)
-                logger.info(f"EOF tipo 2 recibido para '{client_id}'")
-                self.join_node.clean_client_data(client_id)
+                logger.info(f"EOF tipo {eof_type} recibido para '{client_id}'")
+                if eof_type == 2:
+                    self.join_node.clean_client_data(client_id)
+                else:
+                    self.join_node.clean_all_data()
                 return (False, True)
             
             self.join_node.client_states[client_id].groupby_eof_count += 1

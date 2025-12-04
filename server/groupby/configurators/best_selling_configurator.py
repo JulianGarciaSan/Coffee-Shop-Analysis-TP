@@ -67,10 +67,13 @@ class BestSellingConfigurator(GroupByConfigurator):
         logger.info(f"EOF recibido para cliente '{client_id}'")
         
         try:
-            if eof_type == 2:
-                logger.info(f"EOF tipo 2 recibido para cliente '{client_id}', no se envían datos agregados")
-                self._send_eof_to_aggregator(middlewares["output"], client_id, message_id,checkpoint_handler, eof_type=2)
-                strategy.clean_client_data(client_id)
+            if eof_type == 2 or eof_type == 3:
+                logger.info(f"EOF:{eof_type} recibido para cliente '{client_id}', no se envían datos agregados")
+                self._send_eof_to_aggregator(middlewares["output"], client_id, message_id,checkpoint_handler, eof_type=eof_type)
+                if eof_type == 2:
+                    strategy.clean_client_data(client_id)
+                else:
+                    strategy.clean_all_data()
                 return False
             
             checkpoint_handler.start_batch_transaction(client_id, "q2")
@@ -96,18 +99,13 @@ class BestSellingConfigurator(GroupByConfigurator):
     def _send_eof_to_aggregator(self, output_middleware, client_id, message_id,checkpoint_handler, eof_type: Optional[int]=1):
         """Envía EOF al Aggregator Final"""
         
-        if eof_type == 2:
-            logger.info(f"Enviando EOF:2 al Aggregator Final")
-            eof_dto = TransactionItemBatchDTO(f"EOF:2", BatchType.EOF)
-        else:
-            logger.info(f"Enviando EOF al Aggregator Final")
-            eof_dto = TransactionItemBatchDTO(f"EOF:1", BatchType.EOF)
-        
-        # EOF para top_selling.data
-        if eof_type == 2:
+        if eof_type == 2 or eof_type == 3:
             unique_id = 0
         else:
             unique_id = checkpoint_handler.get_next_id_in_memory(client_id)
+            
+        logger.info(f"Enviando EOF:{eof_type} al Aggregator Final")
+        eof_dto = TransactionItemBatchDTO(f"EOF:{eof_type}", BatchType.EOF)
 
         headers = self.create_headers(client_id, unique_id)
         output_middleware.send(
@@ -115,21 +113,20 @@ class BestSellingConfigurator(GroupByConfigurator):
             routing_key='top_selling.data',
             headers=headers
         )
-        logger.info(f"EOF top_selling enviado (ID={unique_id} para cliente {client_id})")
-        time.sleep(5)
-        # EOF para top_profit.data
-        if eof_type == 2:
+        logger.info(f"EOF:{eof_type} top_selling enviado (ID={unique_id} para cliente {client_id})")
+        
+        if eof_type == 2 or eof_type == 3:
             unique_id = 0
         else:
             unique_id = checkpoint_handler.get_next_id_in_memory(client_id)
+        
         headers = self.create_headers(client_id, unique_id)
         output_middleware.send(
             eof_dto.to_bytes_fast(),
             routing_key='top_profit.data',
             headers=headers
         )
-        logger.info(f"EOF top_profit enviado (ID={unique_id}) para cliente {client_id}")
-        time.sleep(5)
+        logger.info(f"EOF:{eof_type} top_profit enviado (ID={unique_id} para cliente {client_id})")
     
     def _calculate_and_send_top1(self, output_middleware, strategy, client_id, message_id, checkpoint_handler):
         """

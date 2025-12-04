@@ -156,13 +156,18 @@ class YearNodeConfigurator(NodeConfigurator):
         
         if decoded_data.startswith("EOF:"):
             batch_type = 'transactions' if self.file_mode == 'transactions' else 'transaction_items'
-            if decoded_data.startswith("EOF:2"):
-                logger.info(f"EOF tipo 2 recibido para cliente {client_id_str}, no se procesará EOF completo")
+            if decoded_data.startswith("EOF:2") or decoded_data.startswith("EOF:3"):
+                if decoded_data.startswith("EOF:2"):
+                    logger.info(f"EOF tipo 2 recibido para cliente {client_id_str}, no se procesará EOF completo")
+                    eof_type = 2
+                else:
+                    logger.info(f"EOF tipo 3 recibido, formateando nodos")
+                    eof_type = 3
                 if self.file_mode == 'transactions':
                     dto = TransactionBatchDTO(decoded_data, BatchType.EOF)
                 else:
                     dto = TransactionItemBatchDTO(decoded_data, BatchType.EOF)
-                self.send_eof(self.output_middlewares, batch_type, client_id,message_id,eof_type=2)
+                self.send_eof(self.output_middlewares, batch_type, client_id,message_id,eof_type=eof_type)
                 return (False, batch_type, dto, True)
             
             logger.info(f"EOF recibido para cliente {client_id_str}")
@@ -285,9 +290,9 @@ class YearNodeConfigurator(NodeConfigurator):
         if eof_type == 1:
             headers = self.create_headers(client_id,message_id)
             eof_dto = TransactionBatchDTO("EOF:1", batch_type=BatchType.EOF)
-        elif eof_type == 2:
+        elif eof_type == 2 or eof_type == 3:
             headers = self.create_headers(client_id,0)
-            eof_dto = TransactionBatchDTO("EOF:2", batch_type=BatchType.EOF)
+            eof_dto = TransactionBatchDTO(f"EOF:{eof_type}", batch_type=BatchType.EOF)
 
         if batch_type == "transactions":
             if 'q1' in middlewares:
@@ -382,10 +387,7 @@ class YearNodeConfigurator(NodeConfigurator):
         # EOF para nodos 2024
         for node_id in self.groupby_node_ids_2024:
             routing_key = f"groupby_2024_node_{node_id}"
-            if optional_eof_type == 2:
-                eof_dto = TransactionItemBatchDTO("EOF:2", BatchType.EOF)
-            elif optional_eof_type == 1:
-                eof_dto = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
+            eof_dto = TransactionItemBatchDTO(f"EOF:{optional_eof_type}", BatchType.EOF)
             self.groupby_exchange.send(
                 eof_dto.to_bytes_fast(),
                 routing_key=routing_key,
@@ -395,10 +397,7 @@ class YearNodeConfigurator(NodeConfigurator):
         # EOF para nodos 2025
         for node_id in self.groupby_node_ids_2025:
             routing_key = f"groupby_2025_node_{node_id}"
-            if optional_eof_type == 2:
-                eof_dto = TransactionItemBatchDTO("EOF:2", BatchType.EOF)
-            elif optional_eof_type == 1:
-                eof_dto = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
+            eof_dto = TransactionItemBatchDTO(f"EOF:{optional_eof_type}", BatchType.EOF)
             self.groupby_exchange.send(
                 eof_dto.to_bytes_fast(),
                 routing_key=routing_key,

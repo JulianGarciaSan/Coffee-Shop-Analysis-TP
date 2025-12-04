@@ -205,6 +205,48 @@ class BestSellingAggregatorNode:
 
         logger.info(f"Limpieza completada para cliente {client_id}")
         
+    def clean_all_clients(self):
+        """Limpia el estado de TODOS los clientes"""
+        logger.info("Limpiando estado de TODOS los clientes")
+        
+        try:
+            self.eof_selling_count_by_client.clear()
+            logger.debug("Todos los EOF selling eliminados")
+        except Exception as e:
+            logger.warning(f"Error limpiando eof_selling_count_by_client: {e}")
+
+        try:
+            self.eof_profit_count_by_client.clear()
+            logger.debug("Todos los EOF profit eliminados")
+        except Exception as e:
+            logger.warning(f"Error limpiando eof_profit_count_by_client: {e}")
+
+        try:
+            self.month_selling_candidates_by_client.clear()
+            logger.debug("Todos los month_selling_candidates eliminados")
+        except Exception as e:
+            logger.warning(f"Error limpiando month_selling_candidates_by_client: {e}")
+
+        try:
+            self.month_profit_candidates_by_client.clear()
+            logger.debug("Todos los month_profit_candidates eliminados")
+        except Exception as e:
+            logger.warning(f"Error limpiando month_profit_candidates_by_client: {e}")
+
+        try:
+            self.outgoing_counter_by_client.clear()
+            logger.debug("Todos los outgoing_counter eliminados")
+        except Exception as e:
+            logger.warning(f"Error limpiando outgoing_counter_by_client: {e}")
+
+        try:
+            self.pending_rollbacks.clear()
+            logger.debug("Todos los pending_rollbacks eliminados")
+        except Exception as e:
+            logger.warning(f"Error limpiando pending_rollbacks: {e}")
+
+        logger.info("Limpieza global completada - todos los clientes eliminados")
+        
     def create_headers(self, client_id: Optional[int], message_id: Optional[int]) -> Dict[str, Any]:
         headers = {}
         if client_id is not None and message_id is not None:
@@ -241,13 +283,11 @@ class BestSellingAggregatorNode:
         
     def _send_eof(self, client_id: str, routing_key: str, eof_type: Optional[int] = 1):
         
-        if eof_type == 2:
-            dto = TransactionItemBatchDTO(f"EOF:2", BatchType.EOF)
-            unique_id = 0
-        elif eof_type == 1:
-            dto = TransactionItemBatchDTO(f"EOF:1", BatchType.EOF)
+        if eof_type == 1:
             unique_id = self.checkpoint_handler.get_next_id_in_memory(client_id)
-        
+        else:
+            unique_id = 0
+        dto = TransactionItemBatchDTO(f"EOF:{eof_type}", BatchType.EOF)
         self.output_middleware.send(
             dto.to_bytes_fast(),
             routing_key=routing_key,
@@ -264,13 +304,25 @@ class BestSellingAggregatorNode:
             dto = TransactionItemBatchDTO.from_bytes_fast(message)
             
             if dto.batch_type == BatchType.EOF:
-                if dto.data.startswith("EOF:2"):
+                if dto.data.startswith("EOF:2") or dto.data.startswith("EOF:3"):
+                    if dto.data.startswith("EOF:2"):
+                        logger.info(f"EOF tipo 2 recibido, limpiando nodos del cliente {client_id}")
+                        eof_type = 2
+                    else:
+                        logger.info(f"EOF tipo 3 recibido, formateando nodos")
+                        eof_type = 3
+                        
                     routing_key = self.client_router.get_routing_key(client_id, 'q2_best_selling.data')
-                    self._send_eof(client_id, routing_key, eof_type=2)
+                    self._send_eof(client_id, routing_key, eof_type=eof_type)
                     
                     routing_key = self.client_router.get_routing_key(client_id, 'q2_most_profit.data')
-                    self._send_eof(client_id, routing_key, eof_type=2)
-                    self.clean_client(client_id)
+                    self._send_eof(client_id, routing_key, eof_type=eof_type)
+                    if eof_type == 2:
+                        self.clean_client(client_id)
+                    else:
+                        self.clean_all_clients()
+
+                        
                     return (False, True)
                 
                 self.handle_eof(routing_key, client_id, message_id)

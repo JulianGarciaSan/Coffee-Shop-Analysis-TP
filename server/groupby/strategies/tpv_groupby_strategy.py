@@ -175,3 +175,10 @@ class TPVGroupByStrategy(GroupByStrategy):
             logger.info(f"Datos TPV limpiados para cliente '{client_id}'")
         else:
             logger.info(f"No hay datos TPV para limpiar para cliente '{client_id}'")
+    
+    def clean_all_data(self):
+        """
+        Limpia todos los datos almacenados.
+        """
+        self.tpv_aggregations_by_client.clear()
+        logger.info("Datos TPV limpiados para TODOS los clientes")

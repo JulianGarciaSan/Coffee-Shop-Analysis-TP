@@ -47,13 +47,17 @@ class TopCustomerConfigurator(GroupByConfigurator):
         return {"output": output_middleware}
 
     def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict, strategy, client_id: str, message_id: str,checkpoint_handler, eof_type: Optional[int]=1) -> bool:
-        logger.info(f"EOF recibido de cliente '{client_id}' con message_id '{message_id}'")
+        logger.info(f"EOF:{eof_type} recibido de cliente '{client_id}' con message_id '{message_id}'")
         try:
-            if eof_type == 2:
-                logger.info(f"EOF tipo 2 recibido de cliente '{client_id}', no se envían datos agregados")
-                self._send_eof_broadcast(middlewares["output"], client_id, message_id,checkpoint_handler,eof_type=2)
-                strategy.clean_client_data(client_id)
+            if eof_type == 2 or eof_type == 3:
+                logger.info(f"EOF:{eof_type} recibido de cliente '{client_id}', no se envían datos agregados")
+                self._send_eof_broadcast(middlewares["output"], client_id, message_id,checkpoint_handler,eof_type=eof_type)
+                if eof_type == 3:
+                    strategy.clean_all_data()
+                else:
+                    strategy.clean_client_data(client_id)
                 return False
+            
             checkpoint_handler.start_batch_transaction(client_id, "top_customers_sharding")
             self._send_data_by_aggregator(middlewares["output"], strategy, client_id, message_id,checkpoint_handler)
             self._send_eof_broadcast(middlewares["output"], client_id, message_id,checkpoint_handler)
@@ -133,19 +137,15 @@ class TopCustomerConfigurator(GroupByConfigurator):
 
     def _send_eof_broadcast(self, output_middleware, client_id, original_message_id,checkpoint_handler, eof_type: Optional[int]=1):
         """Envía UN EOF a todos los aggregators."""
-        if eof_type == 2:
-            logger.info(f"Enviando EOF:2 a {len(self.topk_aggregators_ids)} aggregators")
-        else:
-            logger.info(f"Enviando EOF a {len(self.topk_aggregators_ids)} aggregators")
-        
+        logger.info(f"Enviando EOF:{eof_type} a {len(self.topk_aggregators_ids)} aggregators")
+
         for aggregator_id in self.topk_aggregators_ids:
-            if eof_type == 2:
+            if eof_type == 2 or eof_type == 3:
                 eof_message_id = 0
-                eof_dto = TransactionBatchDTO(f"EOF:2", BatchType.EOF)
             elif eof_type == 1:
                 eof_message_id = checkpoint_handler.get_next_id_in_memory(client_id)
-                eof_dto = TransactionBatchDTO(f"EOF:1", BatchType.EOF)  
-                
+
+            eof_dto = TransactionBatchDTO(f"EOF:{eof_type}", BatchType.EOF)
             routing_key = f'top_customers_aggregator_{aggregator_id}'
             output_middleware.send(
                 eof_dto.to_bytes_fast(),
@@ -153,8 +153,7 @@ class TopCustomerConfigurator(GroupByConfigurator):
                 headers={'client_id': client_id, 'message_id': eof_message_id}
             )
 
-            logger.info(f"Datos enviados (ID={eof_message_id})  para cliente {client_id}")
-            # time.sleep(5)
+            logger.info(f"EOF:{eof_type}, Datos enviados (ID={eof_message_id})  para cliente {client_id}")
 
     def get_strategy_config(self) -> dict:
         return {

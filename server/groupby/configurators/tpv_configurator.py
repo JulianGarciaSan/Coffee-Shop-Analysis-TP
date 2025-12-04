@@ -57,9 +57,9 @@ class TPVConfigurator(GroupByConfigurator):
         return {"output": output_middleware}
 
     def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict, strategy, client_id: str, message_id: str,checkpoint_handler, eof_type: Optional[int]=1) -> bool:
-        if eof_type == 2:
-            logger.info(f"EOF tipo 2 recibido de cliente '{client_id}', no se envían resultados TPV")
-            self._send_cleaning_eof_client(client_id, middlewares, strategy, message_id, eof_type=2)
+        if eof_type == 2 or eof_type == 3:
+            logger.info(f"EOF tipo {eof_type} recibido de cliente '{client_id}', no se envían resultados TPV")
+            self._send_cleaning_eof_client(client_id, middlewares, strategy, message_id, eof_type=eof_type)
             return False
         
         if self.eof_received_by_client.get(client_id, False):
@@ -106,18 +106,21 @@ class TPVConfigurator(GroupByConfigurator):
 
     def _send_cleaning_eof_client(self, client_id: str, middlewares: dict, strategy, original_message_id: str, eof_type: Optional[int]=2):
         routing_key = self.client_router.get_routing_key(client_id, 'tpv.data')
-        logger.info(f"EOF:2 - Cliente '{client_id}'  Routing key: {routing_key}")
+        logger.info(f"EOF:{eof_type} - Cliente '{client_id}'  Routing key: {routing_key}")
 
-        eof_dto = TransactionBatchDTO(f"EOF:2", BatchType.EOF)
+        eof_dto = TransactionBatchDTO(f"EOF:{eof_type}", BatchType.EOF)
         middlewares["output"].send(
             eof_dto.to_bytes_fast(),
             routing_key=routing_key,
             headers={'client_id': client_id, 'message_id': "0"}
         )
-        
-        logger.info(f"EOF:2 TPV enviados para cliente '{client_id}'")
-        strategy.clean_client_data(client_id)
-        
+
+        logger.info(f"EOF:{eof_type} TPV enviados para cliente '{client_id}'")
+        if eof_type == 2:
+            strategy.clean_client_data(client_id)
+        else:
+            strategy.clean_all_data()
+            
     def get_strategy_config(self) -> dict:
         return {
             'semester': self.semester,

@@ -233,7 +233,7 @@ class FilterNode:
                     pass
 
             self.client_logger.write(f"{client_id}:{message_id}")
-            logging.info("Mensaje recibido en FilterNode")
+            # logging.info("Mensaje recibido en FilterNode")
             should_stop = self.process_message(body, routing_key, client_id,message_id)
             ch.basic_ack(delivery_tag=method.delivery_tag)
             self.logger.write_termination()

@@ -275,3 +275,7 @@ class BestSellingGroupByStrategy(GroupByStrategy):
             logger.info(f"Estado BestSelling limpiado para cliente {client_id}")
         else:
             logger.info(f"No se encontró estado BestSelling para limpiar del cliente {client_id}")
+
+    def clean_all_data(self):
+        self.month_item_aggregations_by_client.clear()
+        logger.info("Estado BestSelling limpiado para todos los clientes")

@@ -105,11 +105,11 @@ class ClientHandler(threading.Thread):
             
             raise
         
-    def _send_cleanup_eof(self):
+    def _send_cleanup_eof(self, eof_type: Optional[str] = "2"):
         """Envía EOF:2 (cleanup) cuando el cliente se desconecta abruptamente"""
         with self.lock:
             if self.disconnected_EOF_sent:
-                logger.info(f"EOF:2 ya enviado para cliente {self.client_id}")
+                logger.info(f"EOF:{eof_type} ya enviado para cliente {self.client_id}")
                 return
             else: 
                 self.disconnected_EOF_sent = True
@@ -117,8 +117,8 @@ class ClientHandler(threading.Thread):
         if self.shutdown and self.shutdown.is_shutting_down():
             logger.info("Shutdown activo, no enviando EOF:2")
             return
-        
-        logger.info(f"Enviando EOF:2 para cliente {self.client_id}")
+
+        logger.info(f"Enviando EOF:{eof_type} para cliente {self.client_id}")
         headers = self.create_headers(self.client_id, self.message_id)
         
         # NUEVO: Crear middlewares frescos para enviar EOF:2
@@ -126,65 +126,60 @@ class ClientHandler(threading.Thread):
             output_mw = self.gateway.get_output_middleware()
             join_mw = self.gateway.get_join_middleware()
         except Exception as e:
-            logger.error(f"Error creando middlewares para EOF:2: {e}")
+            logger.error(f"Error creando middlewares para EOF:{eof_type}: {e}")
             return
         
         try:
-            # EOF:2 para transactions
-            eof_transactions = TransactionBatchDTO("EOF:2", batch_type=BatchType.EOF)
-            output_mw.send(  # ← Usar el middleware fresco
+            eof_transactions = TransactionBatchDTO(f"EOF:{eof_type}", batch_type=BatchType.EOF)
+            output_mw.send(  
                 eof_transactions.to_bytes_fast(), 
                 routing_key='transactions', 
                 headers=headers
             )
-            logger.info(f"EOF:2 enviado a transactions para cliente {self.client_id}")
-            
-            # EOF:2 para transaction_items
-            eof_items = TransactionItemBatchDTO("EOF:2", batch_type=BatchType.EOF)
-            output_mw.send(  # ← Usar el middleware fresco
+            logger.info(f"EOF:{eof_type} enviado a transactions para cliente {self.client_id}")
+
+            eof_items = TransactionItemBatchDTO(f"EOF:{eof_type}", batch_type=BatchType.EOF)
+            output_mw.send(  
                 eof_items.to_bytes_fast(), 
                 routing_key='transaction_items', 
                 headers=headers
             )
-            logger.info(f"EOF:2 enviado a transaction_items para cliente {self.client_id}")
-            
-            # EOF:2 para stores en todos los join nodes
+            logger.info(f"EOF:{eof_type} enviado a transaction_items para cliente {self.client_id}")
+
             routing_keys_stores = self.client_router.get_all_routing_keys('stores.data')
             for routing_key in routing_keys_stores:
-                eof_stores = StoreBatchDTO("EOF:2", batch_type=BatchType.EOF)
-                join_mw.send(  # ← Usar el middleware fresco
+                eof_stores = StoreBatchDTO(f"EOF:{eof_type}", batch_type=BatchType.EOF)
+                join_mw.send(  
                     eof_stores.to_bytes_fast(), 
                     routing_key=routing_key, 
                     headers=headers
                 )
-            logger.info(f"EOF:2 stores enviado a {len(routing_keys_stores)} join nodes")
-            
-            # EOF:2 para users en todos los join nodes
+            logger.info(f"EOF:{eof_type} stores enviado a {len(routing_keys_stores)} join nodes")
+
             routing_keys_users = self.client_router.get_all_routing_keys('users.data')
             for routing_key in routing_keys_users:
-                eof_users = UserBatchDTO("EOF:2", batch_type=BatchType.EOF)
-                join_mw.send(  # ← Usar el middleware fresco
+                eof_users = UserBatchDTO(f"EOF:{eof_type}", batch_type=BatchType.EOF)
+                join_mw.send(  
                     eof_users.to_bytes_fast(), 
                     routing_key=routing_key, 
                     headers=headers
                 )
-            logger.info(f"EOF:2 users enviado a {len(routing_keys_users)} join nodes")
-            
-            # EOF:2 para menu_items en todos los join nodes
+            logger.info(f"EOF:{eof_type} users enviado a {len(routing_keys_users)} join nodes")
+
             routing_keys_menu = self.client_router.get_all_routing_keys('menu_items.data')
             for routing_key in routing_keys_menu:
-                eof_menu = MenuItemBatchDTO("EOF:2", batch_type=BatchType.EOF)
-                join_mw.send(  # ← Usar el middleware fresco
+                eof_menu = MenuItemBatchDTO(f"EOF:{eof_type}", batch_type=BatchType.EOF)
+                join_mw.send(  
                     eof_menu.to_bytes_fast(), 
                     routing_key=routing_key, 
                     headers=headers
                 )
-            logger.info(f"EOF:2 menu_items enviado a {len(routing_keys_menu)} join nodes")
-            
-            logger.info(f"EOF:2 completado para cliente {self.client_id}")
-            
+            logger.info(f"EOF:{eof_type} menu_items enviado a {len(routing_keys_menu)} join nodes")
+
+            logger.info(f"EOF:{eof_type} completado para cliente {self.client_id}")
+
         except Exception as e:
-            logger.error(f"Error enviando EOF:2 para cliente {self.client_id}: {e}")
+            logger.error(f"Error enviando EOF:{eof_type} para cliente {self.client_id}: {e}")
         finally:
             # Cerrar los middlewares frescos
             try:

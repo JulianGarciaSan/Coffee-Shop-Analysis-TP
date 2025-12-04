@@ -181,12 +181,17 @@ class HourNodeConfigurator(NodeConfigurator):
                     'transactions',
                     self._on_all_acks_received
                 )
-            elif decoded_data.startswith("EOF:2"):
-                logger.info(f"EOF:2 recibido para cliente {client_id_str}")
-                self.logger.write_with_timestamp(f"EOF:2:{client_id_str}")
+            elif decoded_data.startswith("EOF:2") or decoded_data.startswith("EOF:3"):
+                if decoded_data.startswith("EOF:2"):
+                    logger.info(f"EOF:2 recibido para cliente {client_id_str}")
+                    eof_type = 2
+                else:
+                    logger.info(f"EOF:3 recibido, formateando nodos")
+                    eof_type = 3
+                    
                 self.eof_logger.write(f"EOF:2:{client_id_str}:transactions")
-                self.send_eof(self.output_middlewares, "transactions", client_id,message_id,eof_type=2)
-            
+                self.send_eof(self.output_middlewares, "transactions", client_id,message_id,eof_type=eof_type)
+
             dto = TransactionBatchDTO(decoded_data, BatchType.EOF)
             return (False, 'transactions', dto, False)
         
@@ -227,15 +232,15 @@ class HourNodeConfigurator(NodeConfigurator):
         self.eof_logger.write(f"END:{client_id}:{batch_type}")
 
     def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None,message_id:Optional[int]=None, eof_type: Optional[int] = 1):
-        if eof_type == 2:
+        if eof_type == 2 or eof_type == 3:
             headers = self.create_headers(client_id,0)
-            eof_dto = TransactionBatchDTO("EOF:2", BatchType.EOF)
+            eof_dto = TransactionBatchDTO(f"EOF:{eof_type}", BatchType.EOF)
         elif eof_type == 1:
             headers = self.create_headers(client_id,message_id)
             eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
 
-        logger.info("EOF de tipo 2 enviado a filtros downstream" if eof_type == 2 else "EOF de tipo 1 enviado a filtros downstream")
-        
+        logger.info(f"Enviando EOF de tipo {eof_type} para cliente {client_id}")
+
         if 'q1' in middlewares:
             middlewares['q1'].send(eof_dto.to_bytes_fast(), headers=headers)
             logger.info(f"EOF enviado a Q1 (amount queue) para cliente {client_id}")

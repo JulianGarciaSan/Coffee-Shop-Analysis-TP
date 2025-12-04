@@ -387,6 +387,57 @@ class JoinNode:
                 logger.info(f"pending_rollbacks eliminado para cliente {client_id}")
         except Exception as e:
             logger.error(f"Error limpiando estado de cliente {client_id}: {e}", exc_info=True)
+                
+    def clean_all_data(self):
+        """Limpia el estado de TODOS los clientes en JoinNode"""
+        logger.info("Limpiando estado de TODOS los clientes en JoinNode")
+        
+        try:
+            self.client_states.clear()
+            logger.info("Todos los estados de clientes limpiados")
+        except Exception as e:
+            logger.error(f"Error limpiando client_states: {e}")
+
+        # Limpiar todos los procesadores
+        processor_attrs = [
+            "store_processors",
+            "user_processors",
+            "menu_item_processors",
+            "tpv_processors",
+            "top_customers_processors",
+            "best_selling_processors",
+            "most_profit_processors",
+        ]
+        
+        for attr in processor_attrs:
+            try:
+                proc_dict = getattr(self, attr, None)
+                if proc_dict:
+                    proc_dict.clear()
+                    logger.info(f"Todos los '{attr}' eliminados")
+            except Exception as e:
+                logger.error(f"Error limpiando '{attr}': {e}")
+
+        # Limpiar joined data y counters
+        try:
+            self.q3_joined_data_by_client.clear()
+            logger.info("Todos los q3_joined_data eliminados")
+        except Exception as e:
+            logger.error(f"Error limpiando q3_joined_data_by_client: {e}")
+
+        try:
+            self.outgoing_counter_by_client.clear()
+            logger.info("Todos los outgoing_counter eliminados")
+        except Exception as e:
+            logger.error(f"Error limpiando outgoing_counter_by_client: {e}")
+
+        try:
+            self.pending_rollbacks.clear()
+            logger.info("Todos los pending_rollbacks eliminados")
+        except Exception as e:
+            logger.error(f"Error limpiando pending_rollbacks: {e}")
+
+        logger.info("Limpieza global completada en JoinNode - todos los clientes eliminados")
 
 
 if __name__ == "__main__":

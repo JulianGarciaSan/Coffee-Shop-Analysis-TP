@@ -64,30 +64,30 @@ services:
       - ./report_client_1:/app/report_client_1
       - ./data/transactions_items_test:/data/transactions_items_test
 
-  # client_2:
-  #   build:
-  #     context: .
-  #     dockerfile: ./client/Dockerfile
-  #   restart: on-failure
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - RABBITMQ_HOST=rabbitmq
-  #     - CLIENT_ID=client_2
-  #   depends_on:
-  #     gateway:
-  #       condition: service_started
-  #   volumes:
-  #     - ./client/config.ini:/config.ini
-  #     - ./data/transaction_items:/data/transaction_items
-  #     - ./data/users:/data/users
-  #     - ./data/stores:/data/stores
-  #     - ./data/menu_items:/data/menu_items
-  #     - ./data/payment_methods:/data/payment_methods
-  #     - ./data/vouchers:/data/vouchers
-  #     - ./data/transactions:/data/transactions
-  #     - ./data/transactions_test:/data/transactions_test
-  #     - ./report_client_2:/app/report_client_2
-  #     - ./data/transactions_items_test:/data/transactions_items_test
+  client_2:
+    build:
+      context: .
+      dockerfile: ./client/Dockerfile
+    restart: on-failure
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RABBITMQ_HOST=rabbitmq
+      - CLIENT_ID=client_2
+    depends_on:
+      gateway:
+        condition: service_started
+    volumes:
+      - ./client/config.ini:/config.ini
+      - ./data/transaction_items:/data/transaction_items
+      - ./data/users:/data/users
+      - ./data/stores:/data/stores
+      - ./data/menu_items:/data/menu_items
+      - ./data/payment_methods:/data/payment_methods
+      - ./data/vouchers:/data/vouchers
+      - ./data/transactions:/data/transactions
+      - ./data/transactions_test:/data/transactions_test
+      - ./report_client_2:/app/report_client_2
+      - ./data/transactions_items_test:/data/transactions_items_test
   
   # client_3:
   #   build:

@@ -245,3 +245,7 @@ class TopCustomersGroupByStrategy(GroupByStrategy):
             logger.info(f"Estado TopCustomers limpiado para cliente {client_id}")
         else:
             logger.info(f"No se encontró estado TopCustomers para limpiar del cliente {client_id}")
+            
+    def clean_all_data(self):
+        self.store_user_purchases_by_client.clear()
+        logger.info("Estado TopCustomers limpiado para TODOS los clientes")

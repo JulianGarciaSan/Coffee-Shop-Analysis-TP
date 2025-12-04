@@ -11,7 +11,7 @@ from common.new_protocolo import ProtocolNew
 from rabbitmq.middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
 from dataclasses import asdict
 from logger import get_logger
-from dtos.dto import TransactionBatchDTO, BatchType, StoreBatchDTO,UserBatchDTO, ReportBatchDTO, TransactionItemBatchDTO, MenuItemBatchDTO
+from dtos.dto import BatchType, MenuItemBatchDTO, ReportBatchDTO, StoreBatchDTO, TransactionBatchDTO, TransactionItemBatchDTO, UserBatchDTO
 from gateway_acceptor import GatewayAcceptor
 from handler_report import ReportHandler
 
@@ -111,7 +111,7 @@ class Gateway:
         return mw
     
     def dispatch_report_to_client(self, client_id, routing_key, body):
-        print(f"Dispatching report to client {client_id} with routing_key={routing_key}")
+        # print(f"Dispatching report to client {client_id} with routing_key={routing_key}")
         with self._clients_lock:
             client_handler = self._clients_by_id.get(client_id)
 
@@ -125,12 +125,60 @@ class Gateway:
         logger.info("Iniciando Gateway...")
         
         try:
+            self._send_initial_cleanup()
             self._acceptor.start()  
         except Exception as e:
             logger.error(f"Error en el Gateway: {e}")
             raise
         finally:
             self._cleanup()
+            
+    def _send_initial_cleanup(self):
+        """Envía EOF:3 al iniciar para limpiar datos residuales"""
+        logger.info("Enviando EOF:3 inicial para cleanup de datos residuales")
+        
+        try:
+            # Crear DTOs con EOF:3
+            eof_transactions = TransactionBatchDTO("EOF:3", batch_type=BatchType.EOF)
+            eof_items = TransactionItemBatchDTO("EOF:3", batch_type=BatchType.EOF)
+            eof_stores = StoreBatchDTO("EOF:3", batch_type=BatchType.EOF)
+            eof_users = UserBatchDTO("EOF:3", batch_type=BatchType.EOF)
+            eof_menu = MenuItemBatchDTO("EOF:3", batch_type=BatchType.EOF)
+            
+            headers = {'client_id': -1, 'message_id': 0}
+            
+            self.output_filter_year_nodes_middleware.send(
+                eof_transactions.to_bytes_fast(),
+                routing_key='transactions',
+                headers=headers
+            )
+            self.output_filter_year_nodes_middleware.send(
+                eof_items.to_bytes_fast(),
+                routing_key='transaction_items',
+                headers=headers
+            )
+            
+            for node_id in range(self._acceptor.total_join_nodes):
+                self._join_middleware.send(
+                    eof_stores.to_bytes_fast(),
+                    routing_key=f'join_node_{node_id}.stores.data',
+                    headers=headers
+                )
+                self._join_middleware.send(
+                    eof_users.to_bytes_fast(),
+                    routing_key=f'join_node_{node_id}.users.data',
+                    headers=headers
+                )
+                self._join_middleware.send(
+                    eof_menu.to_bytes_fast(),
+                    routing_key=f'join_node_{node_id}.menu_items.data',
+                    headers=headers
+                )
+            
+            logger.info("-------------- EOF:3 INICIAL ENVIADO EXITOSAMENTE  --------------------")
+            
+        except Exception as e:
+            logger.error(f"----------------- Error enviando EOF:3 inicial: {e} -----------------------")
 
     def _cleanup(self):
         logger.info("Iniciando cleanup del Gateway...")

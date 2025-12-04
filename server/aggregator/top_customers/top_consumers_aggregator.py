@@ -135,7 +135,7 @@ class TopCustomersAggregatorNode:
         for node_id in range(self.total_join_nodes):
             unique_id = self.checkpoint_handler.get_next_id_in_memory(client_id)
             self.output_middleware.send(
-                TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF).to_bytes_fast(),
+                TransactionBatchDTO(f"EOF:1", BatchType.EOF).to_bytes_fast(),
                 routing_key=f"join_node_{node_id}.top_customers.data",
                 headers={'client_id': client_id, 'message_id': unique_id}
             )
@@ -176,19 +176,28 @@ class TopCustomersAggregatorNode:
             dto = TransactionBatchDTO.from_bytes_fast(message)
             
             if dto.batch_type == BatchType.EOF:
-                if dto.data.startswith("EOF:2"):
+                if dto.data.startswith("EOF:2") or dto.data.startswith("EOF:3"):
+                    if dto.data.startswith("EOF:2"):
+                        logger.info(f"EOF tipo 2 recibido, limpiando nodos del cliente {client_id}")
+                        eof_type = 2
+                    else:
+                        logger.info(f"EOF tipo 3 recibido, formateando nodos")
+                        eof_type = 3
+                        
                     for node_id in range(self.total_join_nodes):
                         self.output_middleware.send(
-                            TransactionBatchDTO(f"EOF:2", BatchType.EOF).to_bytes_fast(),
+                            TransactionBatchDTO(f"EOF:{eof_type}", BatchType.EOF).to_bytes_fast(),
                             routing_key=f"join_node_{node_id}.top_customers.data",
                             headers={'client_id': client_id, 'message_id': 0}
                         )
-                        logger.info(f"Enviado EOF:2 a join_node_{node_id} (ID=0) por EOF tipo 2 recibido")                    
-                        if client_id in self.store_user_purchases_by_client:
-                            del self.store_user_purchases_by_client[client_id]
-                            logger.info(f"Datos del cliente {client_id} limpiados tras EOF tipo 2")
+                        if eof_type == 3:
+                            self.store_user_purchases_by_client.clear()
+                        elif eof_type == 2:
+                            if client_id in self.store_user_purchases_by_client:
+                                del self.store_user_purchases_by_client[client_id]
+                                logger.info(f"Datos del cliente {client_id} limpiados tras EOF tipo {eof_type}")
                         else:
-                            logger.info(f"No se encontraron datos para limpiar del cliente {client_id} tras EOF tipo 2")
+                            logger.info(f"No se encontraron datos para limpiar del cliente {client_id} tras EOF tipo {eof_type}")
                     return False, True
                 
                 success = self.handle_eof(dto, client_id, message_id)
