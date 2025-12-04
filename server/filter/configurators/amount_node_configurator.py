@@ -131,6 +131,20 @@ class AmountNodeConfigurator(NodeConfigurator):
         message_id_str = str(message_id) if message_id is not None else "default"
         
         if decoded_data.startswith("EOF:"):
+            if decoded_data.startswith("EOF:2") or decoded_data.startswith("EOF:3"):
+                if decoded_data.startswith("EOF:2"):
+                    logger.info(f"EOF:2 recibido para cliente {client_id_str}")
+                    eof_type = 2
+                else:
+                    logger.info(f"EOF:3 recibido, formateando nodos")
+                    eof_type = 3
+
+                self.eof_logger.write(f"EOF:{eof_type}:{client_id_str}:transactions")
+                self.send_eof(self.output_middlewares, "transactions", client_id,message_id,eof_type=eof_type)
+                
+                dto = TransactionBatchDTO(decoded_data, BatchType.EOF)
+                return (False, 'transactions', dto, False)
+            
             logger.info(f"EOF recibido para cliente {client_id_str}")            
             self.logger.write_with_timestamp(f"EOF:{client_id_str}")
             self.eof_logger.write(f"BEF:{client_id_str}:transactions")
@@ -183,15 +197,15 @@ class AmountNodeConfigurator(NodeConfigurator):
         self.send_eof(self.output_middlewares, "transactions", client_id=client_id_int,message_id=message_id_int)
         self.eof_logger.write(f"END:{client_id}:{batch_type}")
 
-    def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None,message_id: Optional[int] = None):
+    def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None,message_id: Optional[int] = None, eof_type: Optional[int] = 1):
         if 'q1' in middlewares:
-            eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
+            eof_dto = TransactionBatchDTO(f"EOF:{eof_type}", BatchType.EOF)
             middlewares['q1'].send(
                 eof_dto.to_bytes_fast(),
                 routing_key='q1.data',
                 headers=self.create_headers(client_id,message_id)
             )
-            logger.info(f"EOF enviado a Q1 (report exchange) para cliente {client_id}")
+            logger.info(f"EOF:{eof_type} enviado a Q1 (report exchange) para cliente {client_id}")
 
     def _extract_q1_columns(self, csv_data: str) -> str:
         result_lines = ["transaction_id,final_amount"]

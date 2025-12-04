@@ -51,6 +51,7 @@ class LRUCache:
 class ReportHandler(threading.Thread):
 
     REPORT_QUEUE_NAME = "gateway_reports"
+    EXPECTED_EOFS_PER_CLIENT = 6
 
     def __init__(self, rabbitmq_host: str, reports_exchange: str, gateway, 
                  shutdown_handler=None, cache_size: int = 10000):
@@ -63,6 +64,7 @@ class ReportHandler(threading.Thread):
         self._dedup_cache = LRUCache(max_size=cache_size)
         self._cache_hits = 0 
         self._total_messages = 0
+        self._eof_count_by_client = {}
         
         self._middleware = MessageMiddlewareQueue(
             host=self._host,
@@ -84,6 +86,35 @@ class ReportHandler(threading.Thread):
         self._stopped = threading.Event()
         
         logger.info(f"ReportHandler inicializado con cache size={cache_size}")
+        
+    def _is_eof(self, body: bytes) -> bool:
+        """Verifica si el cuerpo del mensaje es un EOF"""
+        try:
+            decoded = body.decode('utf-8').strip()
+            return decoded.startswith("EOF:")
+        except:
+            return False
+
+    def _clean_client_from_cache(self, client_id: int):
+        """Limpia todos los mensajes de un cliente del cache de deduplicación"""
+        logger.info(f"Limpiando cache de deduplicación para cliente {client_id}")
+        
+        try:
+            keys_to_remove = [
+                key for key in list(self._dedup_cache.cache.keys())
+                if key[0] == client_id 
+            ]
+            
+            for key in keys_to_remove:
+                del self._dedup_cache.cache[key]
+            
+            if client_id in self._eof_count_by_client:
+                del self._eof_count_by_client[client_id]
+            
+            logger.info(f"Eliminadas {len(keys_to_remove)} entradas del cache para cliente {client_id}")
+            
+        except Exception as e:
+            logger.error(f"Error limpiando cache para cliente {client_id}: {e}")
 
     def run(self):
         logger.info("ReportHandler iniciado")
@@ -142,6 +173,19 @@ class ReportHandler(threading.Thread):
         
         if message_id is not None:
             self._mark_as_processed(client_id, message_id, query_name)
+
+        is_eof = self._is_eof(body)
+
+        if is_eof:
+            self._eof_count_by_client[client_id] = self._eof_count_by_client.get(client_id, 0) + 1
+            current_eofs = self._eof_count_by_client[client_id]
+            
+            logger.info(f"EOF recibido para cliente {client_id}, query {query_name} "
+                       f"({current_eofs}/{self.EXPECTED_EOFS_PER_CLIENT})")
+            
+            if current_eofs >= self.EXPECTED_EOFS_PER_CLIENT:
+                logger.info(f"Cliente {client_id} completó todos sus reportes (6/6 EOFs), limpiando cache")
+                self._clean_client_from_cache(client_id)
         
         self._gateway.dispatch_report_to_client(client_id, routing_key, body)
                 

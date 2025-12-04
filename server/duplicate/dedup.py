@@ -106,7 +106,6 @@ class FilterDuplicateNode:
             self.processed_messages.add((client_id, message_id))
             self.dedup_logger.write(f"{client_id}:{message_id}")
             
-            # Si es EOF, también marcamos el cliente como finalizado
             if is_eof:
                 self.eof_clients.add(client_id)
     
@@ -119,7 +118,6 @@ class FilterDuplicateNode:
                 ch.stop_consuming()
                 return
             
-            # Extraer headers
             client_id, message_id = self._extract_headers(properties)
             
             if client_id is None or message_id is None:
@@ -129,43 +127,42 @@ class FilterDuplicateNode:
             
             logger.debug(f"Mensaje recibido: client={client_id}, msg={message_id}")
             
-            # Detectar si es EOF
             is_eof = self._is_eof_message(body)
-            
-            # ============ VERIFICACIONES COMUNES ============
-            
-            # Verificar si el cliente ya finalizó
+
             if not is_eof and self.is_client_finished(client_id):
                 logger.info(f"Mensaje de cliente finalizado {client_id}, ignorando")
                 ch.basic_ack(delivery_tag=method.delivery_tag)
                 return
             
-            # Verificar duplicación (tanto para EOF como para mensajes normales)
             if self.is_duplicate(client_id, message_id):
                 logger.info(f"Mensaje duplicado detectado: client={client_id}, msg={message_id}, is_eof={is_eof}")
                 ch.basic_ack(delivery_tag=method.delivery_tag)
                 return
-            
-            # ============ PROCESAMIENTO ============
-            
-            # Mensaje nuevo (EOF o normal) - enviar primero
+
             headers = {'client_id': client_id, 'message_id': message_id}
             self.output_middleware.send(body, routing_key='q1.data', headers=headers)
             
             if is_eof:
-                logger.info(f"EOF enviado downstream: client={client_id}, msg={message_id}")
+                eof_type = self._extract_eof_type(body)
+                if eof_type == 2 or eof_type == 1:
+                    logger.info(f"EOF:2 (cleanup) recibido para cliente {client_id}")
+                    self._clean_client_data(client_id)
+                    ch.basic_ack(delivery_tag=method.delivery_tag)
+                    return
+                elif eof_type == 3:
+                    logger.info(f"EOF:3 (global cleanup) recibido, limpiando todos los datos")
+                    self._clean_all_data()
+                    ch.basic_ack(delivery_tag=method.delivery_tag)
+                    return
             else:
                 logger.debug(f"Mensaje enviado downstream: client={client_id}, msg={message_id}")
             
-            # Marcar como procesado (indicando si es EOF)
             self.mark_processed(client_id, message_id, is_eof=is_eof)
             
-            # ACK
             ch.basic_ack(delivery_tag=method.delivery_tag)
         
         except Exception as e:
             logger.error(f"Error procesando mensaje: {e}", exc_info=True)
-            # En caso de error, rechazar con requeue para reintentar
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
     
     def start(self):
@@ -186,7 +183,54 @@ class FilterDuplicateNode:
         
         finally:
             self._cleanup()
-    
+            
+    def _extract_eof_type(self, body: bytes) -> Optional[int]:
+        """Extrae el tipo de EOF (1, 2, 3) del mensaje"""
+        try:
+            decoded = body.decode('utf-8').strip()
+            if decoded.startswith("EOF:"):
+                eof_type_str = decoded.split(":")[1]
+                return int(eof_type_str)
+        except:
+            pass
+        return None
+
+    def _clean_client_data(self, client_id: int):
+        """Limpia todos los datos del cliente específico"""
+        logger.info(f"Limpiando datos del cliente {client_id}")
+        
+        try:
+            messages_to_remove = {(cid, mid) for cid, mid in self.processed_messages if cid == client_id}
+            self.processed_messages -= messages_to_remove
+            logger.info(f"Eliminados {len(messages_to_remove)} mensajes procesados del cliente {client_id}")
+            
+            if client_id in self.eof_clients:
+                self.eof_clients.remove(client_id)
+                logger.info(f"Cliente {client_id} removido de eof_clients")
+            
+            logger.info(f"Limpieza completada para cliente {client_id}")
+            
+        except Exception as e:
+            logger.error(f"Error limpiando datos del cliente {client_id}: {e}")
+        
+    def _clean_all_data(self):
+        """Limpia todos los datos de TODOS los clientes"""
+        logger.info("Limpiando datos de TODOS los clientes")
+        
+        try:
+            num_messages = len(self.processed_messages)
+            self.processed_messages.clear()
+            logger.info(f"Eliminados {num_messages} mensajes procesados de todos los clientes")
+            
+            num_clients = len(self.eof_clients)
+            self.eof_clients.clear()
+            logger.info(f"Eliminados {num_clients} clientes de eof_clients")
+            
+            logger.info("Limpieza global completada - todos los datos eliminados")
+            
+        except Exception as e:
+            logger.error(f"Error limpiando todos los datos: {e}")
+            
     def _cleanup(self):
         """Limpieza de recursos"""
         logger.info("Iniciando cleanup...")
@@ -200,7 +244,6 @@ class FilterDuplicateNode:
                 self.output_middleware.close()
                 logger.info("Output middleware cerrado")
             
-            # Cerrar logger
             if self.dedup_logger:
                 self.dedup_logger.close()
         

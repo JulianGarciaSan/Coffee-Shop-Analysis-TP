@@ -180,8 +180,8 @@ class HourNodeConfigurator(NodeConfigurator):
                 else:
                     logger.info(f"EOF:3 recibido, formateando nodos")
                     eof_type = 3
-                    
-                self.eof_logger.write(f"EOF:2:{client_id_str}:transactions")
+
+                self.eof_logger.write(f"EOF:{eof_type}:{client_id_str}:transactions")
                 self.send_eof(self.output_middlewares, "transactions", client_id,message_id,eof_type=eof_type)
 
             dto = TransactionBatchDTO(decoded_data, BatchType.EOF)
