@@ -185,8 +185,6 @@ class BestSellingAggregatorNode:
             routing_key=routing_key,
             headers={'client_id': client_id, 'message_id': unique_id}
         )
-        logger.info(f"Enviado Data {metric} (ID={unique_id})")
-        time.sleep(10) 
         
     def _send_eof(self, client_id: str, routing_key: str):
         unique_id = self.checkpoint_handler.get_next_id_in_memory(client_id)
@@ -197,8 +195,6 @@ class BestSellingAggregatorNode:
             routing_key=routing_key,
             headers={'client_id': client_id, 'message_id': unique_id}
         )
-        logger.info(f"Enviado EOF {routing_key} (ID={unique_id})")
-        time.sleep(10)
 
     def process_message(self, message: bytes, routing_key: str, client_id: str, message_id: str) -> bool:
         try:

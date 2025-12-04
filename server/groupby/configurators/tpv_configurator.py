@@ -56,7 +56,7 @@ class TPVConfigurator(GroupByConfigurator):
         
         return {"output": output_middleware}
     
-    def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict, strategy,client_id: str, message_id: str) -> bool:
+    def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict, strategy,client_id: str, message_id: str,checkpoint_handler) -> bool:
         # client_id = getattr(dto, 'client_id', 'default_client')
         
         if self.eof_received_by_client.get(client_id, False):

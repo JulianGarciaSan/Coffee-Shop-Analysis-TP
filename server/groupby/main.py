@@ -41,12 +41,22 @@ class GroupByNode:
             self.groupby_mode, 
             **strategy_config,
         )
-        
+        outgoing_counter = None
+        if hasattr(self.configurator, 'outgoing_counter_by_client'):
+            outgoing_counter = self.configurator.outgoing_counter_by_client
+            
+        extra_id = 0
+        if hasattr(self.configurator, 'node_id'):
+            extra_id = self.configurator.node_id
+
         self.checkpoint_handler = CheckpointHandler(
             checkpoint_dir=self.checkpoint_dir,
             strategy=self.strategy,
             checkpont_interval=1000,
+            outgoing_counter_by_client=outgoing_counter,
+            extra_id=extra_id
         )
+
         self.input_middleware = self.configurator.create_input_middleware()
         if hasattr(self.input_middleware, 'shutdown'):
             self.input_middleware.shutdown = self.shutdown
@@ -75,7 +85,7 @@ class GroupByNode:
         dto = TransactionBatchDTO.from_bytes_fast(message)
 
         if dto.batch_type == BatchType.EOF:
-            self.configurator.handle_eof(dto, self.output_middlewares, self.strategy, client_id, message_id)
+            self.configurator.handle_eof(dto, self.output_middlewares, self.strategy, client_id, message_id, self.checkpoint_handler)
             self.checkpoint_handler.save_eof_checkpoint(client_id, message_id)
             return (False, True) 
 

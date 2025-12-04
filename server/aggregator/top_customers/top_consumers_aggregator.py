@@ -131,8 +131,6 @@ class TopCustomersAggregatorNode:
                 routing_key=f"join_node_{node_id}.top_customers.data",
                 headers={'client_id': client_id, 'message_id': unique_id}
             )
-            logger.info(f"Enviado batch a join_node_{node_id} (ID={unique_id})")
-            time.sleep(10)
 
         for node_id in range(self.total_join_nodes):
             unique_id = self.checkpoint_handler.get_next_id_in_memory(client_id)
@@ -141,9 +139,6 @@ class TopCustomersAggregatorNode:
                 routing_key=f"join_node_{node_id}.top_customers.data",
                 headers={'client_id': client_id, 'message_id': unique_id}
             )
-            logger.info(f"Enviado EOF a join_node_{node_id} (ID={unique_id})")
-            time.sleep(10)
-
 
     def handle_eof(self, dto: TransactionBatchDTO, client_id: str, message_id: str) -> bool:
         current_state = self.client_states.get(client_id, self.ClientState.RECEIVING_DATA)
