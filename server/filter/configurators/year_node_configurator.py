@@ -155,19 +155,18 @@ class YearNodeConfigurator(NodeConfigurator):
         message_id_str = str(message_id) if message_id is not None else "default"
         
         if decoded_data.startswith("EOF:"):
+            batch_type = 'transactions' if self.file_mode == 'transactions' else 'transaction_items'
             if decoded_data.startswith("EOF:2"):
                 logger.info(f"EOF tipo 2 recibido para cliente {client_id_str}, no se procesará EOF completo")
-                self.coordinator.clean_client_data(client_id_str)
                 if self.file_mode == 'transactions':
                     dto = TransactionBatchDTO(decoded_data, BatchType.EOF)
                 else:
                     dto = TransactionItemBatchDTO(decoded_data, BatchType.EOF)
-                    
+                self.send_eof(self.output_middlewares, batch_type, client_id,message_id,eof_type=2)
                 return (False, batch_type, dto, True)
             
             logger.info(f"EOF recibido para cliente {client_id_str}")
 
-            batch_type = 'transactions' if self.file_mode == 'transactions' else 'transaction_items'
             self.logger.write_with_timestamp(f"EOF:{client_id_str}")
             self.eof_logger.write(f"BEF:{client_id_str}:{batch_type}")
 
@@ -281,13 +280,16 @@ class YearNodeConfigurator(NodeConfigurator):
 
         self.eof_logger.write(f"END:{client_id}:{batch_type}")
         
-    def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None,message_id:Optional[int]=None):
-        
-        headers = self.create_headers(client_id,message_id)
-        
-        if batch_type == "transactions":
+    def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None,message_id:Optional[int]=None, eof_type: Optional[int]=1):
+
+        if eof_type == 1:
+            headers = self.create_headers(client_id,message_id)
             eof_dto = TransactionBatchDTO("EOF:1", batch_type=BatchType.EOF)
-            
+        elif eof_type == 2:
+            headers = self.create_headers(client_id,0)
+            eof_dto = TransactionBatchDTO("EOF:2", batch_type=BatchType.EOF)
+
+        if batch_type == "transactions":
             if 'q1' in middlewares:
                 middlewares['q1'].send(eof_dto.to_bytes_fast(), headers=headers)
                 logger.info(f"EOF enviado a Q1 para cliente {client_id}")
@@ -298,7 +300,7 @@ class YearNodeConfigurator(NodeConfigurator):
         
         elif batch_type == "transaction_items":
             if 'q2' in middlewares:
-                self.send_eof_to_groupby(headers)
+                self.send_eof_to_groupby(headers,eof_type)
     
     def handle_eof(self, counter: int, total_filters: int, eof_type: str, 
             middlewares: Dict[str, Any], input_middleware: Any, client_id: Optional[int] = None) -> bool:
@@ -375,12 +377,15 @@ class YearNodeConfigurator(NodeConfigurator):
                     
                     logger.info(f"Batch enviado a {routing_key}: {len(batch_lines)-1} líneas, cliente {client_id}")
 
-    def send_eof_to_groupby(self, headers: Dict[str, Any]):
+    def send_eof_to_groupby(self, headers: Dict[str, Any], optional_eof_type: Optional[int]=1):
         """Enviar EOF a todos los nodos GroupBy con sus IDs reales"""
         # EOF para nodos 2024
         for node_id in self.groupby_node_ids_2024:
             routing_key = f"groupby_2024_node_{node_id}"
-            eof_dto = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
+            if optional_eof_type == 2:
+                eof_dto = TransactionItemBatchDTO("EOF:2", BatchType.EOF)
+            elif optional_eof_type == 1:
+                eof_dto = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
             self.groupby_exchange.send(
                 eof_dto.to_bytes_fast(),
                 routing_key=routing_key,
@@ -390,7 +395,10 @@ class YearNodeConfigurator(NodeConfigurator):
         # EOF para nodos 2025
         for node_id in self.groupby_node_ids_2025:
             routing_key = f"groupby_2025_node_{node_id}"
-            eof_dto = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
+            if optional_eof_type == 2:
+                eof_dto = TransactionItemBatchDTO("EOF:2", BatchType.EOF)
+            elif optional_eof_type == 1:
+                eof_dto = TransactionItemBatchDTO("EOF:1", BatchType.EOF)
             self.groupby_exchange.send(
                 eof_dto.to_bytes_fast(),
                 routing_key=routing_key,
