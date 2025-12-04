@@ -183,9 +183,9 @@ class TopCustomersAggregatorUtils:
 
     def generate_top3_by_store(self, client_id: str) -> Dict[str, list]:
         top_3_by_store = {}
-        
+
         client_data = self.node.store_user_purchases_by_client.get(client_id, {})
-        
+
         for store_id in sorted(client_data.keys()):
             user_purchases = client_data[store_id]
             

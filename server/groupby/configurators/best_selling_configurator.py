@@ -4,6 +4,7 @@ import logging
 import os
 import threading
 from typing import Dict, Any, Optional
+import time
 from rabbitmq.middleware import MessageMiddlewareExchangeManual, MessageMiddlewareQueue,MessageMiddlewareQueueManual
 from dtos.dto import TransactionItemBatchDTO, BatchType, CoordinationMessageDTO
 from .base_configurators import GroupByConfigurator
@@ -61,19 +62,25 @@ class BestSellingConfigurator(GroupByConfigurator):
         
         return {"output": output_middleware}
     
-    def handle_eof(self, dto: TransactionItemBatchDTO, middlewares: dict, strategy, client_id: str, message_id: str, eof_type: Optional[int]=1) -> bool:
+
+    def handle_eof(self, dto: TransactionItemBatchDTO, middlewares: dict, strategy, client_id: str, message_id: str,checkpoint_handler, eof_type: Optional[int]=1) -> bool:
         logger.info(f"EOF recibido para cliente '{client_id}'")
         
         try:
             if eof_type == 2:
                 logger.info(f"EOF tipo 2 recibido para cliente '{client_id}', no se envían datos agregados")
-                self._send_eof_to_aggregator(middlewares["output"], client_id, message_id, eof_type=2)
+                self._send_eof_to_aggregator(middlewares["output"], client_id, message_id,checkpoint_handler, eof_type=2)
                 strategy.clean_client_data(client_id)
                 return False
             
-            self._calculate_and_send_top1(middlewares["output"], strategy, client_id, message_id)
+            checkpoint_handler.start_batch_transaction(client_id, "q2")
+
+            self._calculate_and_send_top1(middlewares["output"], strategy, client_id, message_id,checkpoint_handler)
             
-            self._send_eof_to_aggregator(middlewares["output"], client_id, message_id)
+            self._send_eof_to_aggregator(middlewares["output"], client_id, message_id,checkpoint_handler)
+            
+            checkpoint_handler.commit_batch_transaction(client_id, "q2")
+
             
             month_item_aggregations = getattr(strategy, 'month_item_aggregations_by_client', {})
             if client_id in month_item_aggregations:
@@ -85,16 +92,8 @@ class BestSellingConfigurator(GroupByConfigurator):
         except Exception as e:
             logger.error(f"Error manejando EOF para client_id={client_id}: {e}")
             return False
-    
-    def generate_next_message_id(self, client_id: str) -> int:
-        """
-        Genera ID único por mensaje para este cliente.
-        Determinístico porque el contador se reconstruye desde el checkpoint.
-        """
-        self.outgoing_counter_by_client[client_id] += 1
-        return int(self.node_id) * 1000000 + self.outgoing_counter_by_client[client_id]
 
-    def _send_eof_to_aggregator(self, output_middleware, client_id, message_id, eof_type: Optional[int]=1):
+    def _send_eof_to_aggregator(self, output_middleware, client_id, message_id,checkpoint_handler, eof_type: Optional[int]=1):
         """Envía EOF al Aggregator Final"""
         
         if eof_type == 2:
@@ -108,32 +107,31 @@ class BestSellingConfigurator(GroupByConfigurator):
         if eof_type == 2:
             unique_id = 0
         else:
-            unique_id = self.generate_next_message_id(client_id)
-            
+            unique_id = checkpoint_handler.get_next_id_in_memory(client_id)
+
         headers = self.create_headers(client_id, unique_id)
         output_middleware.send(
             eof_dto.to_bytes_fast(),
             routing_key='top_selling.data',
             headers=headers
         )
-        logger.info(f"EOF top_selling enviado (ID={unique_id})")
-        
+        logger.info(f"EOF top_selling enviado (ID={unique_id} para cliente {client_id})")
+        time.sleep(5)
         # EOF para top_profit.data
         if eof_type == 2:
             unique_id = 0
         else:
-            unique_id = self.generate_next_message_id(client_id)
+            unique_id = checkpoint_handler.get_next_id_in_memory(client_id)
         headers = self.create_headers(client_id, unique_id)
         output_middleware.send(
             eof_dto.to_bytes_fast(),
             routing_key='top_profit.data',
             headers=headers
         )
-        logger.info(f"EOF top_profit enviado (ID={unique_id})")
-        
-        logger.info(f"EOF enviado al Aggregator Final para cliente {client_id}")
+        logger.info(f"EOF top_profit enviado (ID={unique_id}) para cliente {client_id}")
+        time.sleep(5)
     
-    def _calculate_and_send_top1(self, output_middleware, strategy, client_id, message_id):
+    def _calculate_and_send_top1(self, output_middleware, strategy, client_id, message_id, checkpoint_handler):
         """
         Calcula el top 1 LOCAL y envía al Aggregator Final
         """
@@ -158,15 +156,15 @@ class BestSellingConfigurator(GroupByConfigurator):
             selling_csv += f"{year_month},{top_selling_item.item_id},{top_selling_item.sellings_qty}"
             
             # Generar ID único usando client_id
-            unique_id = self.generate_next_message_id(client_id)
+            unique_id = checkpoint_handler.get_next_id_in_memory(client_id)
             selling_dto = TransactionItemBatchDTO(selling_csv, BatchType.RAW_CSV)
             output_middleware.send(
                 selling_dto.to_bytes_fast(),
                 routing_key='top_selling.data',
                 headers=self.create_headers(client_id, unique_id)
             )
-            logger.info(f"Enviado selling {year_month} (ID={unique_id})")
-            
+            logger.info(f"Enviado selling {year_month} (ID={unique_id} para cliente {client_id})")
+            time.sleep(5)
             # Top profit
             top_profit_item = max(valid_items,
                                 key=lambda x: (x.profit_sum, -int(x.item_id) if x.item_id.isdigit() else 0))
@@ -175,15 +173,16 @@ class BestSellingConfigurator(GroupByConfigurator):
             profit_csv += f"{year_month},{top_profit_item.item_id},{top_profit_item.profit_sum:.2f}"
             
             # Generar siguiente ID único
-            unique_id = self.generate_next_message_id(client_id)
+            unique_id = checkpoint_handler.get_next_id_in_memory(client_id)
             profit_dto = TransactionItemBatchDTO(profit_csv, BatchType.RAW_CSV)
             output_middleware.send(
                 profit_dto.to_bytes_fast(),
                 routing_key='top_profit.data',
                 headers=self.create_headers(client_id, unique_id)
             )
-            logger.info(f"Enviado profit {year_month} (ID={unique_id})")
-                    
+            logger.info(f"Enviado profit {year_month} (ID={unique_id} para cliente {client_id})")
+            time.sleep(5)
+
         logger.info(f"Top 1 local enviado para cliente {client_id}")
     
     def get_strategy_config(self) -> dict:
@@ -193,56 +192,3 @@ class BestSellingConfigurator(GroupByConfigurator):
             'outgoing_counter_by_client': self.outgoing_counter_by_client
         }
     
-    # def close(self):
-    #     logger.info("Cerrando BestSellingConfigurator...")
-        
-    #     self.coordination_running = False
-    #     if self.coordination_queue:
-    #         try:
-    #             self.coordination_queue.stop_consuming()
-    #             self.coordination_queue.close()
-    #         except Exception as e:
-    #             logger.error(f"Error cerrando coordination_queue: {e}")
-        
-    #     if self.coordinator:
-    #         self.coordinator.close()
-        
-    #     logger.info("BestSellingConfigurator cerrado")
-        
-        
-    # def _on_all_acks_received(self, client_id: str, middlewares: dict):
-    #     logger.info(f"Todos los ACKs recibidos para cliente {client_id}, propagando EOF")
-        
-    #     headers = {'client_id': client_id}
-        
-    #     eof_dto = TransactionItemBatchDTO(f"EOF:{client_id}", BatchType.EOF)
-        
-    #     middlewares["output"].send(
-    #         eof_dto.to_bytes_fast(),
-    #         routing_key='top_selling.data',
-    #         headers=headers
-    #     )
-        
-    #     middlewares["output"].send(
-    #         eof_dto.to_bytes_fast(),
-    #         routing_key='top_profit.data',
-    #         headers=headers
-    #     )
-        
-    #     logger.info(f"EOF propagado a Aggregator Final para cliente {client_id}")
-    
-    
-        # def process_message(self, body: bytes, headers: dict = None) -> tuple:
-    #     dto = TransactionItemBatchDTO.from_bytes_fast(body)
-        
-    #     client_id = 'default_client'
-    #     if headers and 'client_id' in headers:
-    #         client_id = headers['client_id']
-    #         if isinstance(client_id, bytes):
-    #             client_id = client_id.decode('utf-8')
-        
-    #     dto.client_id = str(client_id)
-        
-    #     is_eof = (dto.batch_type == BatchType.EOF)
-        
-    #     return (False, dto, is_eof) 

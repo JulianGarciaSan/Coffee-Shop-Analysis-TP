@@ -238,8 +238,6 @@ class BestSellingAggregatorNode:
             routing_key=routing_key,
             headers={'client_id': client_id, 'message_id': unique_id}
         )
-        logger.info(f"Enviado Data {metric} (ID={unique_id})")
-        time.sleep(10) 
         
     def _send_eof(self, client_id: str, routing_key: str, eof_type: Optional[int] = 1):
         

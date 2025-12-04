@@ -56,7 +56,7 @@ class TPVConfigurator(GroupByConfigurator):
         
         return {"output": output_middleware}
 
-    def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict, strategy, client_id: str, message_id: str, eof_type: Optional[int]=1) -> bool:
+    def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict, strategy, client_id: str, message_id: str,checkpoint_handler, eof_type: Optional[int]=1) -> bool:
         if eof_type == 2:
             logger.info(f"EOF tipo 2 recibido de cliente '{client_id}', no se envían resultados TPV")
             self._send_cleaning_eof_client(client_id, middlewares, strategy, message_id, eof_type=2)

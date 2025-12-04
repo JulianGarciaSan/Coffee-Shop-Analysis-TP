@@ -43,7 +43,7 @@ class ChaosMonkey:
                 'groupby_top_customers',
                 'top_consumers_aggregator',
                 'groupby_semester_1',
-                'groupby_best_selling_2024',
+                'groupby_best_selling',
                 'aggregator_best_selling_final',
                 'filter_year_1','filter_year_2','filter_year_3',
                 'filter_amount_1','filter_amount_2','filter_amount_3',
