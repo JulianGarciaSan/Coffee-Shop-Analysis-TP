@@ -2,8 +2,8 @@ import logging
 import os
 from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
 from dtos.dto import TransactionBatchDTO, BatchType
-from top_consumers_aggregator import TopCustomersAggregatorNode
-from best_selling_aggregator import BestSellingAggregatorNode
+from top_customers.top_consumers_aggregator import TopCustomersAggregatorNode
+from best_selling.best_selling_aggregator import BestSellingAggregatorNode
 
 
 

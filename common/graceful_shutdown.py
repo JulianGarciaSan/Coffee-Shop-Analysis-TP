@@ -17,7 +17,7 @@ class GracefulShutdown:
         signal.signal(signal.SIGTERM, self._signal_handler)
         signal.signal(signal.SIGINT, self._signal_handler)
         
-        logger.info("GracefulShutdown inicializado")
+        logger.info("GracefulShutdown seteado para manejar SIGTERM/SIGINT")
     
     def _signal_handler(self, signum, frame):
         """Se ejecuta cuando llega SIGTERM o SIGINT"""

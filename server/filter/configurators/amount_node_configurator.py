@@ -2,7 +2,7 @@ import logging
 import os
 import threading
 from typing import Optional, Dict, Any
-from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue
+from rabbitmq.middleware import MessageMiddlewareExchange, MessageMiddlewareQueue, MessageMiddlewareQueueManual
 from dtos.dto import TransactionBatchDTO, BatchType, CoordinationMessageDTO
 from .base_configurator import NodeConfigurator
 from coordinator.coordinator import PeerCoordinator 
@@ -10,13 +10,20 @@ logger = logging.getLogger(__name__)
 
 
 class AmountNodeConfigurator(NodeConfigurator):
-    def __init__(self, rabbitmq_host: str):
-        super().__init__(rabbitmq_host)
+    def __init__(self, rabbitmq_host: str, logging_instance, client_logging_instance, eof_logging_instance):
+        super().__init__(rabbitmq_host, logging_instance, client_logging_instance, eof_logging_instance)
         self.node_id = os.getenv('NODE_ID', f'amount_node_{os.getpid()}')
         self.total_nodes = int(os.getenv('TOTAL_AMOUNT_FILTERS', '1'))
         all_node_ids_str = os.getenv('ALL_NODE_IDS', self.node_id)
         all_node_ids = [nid.strip() for nid in all_node_ids_str.split(',')]
+        self.leader_id = os.getenv('LEADER_ID', None)
+        self.node_addresses_str = os.getenv('NODE_ADDRESSES', '')
         
+        nodes_addresses = self._parse_node_addresses(
+            self.node_addresses_str,
+            all_node_ids
+        )  
+                
         self.coordinator = PeerCoordinator(
             node_id=self.node_id,
             rabbitmq_host=rabbitmq_host,
@@ -71,6 +78,7 @@ class AmountNodeConfigurator(NodeConfigurator):
                     msg.node_id,
                     msg.batch_type_str
                 )
+                self.logger.write_with_timestamp(f"Informo que recibí el FANOUT de EOF para {msg.client_id}")
             
             elif msg.msg_type == CoordinationMessageDTO.ACK:
                 self.coordinator.handle_ack_received(
@@ -78,6 +86,7 @@ class AmountNodeConfigurator(NodeConfigurator):
                     msg.node_id,
                     msg.batch_type_str
                 )
+                self.logger.write_with_timestamp(f"Informo que recibí el ACK de {msg.node_id} para {msg.client_id}")
             
             else:
                 logger.warning(f"Tipo de mensaje desconocido: {msg.msg_type}")
@@ -89,7 +98,7 @@ class AmountNodeConfigurator(NodeConfigurator):
     def create_input_middleware(self, input_queue: str, node_id: str):
         logger.info(f"AmountNode: Usando working queue compartida '{input_queue}'")
         
-        return MessageMiddlewareQueue(
+        return MessageMiddlewareQueueManual(
             host=self.rabbitmq_host,
             queue_name=input_queue
         )
@@ -102,7 +111,8 @@ class AmountNodeConfigurator(NodeConfigurator):
         if output_q1:
             middlewares['q1'] = MessageMiddlewareExchange(
                 host=self.rabbitmq_host,
-                exchange_name=output_q1,
+                #exchange_name=output_q1,
+                exchange_name='dedup_exchange',
                 route_keys=['q1.data']
             )
             logger.info(f"  Output Q1 Exchange: {output_q1}")
@@ -114,16 +124,34 @@ class AmountNodeConfigurator(NodeConfigurator):
     def process_filtered_data(self, filtered_csv: str) -> str:
         return self._extract_q1_columns(filtered_csv)
     
-    def process_message(self, body: bytes, routing_key: str = None, client_id: Optional[int] = None) -> tuple:
+    def process_message(self, body: bytes, routing_key: str = None, client_id: Optional[int] = None,message_id: Optional[int] = None) -> tuple:   
         decoded_data = body.decode('utf-8').strip()
         
         client_id_str = str(client_id) if client_id is not None else "default"
+        message_id_str = str(message_id) if message_id is not None else "default"
         
         if decoded_data.startswith("EOF:"):
-            logger.info(f"EOF recibido para cliente {client_id_str}")
+            if decoded_data.startswith("EOF:2") or decoded_data.startswith("EOF:3"):
+                if decoded_data.startswith("EOF:2"):
+                    logger.info(f"EOF:2 recibido para cliente {client_id_str}")
+                    eof_type = 2
+                else:
+                    logger.info(f"EOF:3 recibido, formateando nodos")
+                    eof_type = 3
+
+                self.eof_logger.write(f"EOF:{eof_type}:{client_id_str}:transactions")
+                self.send_eof(self.output_middlewares, "transactions", client_id,message_id,eof_type=eof_type)
+                
+                dto = TransactionBatchDTO(decoded_data, BatchType.EOF)
+                return (False, 'transactions', dto, False)
             
+            logger.info(f"EOF recibido para cliente {client_id_str}")            
+            self.logger.write_with_timestamp(f"EOF:{client_id_str}")
+            self.eof_logger.write(f"BEF:{client_id_str}:transactions")
+                        
             self.coordinator.take_leadership(
                 client_id_str, 
+                message_id_str,
                 'transactions',
                 self._on_all_acks_received
             )
@@ -138,9 +166,9 @@ class AmountNodeConfigurator(NodeConfigurator):
         
         dto = TransactionBatchDTO(decoded_data, BatchType.RAW_CSV)
         return (False, 'transactions', dto, False)
-    
-    def send_data(self, data: str, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None):
-        headers = self.create_headers(client_id)
+
+    def send_data(self, data: str, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None, message_id: Optional[int] = None):
+        headers = self.create_headers(client_id, message_id)
         
         if client_id:
             client_id_str = str(client_id)
@@ -156,25 +184,28 @@ class AmountNodeConfigurator(NodeConfigurator):
             )
             logger.debug(f"Datos enviados a Q1 exchange con routing key 'q1.data'")
 
-    def _on_all_acks_received(self, client_id: str, batch_type: str):
+    def _on_all_acks_received(self, client_id: str,message_id: str, batch_type: str):
         logger.info(f"Todos los ACKs recibidos para cliente {client_id}, propagando EOF downstream")
-        
+        self.eof_logger.write(f"EOF:{client_id}:{batch_type}")
+
         if self.output_middlewares is None:
             logger.error("output_middlewares no está configurado")
             return
         
         client_id_int = int(client_id) if client_id.isdigit() else None
-        self.send_eof(self.output_middlewares, "transactions", client_id=client_id_int)
+        message_id_int = int(message_id) if message_id.isdigit() else None
+        self.send_eof(self.output_middlewares, "transactions", client_id=client_id_int,message_id=message_id_int)
+        self.eof_logger.write(f"END:{client_id}:{batch_type}")
 
-    def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None):
+    def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None,message_id: Optional[int] = None, eof_type: Optional[int] = 1):
         if 'q1' in middlewares:
-            eof_dto = TransactionBatchDTO("EOF:1", BatchType.EOF)
+            eof_dto = TransactionBatchDTO(f"EOF:{eof_type}", BatchType.EOF)
             middlewares['q1'].send(
                 eof_dto.to_bytes_fast(),
                 routing_key='q1.data',
-                headers=self.create_headers(client_id)
+                headers=self.create_headers(client_id,message_id)
             )
-            logger.info(f"EOF enviado a Q1 (report exchange) para cliente {client_id}")
+            logger.info(f"EOF:{eof_type} enviado a Q1 (report exchange) para cliente {client_id}")
 
     def _extract_q1_columns(self, csv_data: str) -> str:
         result_lines = ["transaction_id,final_amount"]
@@ -201,6 +232,24 @@ class AmountNodeConfigurator(NodeConfigurator):
         """
         logger.warning("handle_eof llamado pero ya no se usa (coordinador maneja EOF)")
         return False
+
+    def _parse_node_addresses(self, addresses_str, node_ids):
+        addresses = addresses_str.split(',')
+        
+        if len(addresses) != len(node_ids):
+            raise ValueError(
+                f"Mismatch: {len(addresses)} direcciones "
+                f"pero {len(node_ids)} node_ids"
+            )
+        
+        nodes_dict = {}
+        for i, address in enumerate(addresses):
+            host, port = address.split(':')
+            node_id = node_ids[i]
+            
+            nodes_dict[node_id] = (host, int(port))
+        
+        return nodes_dict
     
     def close(self):
         logger.info("Cerrando AmountNodeConfigurator...")

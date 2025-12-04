@@ -6,9 +6,12 @@ logger = logging.getLogger(__name__)
 
 
 class NodeConfigurator(ABC):
-    def __init__(self, rabbitmq_host: str):
+    def __init__(self, rabbitmq_host: str, logging_instance, client_logging_instance,eof_logging_instance):
         self.rabbitmq_host = rabbitmq_host
-    
+        self.logger = logging_instance
+        self.logger_client = client_logging_instance
+        self.eof_logger = eof_logging_instance
+
     @abstractmethod
     def create_output_middlewares(self, output_q1: Optional[str], output_q3: Optional[str], 
                                   output_q4: Optional[str] = None, output_q2: Optional[str] = None) -> Dict[str, Any]:
@@ -19,11 +22,11 @@ class NodeConfigurator(ABC):
         pass
     
     @abstractmethod
-    def send_data(self, data: str, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None):
+    def send_data(self, data: str, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None, message_id:Optional[int]=None):
         pass
     
     @abstractmethod
-    def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None):
+    def send_eof(self, middlewares: Dict[str, Any], batch_type: str = "transactions", client_id: Optional[int] = None,message_id:Optional[int]=None):
         pass
     
     @abstractmethod
@@ -36,16 +39,23 @@ class NodeConfigurator(ABC):
         pass
     
     @abstractmethod
-    def process_message(self, body: bytes, routing_key: str = None, client_id: Optional[int] = None) -> tuple:
+    def process_message(self, body: bytes, routing_key: str = None, client_id: Optional[int] = None, message_id: Optional[int] = None) -> tuple:
         pass
     
     def extract_client_id(self, properties) -> Optional[int]:
         if properties and properties.headers:
             return properties.headers.get('client_id')
         return None
-    
-    def create_headers(self, client_id: Optional[int]) -> Dict[str, Any]:
-        if client_id is not None:
-            return {'client_id': client_id}
+
+    def create_headers(self, client_id: Optional[int], message_id: Optional[int]) -> Dict[str, Any]:
+        headers = {}
+        if client_id is not None and message_id is None:
+            return {'client_id': client_id,
+                    'message_id': 0
+                    }
+        elif client_id is not None and message_id is not None:
+            return {'client_id': client_id,
+                    'message_id': message_id
+                    }
         return {}
 

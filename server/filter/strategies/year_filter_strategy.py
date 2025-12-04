@@ -28,9 +28,6 @@ class YearFilterStrategy(FilterStrategy):
             year_str = created_at[:4]
             
             if year_str in self.filter_years:
-                self.count += 1
-                if self.count % 1000 == 0:
-                    logger.info(f"YearFilter: {self.count} líneas pasaron el filtro")
                 return True
             return False
             

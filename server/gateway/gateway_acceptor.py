@@ -23,7 +23,6 @@ class GatewayAcceptor(threading.Thread):
         
     def __accept_new_connection(self):
 
-        logger.info('Accepting new connection')
         c, addr = self._server_socket.accept()
         logger.info(f'Accepted new connection from {addr[0]}')
         return c

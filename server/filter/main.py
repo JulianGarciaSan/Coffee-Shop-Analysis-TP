@@ -1,9 +1,14 @@
+from datetime import datetime
 import logging
 import os
 import sys
+import time
 import threading
 from typing import Optional
 from rabbitmq.middleware import MessageMiddlewareQueue
+from logger_monitor.logger_monitor import LoggerMonitor
+from healthchecker.healthchecker import HealthChecker
+from logger_monitor.logger_recovery import RecoveryManager, RecoveryState
 from strategies import FilterStrategyFactory
 from configurators import NodeConfiguratorFactory
 from dtos.dto import TransactionBatchDTO, TransactionItemBatchDTO, BatchType, FileType
@@ -26,6 +31,7 @@ class FilterNode:
         self.output_q4 = os.getenv('OUTPUT_Q4', None)
         self.filter_mode = os.getenv('FILTER_MODE', 'year')
         self.input_exchange = os.getenv('INPUT_EXCHANGE', None)
+
         
         total_env_var = f'TOTAL_{self.filter_mode.upper()}_FILTERS'
         self.total_filters = int(os.getenv(total_env_var, '1'))
@@ -42,11 +48,18 @@ class FilterNode:
         
         self.filter_strategy = self._create_filter_strategy()
         
+        self.logger = LoggerMonitor('/app/logs.txt')
+        self.client_logger = LoggerMonitor('/app/client_logs.txt')
+        self.eof_logger = LoggerMonitor('/app/eof_logs.txt')
+        
+        self.is_first_message = True
+        
         self.node_configurator = NodeConfiguratorFactory.create_configurator(
             self.filter_mode,
             self.rabbitmq_host
+        , self.logger, self.client_logger, self.eof_logger
         )
-        
+                
         if self.filter_mode == 'year':
             self.input_middleware = self.node_configurator.create_input_middleware(
                 self.input_exchange, self.input_queue
@@ -69,6 +82,18 @@ class FilterNode:
         for name, middleware in self.middlewares.items():
             if middleware and hasattr(middleware, 'shutdown'):
                 middleware.shutdown = self.shutdown
+                
+        health_port = int(os.getenv('HEALTH_PORT', '9999'))
+        self.health_server = HealthChecker(port=health_port)
+        self.health_server.start()
+        
+        self.recovery = RecoveryManager(
+            self.logger,
+            self.client_logger, 
+            self.eof_logger
+        )
+
+        
 
 
     def _on_shutdown_signal(self):
@@ -106,23 +131,31 @@ class FilterNode:
         
         return "default"
 
-    def process_message(self, body: bytes, routing_key: str = None, client_id: int = None):
+    def process_message(self, body: bytes, routing_key: str = None, client_id: int = None,message_id:int = None):
         if self.shutdown.is_shutting_down():
             logger.warning("Shutdown en progreso, ignorando mensaje")
         
         try:
-            should_stop, batch_type, dto, is_eof = self.node_configurator.process_message(
-                body, routing_key, client_id
-            )
+            result = self.node_configurator.process_message(body, routing_key, client_id, message_id)
             
+            if len(result) == 5:
+                should_stop, batch_type, dto, is_eof, is_dup = result
+            else:
+                should_stop, batch_type, dto, is_eof = result
+                is_dup = False 
+                
             if is_eof:
-                return self._handle_eof_message(dto, batch_type, client_id)
+                self.logger.write_with_timestamp(f"END:{client_id}")
+                return False
             
+            if is_dup:
+                logger.info(f"Mensaje duplicado detectado para client_id {client_id}, message_id {message_id}. Ignorando procesamiento.")
+                return False
+
             if should_stop:
                 return True
                         
             decoded_data = body.decode('utf-8').strip()
-            
             
             if hasattr(self.filter_strategy, 'set_dto_helper'):
                 self.filter_strategy.set_dto_helper(dto)
@@ -137,69 +170,129 @@ class FilterNode:
                 return True
                         
             processed_data = self.node_configurator.process_filtered_data(filtered_csv)
-            self.node_configurator.send_data(processed_data, self.middlewares, batch_type, client_id=client_id)
-            
+            self.logger.write_filter()
+            self.node_configurator.send_data(processed_data, self.middlewares, batch_type, client_id=client_id,message_id=message_id)
+            self.logger.write_enqueue()
+            # time.sleep(30)
             return False
 
         except Exception as e:
             logger.error(f"Error procesando mensaje: {e}")
             return False
         
-    def _handle_eof_message(self, dto: TransactionBatchDTO, eof_type: str, client_id: Optional[int] = None):
-        try:
-            eof_data = dto.data.strip()
-            if ":" in eof_data:
-                parts = eof_data.split(':')
-                counter = int(parts[-1])  
-            else:
-                counter = 1
-            
-            logger.info(f"EOF recibido: tipo={eof_type}, counter={counter}, total_filters={self.total_filters}, client_id={client_id}")
-            
-            should_stop = self.node_configurator.handle_eof(
-                counter=counter,
-                total_filters=self.total_filters,
-                eof_type=eof_type,
-                middlewares=self.middlewares,
-                input_middleware=self.input_middleware,
-                client_id=client_id
-            )
-            
-            if should_stop:
-                logger.info("Configurador indica que debe cerrarse el nodo")
-            
-            return should_stop
-            
-        except Exception as e:
-            logger.error(f"Error manejando EOF: {e}")
-            return False
-        
-        
     def on_message_callback(self, ch, method, properties, body):
         try:
+            #logging.info("Mensaje recibido en FilterNode")
             if self.shutdown.is_shutting_down():
                 logger.warning("Shutdown solicitado, deteniendo consumo")
                 ch.stop_consuming()
                 return
             
             client_id = None
+            message_id = None
             if properties and properties.headers:
                 client_id = properties.headers.get('client_id')
-            
-            
+                message_id = properties.headers.get('message_id')
+                
+                
             routing_key = method.routing_key if hasattr(method, 'routing_key') else None
-            should_stop = self.process_message(body, routing_key, client_id)
+            
+            if self.is_first_message:
+                self.is_first_message = False
+                last_log = self.logger._get_last_line()
+                
+                action = self.recovery.check_message_recovery(
+                    last_log, 
+                    client_id, 
+                    message_id
+                )
+                
+                if action.state == RecoveryState.ALREADY_DONE:
+                    ch.basic_ack(delivery_tag=method.delivery_tag)
+                    self.logger.write_termination()
+                    return
+                
+                if action.state == RecoveryState.COMPLETE_EOF:
+                    self.node_configurator._on_all_acks_received(
+                        action.client_id,
+                        action.batch_type
+                    )
+                
+                if action.state == RecoveryState.RESEND_EOF:
+                    self.node_configurator.process_message(
+                        TransactionBatchDTO("EOF:1", BatchType.EOF).to_bytes_fast(),
+                        None,
+                        action.client_id
+                    )
+                
+                if action.state == RecoveryState.RETRY_SEND:
+                    pass
+
+            self.client_logger.write(f"{client_id}:{message_id}")
+            should_stop = self.process_message(body, routing_key, client_id,message_id)
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+            self.logger.write_termination()
+
             
             if should_stop:
                 logger.info("EOF procesado - deteniendo consuming")
                 ch.stop_consuming()
         except Exception as e:
             logger.error(f"Error en callback: {e}")
+            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+
 
     def start(self):
-
         try:
             logger.info("Iniciando consumo de mensajes...")
+            action = self.recovery.check_startup_recovery()
+
+            if action.state == RecoveryState.COMPLETE_EOF:
+                logger.info(f"Completando EOF para cliente {action.client_id}")
+                self.node_configurator._on_all_acks_received(
+                    action.client_id, 
+                    action.batch_type
+                )
+                self.is_first_message = False
+                
+            elif action.state == RecoveryState.RESEND_EOF:
+                logger.info(f"Reenviando EOF para cliente {action.client_id}")
+                self.node_configurator.process_message(
+                    TransactionBatchDTO("EOF:1", BatchType.EOF).to_bytes_fast(),
+                    None,
+                    action.client_id
+                )
+                self.is_first_message = False
+            
+            elif action.state == RecoveryState.MULTIPLE_PENDING:
+                logger.warning(f"Múltiples clientes pendientes detectados: {len(action.pending_clients)}")
+                
+                eof_count = sum(1 for _, _, is_eof in action.pending_clients if is_eof)
+                bef_count = len(action.pending_clients) - eof_count
+                
+                logger.info(f"Procesando {eof_count} EOFs y {bef_count} BEFs pendientes")
+                
+                for client_id, batch_type, is_eof in action.pending_clients:
+                    if is_eof:
+                        logger.info(f"Completando EOF pendiente para cliente {client_id}")
+                        self.node_configurator._on_all_acks_received(
+                            client_id, 
+                            batch_type
+                        )
+                    else:
+                        logger.info(f"Reenviando EOF pendiente para cliente {client_id}")
+                        self.node_configurator.process_message(
+                            TransactionBatchDTO("EOF:1", BatchType.EOF).to_bytes_fast(),
+                            None,
+                            client_id
+                        )
+                
+                logger.info("Todos los clientes pendientes procesados")
+                self.is_first_message = False
+                
+            else:
+                self.is_first_message = True
+
             self.input_middleware.start_consuming(self.on_message_callback)
         except KeyboardInterrupt:
             logger.info("Filtro detenido manualmente")
@@ -208,6 +301,7 @@ class FilterNode:
             raise
         finally:
             self._cleanup()
+                   
 
     def _cleanup(self):
         """Limpieza ordenada de recursos"""
@@ -216,12 +310,10 @@ class FilterNode:
         try:
             if hasattr(self.node_configurator, 'close'):
                 self.node_configurator.close()
-            # Cerrar middleware de entrada
             if self.input_middleware:
                 self.input_middleware.close()
                 logger.info("Middleware de entrada cerrado")
             
-            # Cerrar todos los middlewares de salida
             for name, middleware in self.middlewares.items():
                 if middleware:
                     try:
@@ -229,7 +321,12 @@ class FilterNode:
                         logger.info(f"Middleware '{name}' cerrado")
                     except Exception as e:
                         logger.error(f"Error cerrando middleware '{name}': {e}")
-                
+             
+            if self.health_server:
+                self.health_server.stop()
+                self.health_server.join(timeout=5.0)
+                logger.info("HealthChecker detenido")
+                   
         except Exception as e:
             logger.error(f"Error durante cleanup: {e}")
 

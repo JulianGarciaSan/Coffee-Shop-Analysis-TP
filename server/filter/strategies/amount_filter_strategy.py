@@ -22,9 +22,6 @@ class AmountFilterStrategy(FilterStrategy):
             final_amount = float(final_amount_str)
             
             if final_amount >= self.min_amount:
-                self.count += 1
-                if self.count % 1000 == 0:
-                    logger.info(f"AmountFilter: {self.count} transacciones pasaron el filtro")
                 return True
             return False
             
