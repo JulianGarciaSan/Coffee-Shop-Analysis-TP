@@ -36,8 +36,6 @@ class BestSellingGroupByStrategy(GroupByStrategy):
         )
         self.dto_helper = TransactionItemBatchDTO("", BatchType.RAW_CSV)
         self.outgoing_counter_by_client = outgoing_counter_by_client or {}
-        # self.lines_processed_by_client = defaultdict(int)
-        # self.lines_per_item_by_client = defaultdict(lambda: defaultdict(int))
 
         logger.info(f"BestSellingGroupByStrategy inicializada para año {year}")
     
@@ -50,9 +48,6 @@ class BestSellingGroupByStrategy(GroupByStrategy):
             
             if not all([item_id, created_at, quantity_str, subtotal_str]):
                 return
-            
-            # self.lines_processed_by_client[client_id] += 1
-            # self.lines_per_item_by_client[client_id][item_id] += 1
             
             year_month = created_at[:7]
             quantity = int(quantity_str) 
@@ -71,13 +66,11 @@ class BestSellingGroupByStrategy(GroupByStrategy):
         Serializa operaciones para el WAL.
         """
         try:
-            # 1. Operaciones de Control (Start, Commit, Sent, EOF, Counter)
             if any(op in csv_line for op in [self.OP_START_TX, self.OP_COMMIT_TX, self.OP_SENT, self.OP_EOF, 'PENDING_ID', 'COMMIT_ID']):
                 if csv_line.startswith(f"{client_id},"):
                     return csv_line
                 return f"{client_id},{csv_line}"
 
-            # 2. Datos de Negocio
             item_id = self.dto_helper.get_column_value(csv_line, 'item_id')
             created_at = self.dto_helper.get_column_value(csv_line, 'created_at')
             quantity = self.dto_helper.get_column_value(csv_line, 'quantity')
@@ -86,7 +79,6 @@ class BestSellingGroupByStrategy(GroupByStrategy):
             if not all([item_id, created_at, quantity, subtotal]):
                 return None
             
-            # Formato Estandarizado: client_id, DATA, item_id, created_at, quantity, subtotal
             return f"{client_id},{self.OP_DATA},{item_id},{created_at},{quantity},{subtotal}"
             
         except Exception as e:
@@ -110,16 +102,13 @@ class BestSellingGroupByStrategy(GroupByStrategy):
             op_part = parts[1].strip()
             content = parts[2] if len(parts) > 2 else ""
 
-            # Manejo de separadores ':'
             if ':' in op_part:
                 op_type, extra = op_part.split(':', 1)
                 if not content: content = extra
             else:
                 op_type = op_part
 
-            # --- Transacciones y Control ---
             if op_type == self.OP_START_TX:
-                # Content: "ID, Query" o "ID"
                 if ',' in content:
                     msg_id_str, query = content.split(',', 1)
                     return {'client_id': client_id, 'type': self.OP_START_TX, 'id': int(msg_id_str), 'query': query}
@@ -137,9 +126,7 @@ class BestSellingGroupByStrategy(GroupByStrategy):
             if op_type == self.OP_COUNTER:
                 return {'client_id': client_id, 'type': self.OP_COUNTER, 'value': int(content)}
 
-            # --- Datos de Negocio ---
             if op_type == self.OP_DATA:
-                # Content: item_id, created_at, quantity, subtotal
                 data_parts = content.split(',')
                 if len(data_parts) < 4:
                     raise ValueError(f"Datos incompletos para DATA: {content}")
@@ -153,10 +140,6 @@ class BestSellingGroupByStrategy(GroupByStrategy):
                     'subtotal': float(data_parts[3])
                 }
 
-            # Fallback para compatibilidad con logs viejos (sin OP_DATA)
-            # Formato viejo: client, item_id, created_at, quantity, subtotal (5 campos total)
-            # parts tiene 3 elementos (client, op/item, content)
-            # Si op_part parece un item_id y content tiene 3 campos más...
             if ',' in content and len(content.split(',')) == 3:
                  legacy_parts = content.split(',')
                  return {
@@ -182,12 +165,9 @@ class BestSellingGroupByStrategy(GroupByStrategy):
             client_id = operation['client_id']
             op_type = operation.get('type', 'data')
             
-            # Ignorar operaciones de sistema (Start/Commit/Sent/Counter/EOF)
-            # El CheckpointHandler ya las usó o el EOF handler las procesará.
             if op_type in [self.OP_START_TX, self.OP_COMMIT_TX, self.OP_SENT, self.OP_EOF, self.OP_COUNTER]:
                 return
 
-            # Procesar Datos
             if op_type == self.OP_DATA:
                 item_id = operation['item_id']
                 created_at = operation['created_at']
@@ -234,7 +214,6 @@ class BestSellingGroupByStrategy(GroupByStrategy):
                         "profit_sum": aggregation.profit_sum
                     }
         
-        # AGREGAR: Incluir el contador desde la referencia compartida
         serialized["outgoing_counter"] = self.outgoing_counter_by_client.get(client_id, 0)
         
         logger.info(f"Serializando cliente {client_id}: counter={serialized['outgoing_counter']}")
@@ -246,11 +225,10 @@ class BestSellingGroupByStrategy(GroupByStrategy):
         """
         self.month_item_aggregations_by_client[client_id] = defaultdict(lambda: defaultdict(lambda: None))
         
-        # Deserializar aggregations (compatibilidad con formato anterior)
-        aggregations_data = data.get("aggregations", data)  # Fallback al formato anterior
+        aggregations_data = data.get("aggregations", data)  
         
         for year_month, items_dict in aggregations_data.items():
-            if year_month == "outgoing_counter":  # Skip counter field
+            if year_month == "outgoing_counter": 
                 continue
                 
             for item_id, aggregation_data in items_dict.items():
@@ -260,12 +238,10 @@ class BestSellingGroupByStrategy(GroupByStrategy):
                 aggregation.sellings_qty = aggregation_data.get('sellings_qty', 0)
                 aggregation.profit_sum = aggregation_data.get('profit_sum', 0.0)
         
-        # AGREGAR: Restaurar contador en la referencia compartida
         if "outgoing_counter" in data:
             self.outgoing_counter_by_client[client_id] = data["outgoing_counter"]
             logger.info(f"Contador restaurado para {client_id}: {data['outgoing_counter']}")
         else:
-            # Compatibilidad con checkpoints antiguos
             self.outgoing_counter_by_client[client_id] = 0
             logger.info(f"Contador inicializado para {client_id}: 0 (checkpoint sin counter)")
 

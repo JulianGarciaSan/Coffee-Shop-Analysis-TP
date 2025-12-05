@@ -60,15 +60,11 @@ class TopCustomersGroupByStrategy(GroupByStrategy):
         Distingue entre operaciones de control (ya formateadas) y datos nuevos.
         """
         try:
-            # 1. Operaciones de Control (Start, Commit, Sent, EOF, Counter)
-            # Si la línea ya contiene uno de estos opcodes, asumimos que viene del sistema
             if any(op in csv_line for op in [self.OP_START_TX, self.OP_COMMIT_TX, self.OP_SENT, self.OP_EOF, 'PENDING_ID', 'COMMIT_ID']):
                 if csv_line.startswith(f"{client_id},"):
                     return csv_line
                 return f"{client_id},{csv_line}"
 
-            # 2. Datos de Negocio (CSV Raw)
-            # Formato esperado: store_id, user_id, purchases_qty
             store_id = self.dto_helper.get_column_value(csv_line, 'store_id')
             user_id = self.dto_helper.get_column_value(csv_line, 'user_id')
             # Nota: purchases_qty no siempre está en el CSV raw de entrada (depende de la etapa),
@@ -79,7 +75,6 @@ class TopCustomersGroupByStrategy(GroupByStrategy):
             if not store_id or not user_id:
                 return None
             
-            # Formato Estandarizado: client_id, DATA, store_id, user_id
             return f"{client_id},{self.OP_DATA},{store_id},{user_id}"
             
         except Exception as e:
@@ -104,16 +99,13 @@ class TopCustomersGroupByStrategy(GroupByStrategy):
             op_part = parts[1].strip()
             content = parts[2] if len(parts) > 2 else ""
 
-            # Manejo de separadores ':' (ej: EOF:top_customers)
             if ':' in op_part:
                 op_type, extra = op_part.split(':', 1)
                 if not content: content = extra
             else:
                 op_type = op_part
 
-            # --- Transacciones y Control ---
             if op_type == self.OP_START_TX:
-                # Content: "ID, Query" o "ID"
                 if ',' in content:
                     msg_id_str, query = content.split(',', 1)
                     return {'client_id': client_id, 'type': self.OP_START_TX, 'id': int(msg_id_str), 'query': query}
@@ -131,9 +123,7 @@ class TopCustomersGroupByStrategy(GroupByStrategy):
             if op_type == self.OP_COUNTER:
                 return {'client_id': client_id, 'type': self.OP_COUNTER, 'value': int(content)}
 
-            # --- Datos de Negocio ---
             if op_type == self.OP_DATA:
-                # Content: store_id, user_id
                 data_parts = content.split(',')
                 if len(data_parts) < 2:
                     raise ValueError(f"Datos incompletos para DATA: {content}")
@@ -145,8 +135,6 @@ class TopCustomersGroupByStrategy(GroupByStrategy):
                     'user_id': data_parts[1]
                 }
 
-            # Fallback para compatibilidad con logs viejos (sin OP_DATA explícito)
-            # Si llegamos acá y parece dato (3 partes total), lo tratamos como DATA
             if len(parts) == 3 and op_type not in [self.OP_START_TX, self.OP_COMMIT_TX]:
                  return {
                     'client_id': client_id,
@@ -171,13 +159,9 @@ class TopCustomersGroupByStrategy(GroupByStrategy):
             client_id = operation['client_id']
             op_type = operation.get('type')
             
-            # 1. Operaciones de Sistema -> No afectan el modelo de negocio (Purchases)
             if op_type in [self.OP_START_TX, self.OP_COMMIT_TX, self.OP_SENT, self.OP_EOF, self.OP_COUNTER]:
-                # Opcional: Si quisieras restaurar el contador aquí, podrías:
-                # if op_type == self.OP_COUNTER: self.outgoing_counter_by_client[client_id] = operation['value']
                 return
 
-            # 2. Operaciones de Datos
             if op_type == self.OP_DATA:
                 store_id = operation['store_id']
                 user_id = operation['user_id']
@@ -187,7 +171,6 @@ class TopCustomersGroupByStrategy(GroupByStrategy):
                 if user_id not in self.store_user_purchases_by_client[client_id][store_id]:
                     self.store_user_purchases_by_client[client_id][store_id][user_id] = UserPurchaseCount(user_id)
                 
-                # En TopCustomers, cada línea es una compra (+1)
                 self.store_user_purchases_by_client[client_id][store_id][user_id].add_purchase()
 
         except Exception as e:

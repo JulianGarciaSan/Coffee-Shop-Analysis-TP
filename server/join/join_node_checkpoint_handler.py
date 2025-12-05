@@ -18,16 +18,8 @@ class JoinNodeCheckpointHandler:
             
             prefix, content = csv_line.split(':', 1)
             
-            # CONTROL_OPS = ['START_TRANSACTION', 'COMMIT_TRANSACTION', 'EOF', 'SENT']
-            # if prefix in CONTROL_OPS:
-            #     return f"{client_id},{prefix},{content}"
-            
-            # BUSINESS_OPS = ['stores', 'users', 'menu_items', 'tpv', 'top_customers', 'best_selling', 'most_profit']
-            # if prefix in BUSINESS_OPS:
             return f"{client_id},{prefix},{content}"
             
-            # logger.warning(f"Tipo de operación desconocida al serializar: {prefix}")
-            # return None
             
         except Exception as e:
             logger.error(f"Error crítico serializando operación: {e}")

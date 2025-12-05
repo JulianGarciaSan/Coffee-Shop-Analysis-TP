@@ -324,7 +324,7 @@ class MessageMiddlewareQueue(MessageMiddleware):
                     logger.error(f"Error en callback: {e}")
                     self.channel.basic_nack(method_frame.delivery_tag, requeue=True)
                     
-            self.channel.start_consuming()
+            # self.channel.start_consuming()
         except MessageMiddlewareDisconnectedError:
             raise
         except pika.exceptions.AMQPConnectionError as e:
@@ -486,14 +486,13 @@ class MessageMiddlewareQueueManual(MessageMiddleware):
             if not self.channel:
                 raise MessageMiddlewareDisconnectedError("No hay conexión activa con RabbitMQ")
             
-            # Optimizado para throughput
             self.channel.basic_qos(prefetch_count=1)
             
             logger.info(f"Esperando mensajes en cola {self.queue_name}...")
             
             for method_frame, properties, body in self.channel.consume(
                 self.queue_name,
-                auto_ack=False,  # ACK MANUAL
+                auto_ack=False,  
                 inactivity_timeout=5
             ):
             
@@ -508,7 +507,6 @@ class MessageMiddlewareQueueManual(MessageMiddleware):
                     logger.info("Canal cerrado durante consumo, saliendo del loop")
                     break
                 
-                # El callback ahora es responsable de hacer ACK/NACK
                 on_message_callback(self.channel, method_frame, properties, body)
                     
         except MessageMiddlewareDisconnectedError:
@@ -640,9 +638,7 @@ class MessageMiddlewareExchangeManual(MessageMiddleware):
             if not self.channel:
                 raise MessageMiddlewareDisconnectedError("No hay conexión activa con RabbitMQ")
             
-            # ✅ CAMBIO AQUÍ: Usar cola durable si se provee queue_name
             if self.queue_name:
-                # Cola durable con nombre fijo
                 self.channel.queue_declare(
                     queue=self.queue_name,
                     durable=True,
@@ -650,11 +646,9 @@ class MessageMiddlewareExchangeManual(MessageMiddleware):
                 )
                 self.consumer_queue = self.queue_name
             else:
-                # Cola temporal exclusiva (para casos donde no importa persistencia)
                 result = self.channel.queue_declare(queue='', exclusive=True)
                 self.consumer_queue = result.method.queue
             
-            # Bind a routing keys
             for route_key in self.route_keys:
                 self.channel.queue_bind(
                     exchange=self.exchange_name,

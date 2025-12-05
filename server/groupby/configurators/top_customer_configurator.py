@@ -78,23 +78,6 @@ class TopCustomerConfigurator(GroupByConfigurator):
         aggregator_index = store_num % len(self.topk_aggregators_ids)
         return self.topk_aggregators_ids[aggregator_index]
 
-    
-#     def handle_eof(self, dto: TransactionBatchDTO, middlewares: dict, strategy, client_id: str, message_id: str, checkpoint_handler) -> bool:
-#         logger.info(f"EOF recibido de cliente '{client_id}' con message_id '{message_id}'")
-        
-#         try:
-#             checkpoint_handler.start_batch_transaction(client_id, "top_customers_sharding")
-
-#             self._send_data_by_aggregator(middlewares["output"], strategy, client_id, message_id, checkpoint_handler)
-#             self._send_eof_broadcast(middlewares["output"], client_id, message_id, checkpoint_handler)
-            
-#             checkpoint_handler.commit_batch_transaction(client_id, "top_customers_sharding")
-#         except Exception as e:
-#             logger.error(f"Error procesando EOF para cliente {client_id}: {e}")
-#             raise
-        
-#         return False
-
     def _send_data_by_aggregator(self, output_middleware, strategy, client_id, original_message_id, checkpoint_handler):
         """
         Agrupa stores por aggregator y envía UN mensaje por aggregator.

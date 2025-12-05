@@ -54,7 +54,7 @@ class TPVQueryHandler:
             headers={'client_id': int(client_id), 'message_id': unique_id}
         )
         print(f"///////////// ENVIANDO EOF Q3 MESSAGE ID: {unique_id} /////////////")
-        # time.sleep(10)
+
     def _parse_tpv_line(self, line: str) -> Dict:
         if line.startswith('year_half_created_at'):
             return None

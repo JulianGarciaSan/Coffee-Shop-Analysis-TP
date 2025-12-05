@@ -49,7 +49,6 @@ class TopCustomersQueryHandler:
         )
         logger.info(f"Batch Q4 enviado para cliente '{client_id}')")
         print(f"///////////// ENVIANDO QUERY Q4 MESSAGE ID: {unique_id} /////////////")
-        # time.sleep(10)
         
     def send_eof(self, client_id: str):
         eof_dto = TransactionBatchDTO(f"EOF:{client_id}", BatchType.EOF)
@@ -60,9 +59,7 @@ class TopCustomersQueryHandler:
             routing_key=f'q4.data',
             headers={'client_id': int(client_id), 'message_id': unique_id}
         )
-        print(f"///////////// ENVIANDO EOF Q4 MESSAGE ID: {unique_id} /////////////")
-        # time.sleep(10)            
-    
+        print(f"///////////// ENVIANDO EOF Q4 MESSAGE ID: {unique_id} /////////////")    
        
     def _parse_top_customers_line(self, line: str) -> Dict:
         if line.startswith('store_id,user_id,purchases_qty'):

@@ -63,15 +63,12 @@ class ProtocolNew:
                 elif msg_type == self.MSG_TYPE_PUSH:
                     if payload:
                         decoded_payload = payload.decode('utf-8')
-                    # EXIT_REPORTS es crítico → enviar ACK
                         if decoded_payload == "EXIT_REPORTS":
-                            self._send_ack(msg_id)  # ← ACK obligatorio
+                            self._send_ack(msg_id)  
                             self.report_queue.put("EXIT")
                             logger.info("EXIT_REPORTS recibido y confirmado con ACK")
                         else:
-                            # Datos normales → NO ACK (fire-and-forget)
                             self.report_queue.put(decoded_payload)
-                            # NO enviar ACK para throughput
                         
                 elif msg_type == self.MSG_TYPE_BATCH:
                     if payload:
@@ -132,7 +129,7 @@ class ProtocolNew:
         """Envía datos de reporte SIN esperar ACK (fire-and-forget)."""
         try:
             message = f"L|{query_name}|0|{data}"
-            return self._send_push_no_ack(message)  # ← Nuevo método
+            return self._send_push_no_ack(message) 
         except Exception as e:
             logger.error(f"Error enviando datos de reporte: {e}")
             return False
@@ -177,24 +174,20 @@ class ProtocolNew:
         msg_id = self.next_msg_id
         self.next_msg_id += 1
         
-        # Preparar para esperar ACK
         ack_event = threading.Event()
         self.pending_acks[msg_id] = ack_event
         
         try:
-            # Enviar mensaje
             success = self._send_with_header(self.MSG_TYPE_PUSH, msg_id, message)
             if not success:
                 return False
             
-            # Esperar ACK
             if ack_event.wait(timeout=10.0):
                 return True
             else:
                 logger.error(f"Timeout esperando ACK para PUSH msg_id {msg_id}")
                 return False
         finally:
-            # Limpiar
             self.pending_acks.pop(msg_id, None)
 
     def _send_ack(self, msg_id: int) -> bool:
@@ -350,218 +343,3 @@ class ProtocolNew:
         except Exception as e:
             logger.error(f"Error cerrando conexión: {e}")
             
-    # def _receive_single_message(self) -> Optional[ProtocolMessage]:
-    #     """Recibe un solo mensaje del socket y lo parsea."""
-    #     try:
-    #         # Recibir header (4 bytes) - longitud del payload
-    #         header_data = self._receive_exact(self.HEADER_SIZE)
-    #         if not header_data:
-    #             return None
-            
-    #         payload_length = struct.unpack('>I', header_data)[0]
-            
-    #         # Recibir payload completo
-    #         payload_data = self._receive_exact(payload_length)
-    #         if not payload_data:
-    #             return None
-            
-    #         # Decodificar payload
-    #         payload = payload_data.decode('utf-8')
-            
-    #         # Parsear el mensaje según formato: ACTION|FILE_TYPE|LAST_BATCH|DATA
-    #         return (payload, payload_length)
-    #         #return self._parse_message(payload, payload_length)
-            
-    #     except Exception as e:
-    #         logger.error(f"Error recibiendo mensaje: {e}")
-    #         return None
-            
-    # def send_exit_message(self) -> bool:
-    #     """Envía mensaje EXIT al servidor."""
-    #     try:
-    #         success = self._send_message("EXIT")
-    #         if not success:
-    #             return False
-            
-    #         return self._wait_for_ack()
-    #         # ack = self._receive_message()
-    #         # if ack != "OK":
-    #         #     logger.error(f"ACK inválido para EXIT: {ack}")
-    #         #     return False
-            
-    #         # logger.info("Mensaje EXIT enviado y confirmado")
-    #         # return True
-            
-    #     except Exception as e:
-    #         logger.error(f"Error enviando EXIT: {e}")
-    #         return False
-            
-    # def send_message(self, message: str) -> bool:
-    #     try:
-    #         return self._send_message(message)
-    #     except Exception as e:
-    #         logger.error(f"Error enviando mensaje: {e}")
-    #         return False       
-            
-    # def send_response_batches(self, action: str, file_type: str, csv_content: str) -> bool:
-    #     """Envía datos en múltiples batches como respuesta (método de compatibilidad)."""
-    #     try:
-    #         # Extraer query_id del action
-    #         # Ej: "RPRT_Q1" -> query_id = "1"
-    #         if action.startswith("RPRT_Q"):
-    #             query_id = action[5:]  # Extraer número después de "RPRT_Q"
-    #         elif action.startswith("RPRT_"):
-    #             query_id = action[5:]  # Extraer parte después de "RPRT_"
-    #         else:
-    #             query_id = "1"  # Default
-            
-    #         # Usar el método que ya existe
-    #         return self.send_complete_report(csv_content, query_id, 50000)
-            
-    #     except Exception as e:
-    #         logger.error(f"Error enviando response batches: {e}")
-    #         return False
-        
-    # def send_report_batch(self, csv_content: str, query_id: str, is_last_batch: bool = True) -> bool:
-    #     """Envía un batch de reporte al cliente."""
-    #     try:
-    #         last_batch_flag = "1" if is_last_batch else "0"
-    #         # Cambio: usar R{query_id} en lugar de solo R
-    #         message = f"BATCH|R{query_id}|{last_batch_flag}|{csv_content}"
-            
-    #         success = self._send_message(message)
-    #         if not success:
-    #             return False
-            
-    #         # Esperar ACK del cliente
-    #         ack = self._receive_message()
-    #         if ack != "OK":
-    #             logger.error(f"Cliente no confirmó reporte Q{query_id}: {ack}")
-    #             return False
-            
-    #         logger.info(f"Reporte Q{query_id} enviado y confirmado: {len(csv_content)} bytes")
-    #         return True
-            
-    #     except Exception as e:
-    #         logger.error(f"Error enviando reporte Q{query_id}: {e}")
-    #         return False
-        
-    # # Método alternativo para enviar por número de líneas CSV en lugar de bytes
-    # def send_complete_report_by_lines(self, csv_content: str, query_id: str, max_lines_per_batch: int = 1000) -> bool:
-    #     """Envía un reporte completo dividido en batches por número de líneas CSV."""
-    #     try:
-    #         lines = csv_content.splitlines(keepends=True)  # Mantener \n
-            
-    #         if len(lines) <= max_lines_per_batch:
-    #             # Enviar en un solo batch
-    #             return self.send_report_batch(csv_content, query_id, True)
-    #         else:
-    #             # Dividir en múltiples batches por líneas
-    #             batches = []
-    #             current_pos = 0
-                
-    #             while current_pos < len(lines):
-    #                 # Crear batch con el número de líneas especificado
-    #                 batch_end = min(current_pos + max_lines_per_batch, len(lines))
-    #                 batch_lines = lines[current_pos:batch_end]
-    #                 batch_data = ''.join(batch_lines)
-    #                 batches.append(batch_data)
-    #                 current_pos = batch_end
-                
-    #             # Enviar cada batch
-    #             for i, batch_data in enumerate(batches):
-    #                 is_last_batch = (i == len(batches) - 1)
-    #                 success = self.send_report_batch(batch_data, query_id, is_last_batch)
-    #                 if not success:
-    #                     logger.error(f"Error enviando batch {i+1}/{len(batches)} de Q{query_id}")
-    #                     return False
-                    
-    #                 lines_in_batch = batch_data.count('\n')
-    #                 logger.debug(f"Batch {i+1}/{len(batches)} de Q{query_id} enviado: {lines_in_batch} líneas, {len(batch_data)} bytes")
-                
-    #             logger.info(f"Reporte Q{query_id} completo enviado en {len(batches)} batches")
-    #             return True
-                
-    #     except Exception as e:
-    #         logger.error(f"Error enviando reporte completo Q{query_id}: {e}")
-            # return False
-            
-            
-        
-
-    # def receive_report(self) -> Optional[dict]:
-    #     """Recibe un reporte completo del servidor usando el parser estructurado."""
-    #     try:
-    #         report_parts = []
-    #         query_id = None
-            
-    #         while True:
-    #             message = self._receive_single_message()
-    #             if message is None:
-    #                 return None
-                
-    #             # Enviar ACK
-    #             self._send_ack()
-                
-    #             if message.action == "EXIT":
-    #                 logger.info("EXIT recibido durante recepción de reporte")
-    #                 return None
-                
-    #             logger.debug(f"Mensaje recibido: action='{message.action}', file_type='{message.file_type}'")
-
-    #             # Verificar que es un reporte (file_type empieza con "RQ")
-    #             if message.action == "BATCH" and message.file_type.startswith("RQ"):
-    #                 query_id = message.file_type[2:]  # Extraer número después de "RQ"
-                    
-    #                 report_parts.append(message.data)
-                    
-    #                 if message.last_batch:
-    #                     complete_report = ''.join(report_parts)
-    #                     logger.info(f"Reporte Q{query_id} completo recibido: {len(complete_report)} bytes")
-    #                     return {
-    #                         'query_id': query_id,
-    #                         'content': complete_report,
-    #                         'total_size': sum(len(part) for part in report_parts)
-    #                     }
-    #             else:
-    #                 logger.warning(f"Mensaje inesperado: {message.action}|{message.file_type}")
-                    
-    #     except Exception as e:
-    #         logger.error(f"Error recibiendo reporte: {e}")
-    #         return None
-
-    # # Método de conveniencia para enviar reportes completos
-    # def send_complete_report(self, csv_content: str, query_id: str, max_batch_size: int) -> bool:
-    #     """Envía un reporte completo dividido en batches si es necesario."""
-    #     try:
-    #         if len(csv_content) <= max_batch_size:
-    #             # Enviar en un solo batch
-    #             return self.send_report_batch(csv_content, query_id, True)
-    #         else:
-    #             # Dividir en múltiples batches
-    #             batches = []
-    #             current_pos = 0
-                
-    #             while current_pos < len(csv_content):
-    #                 # Crear batch del tamaño especificado
-    #                 batch_end = min(current_pos + max_batch_size, len(csv_content))
-    #                 batch_data = csv_content[current_pos:batch_end]
-    #                 batches.append(batch_data)
-    #                 current_pos = batch_end
-                
-    #             # Enviar cada batch
-    #             for i, batch_data in enumerate(batches):
-    #                 is_last_batch = (i == len(batches) - 1)
-    #                 success = self.send_report_batch(batch_data, query_id, is_last_batch)
-    #                 if not success:
-    #                     logger.error(f"Error enviando batch {i+1}/{len(batches)} de Q{query_id}")
-    #                     return False
-                    
-    #                 logger.debug(f"Batch {i+1}/{len(batches)} de Q{query_id} enviado: {len(batch_data)} bytes")
-                
-    #             logger.info(f"Reporte Q{query_id} completo enviado en {len(batches)} batches")
-    #             return True
-                
-    #     except Exception as e:
-    #         logger.error(f"Error enviando reporte completo Q{query_id}: {e}")
-    #         return False

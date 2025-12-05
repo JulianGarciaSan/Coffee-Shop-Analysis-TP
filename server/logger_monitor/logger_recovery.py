@@ -66,27 +66,10 @@ class RecoveryManager:
         self.LOG_SPLITTER = ':'
     
     def load_dedup_state(self) -> Tuple[Set[Tuple[int, int]], Set[int]]:
-        """
-        NUEVO MÉTODO: Carga el estado de deduplicación desde UN SOLO LOG.
-        
-        El log contiene todas las entradas en formato: CLIENT_ID:MSG_ID;
-        
-        Los clientes finalizados se detectan porque sus EOFs también son mensajes
-        que vienen con el payload "EOF:X", pero en el log solo guardamos client_id:message_id.
-        
-        Para saber qué clientes finalizaron, necesitamos trackear qué client_ids
-        procesamos sus EOFs. Esto lo hacemos en memoria en el FilterDuplicateNode,
-        acá solo cargamos los mensajes procesados.
-        
-        Returns:
-            Tuple de (processed_messages, eof_clients)
-            - processed_messages: Set[(client_id, message_id)]
-            - eof_clients: Set[client_id] - VACÍO porque no lo guardamos en log
-        """
+
         processed_messages: Set[Tuple[int, int]] = set()
-        eof_clients: Set[int] = set()  # Siempre vacío, se reconstruye en runtime
+        eof_clients: Set[int] = set()  
         
-        # Cargar mensajes procesados desde dedup_log
         try:
             with open(self.main_logger.log_path, 'r') as f:
                 for line_num, line in enumerate(f, 1):
@@ -94,15 +77,12 @@ class RecoveryManager:
                     if not line:
                         continue
                     
-                    # Verificar delimitador
                     if not line.endswith(self.LOG_DELIMITER):
                         logger.warning(f"Dedup log línea {line_num}: sin delimitador, ignorando")
                         continue
                     
-                    # Remover delimitador
                     line = line[:-1]
                     
-                    # Parse: CLIENT_ID:MSG_ID
                     try:
                         parts = line.split(self.LOG_SPLITTER)
                         if len(parts) == 2:
@@ -121,20 +101,9 @@ class RecoveryManager:
         
         logger.info(f"Dedup state cargado: {len(processed_messages)} mensajes procesados")
         
-        # NOTA: eof_clients se reconstruirá en runtime cuando lleguen nuevos mensajes
-        # Si un cliente ya envió EOF y crasheamos, al reiniciar:
-        # 1. El EOF está en processed_messages como (client_id, eof_message_id)
-        # 2. Si llega un mensaje normal de ese cliente, NO está en eof_clients
-        # 3. Lo procesaremos y enviaremos (duplicado aceptable)
-        # 4. Cuando llegue el EOF de nuevo (duplicado), lo detectaremos y no lo procesaremos
-        
         return processed_messages, eof_clients
     
     def _parse_all_eof_logs(self) -> Dict[str, ClientState]:
-        """
-        Lee TODO el archivo eof_logs.txt y construye el estado de cada cliente.
-        Retorna un diccionario {client_id: ClientState}
-        """
         client_states: Dict[str, ClientState] = {}
         
         try:
@@ -152,8 +121,6 @@ class RecoveryManager:
             if not line or self.LOG_DELIMITER not in line:
                 continue
             
-            # Parse: STATUS:client_id:batch_type;
-            # Ejemplo: BEF:2:transactions;
             parts = line.split(self.LOG_SPLITTER)
             if len(parts) < 2:
                 continue
@@ -162,11 +129,9 @@ class RecoveryManager:
             client_id = parts[1]
             batch_type = parts[2].rstrip(self.LOG_DELIMITER) if len(parts) > 2 else None
             
-            # Inicializar estado si no existe
             if client_id not in client_states:
                 client_states[client_id] = ClientState(client_id)
             
-            # Actualizar estado según el log
             if status == "BEF":
                 client_states[client_id].has_bef = True
                 client_states[client_id].last_status = "BEF"
@@ -186,12 +151,6 @@ class RecoveryManager:
         return client_states
     
     def check_startup_recovery(self) -> RecoveryAction:
-        """
-        Analiza logs al iniciar.
-        Retorna qué acción tomar antes de procesar mensajes.
-        
-        Ahora verifica TODOS los clientes, no solo el último.
-        """
         client_states = self._parse_all_eof_logs()
         
         if not client_states:
@@ -250,21 +209,16 @@ class RecoveryManager:
         Analiza si un mensaje ya fue procesado.
         Retorna qué hacer con este mensaje.
         """
-        # Leer logs
         client_log = self.client_logger._get_last_line()
         eof_log = self.eof_logger._get_last_line()
         
-        # Convertir IDs a string
         curr_cid = str(current_client_id) if current_client_id else ""
         curr_mid = str(current_message_id) if current_message_id else ""
         
-        # Parse client log: "client_id:message_id"
         log_cid, log_mid = self._parse_client_log(client_log)
         
-        # Parse EOF log: "STATUS:client_id:batch_type"
         eof_status, eof_cid, eof_batch = self._parse_eof_log(eof_log)
         
-        # Analizar según estado del main_log
         if "END" in main_log:
             return self._analyze_end_state(
                 curr_cid, curr_mid, log_cid, log_mid,
@@ -301,7 +255,6 @@ class RecoveryManager:
         if not line or self.LOG_DELIMITER not in line:
             return None, None, None
         try:
-            # Remover el delimitador final
             line = line.rstrip(self.LOG_DELIMITER)
             parts = line.split(self.LOG_SPLITTER)
             if len(parts) >= 3:

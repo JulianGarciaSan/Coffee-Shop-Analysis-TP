@@ -215,7 +215,8 @@ class FilterNode:
                 if action.state == RecoveryState.COMPLETE_EOF:
                     self.node_configurator._on_all_acks_received(
                         action.client_id,
-                        action.batch_type
+                        0,
+                        action.batch_type,
                     )
                 
                 if action.state == RecoveryState.RESEND_EOF:

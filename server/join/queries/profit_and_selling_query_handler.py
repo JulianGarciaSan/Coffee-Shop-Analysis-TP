@@ -65,7 +65,6 @@ class ProfitAndSellingQueryHandler:
             headers={'client_id': int(client_id), 'message_id': unique_id}
         )
         print(f"///////////// ENVIANDO MESSAGE Q2 MP MESSAGE ID: {unique_id} /////////////")
-        # time.sleep(10)
     
     def send_best_selling_data(self, client_id: str, joined_data: List[Dict]):
         sorted_data = sorted(joined_data, key=lambda x: x['year_month_created_at'])
@@ -85,7 +84,7 @@ class ProfitAndSellingQueryHandler:
             headers={'client_id': int(client_id), 'message_id': unique_id}
             )
         print(f"///////////// ENVIANDO QUERY Q2 BS MESSAGE ID: {unique_id} /////////////")
-        # time.sleep(10)
+
     def send_eof(self, client_id: str, routing_key: str):
         eof_dto = TransactionItemBatchDTO(f"EOF:{client_id}", BatchType.EOF)
         unique_id = self.join_node.checkpoint_handler.get_next_id_in_memory(client_id)
@@ -96,7 +95,6 @@ class ProfitAndSellingQueryHandler:
             headers={'client_id': int(client_id), 'message_id': unique_id}
         )
         print(f"///////////// ENVIANDO EOF Q2 {routing_key} MESSAGE ID: {unique_id} /////////////")    
-        # time.sleep(10)
     
     def _parse_best_selling_line(self, line: str) -> Dict:
         if line.startswith('created_at'):

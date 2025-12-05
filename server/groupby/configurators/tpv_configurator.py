@@ -48,7 +48,6 @@ class TPVConfigurator(GroupByConfigurator):
             host=self.rabbitmq_host,
             exchange_name=self.output_exchange,
             route_keys=all_routing_keys,
-            #queue_name=f'groupby.tpv.semester.{self.semester}.output'
         )
         
         logger.info(f"  Output exchange: {self.output_exchange}")

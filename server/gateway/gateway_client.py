@@ -121,7 +121,6 @@ class ClientHandler(threading.Thread):
         logger.info(f"Enviando EOF:{eof_type} para cliente {self.client_id}")
         headers = self.create_headers(self.client_id, self.message_id)
         
-        # NUEVO: Crear middlewares frescos para enviar EOF:2
         try:
             output_mw = self.gateway.get_output_middleware()
             join_mw = self.gateway.get_join_middleware()
@@ -498,7 +497,7 @@ class ClientHandler(threading.Thread):
                 self._send_cleanup_eof()
         except (BrokenPipeError, ConnectionResetError, OSError) as e:
             logger.warning(f"Cliente {self.client_id} desconectado: {e}")
-            self._send_cleanup_eof()  # ← Enviar EOF:2 inmediatamente
+            self._send_cleanup_eof() 
             self._is_running = False
         except Exception as e:
             logger.error(f"Error enviando EXIT: {e}")

@@ -20,8 +20,6 @@ class BestSellingConfigurator(GroupByConfigurator):
         
         self.node_id = int(os.getenv('GROUPBY_NODE_ID', '0'))
         self.total_groupby_nodes = int(os.getenv('TOTAL_GROUPBY_NODES', '4'))
-        # all_node_ids_str = os.getenv('ALL_NODE_IDS', '')
-        # all_node_ids = [nid.strip() for nid in all_node_ids_str.split(',')] if all_node_ids_str else [f'groupby_{self.year}_node_{self.node_id}']
         self.outgoing_counter_by_client = outgoing_counter_by_client or defaultdict(int)
         self.node_name = f'groupby_{self.year}_node_{self.node_id}'
         self.input_queue_name = f"best_selling_{self.year}_node_{self.node_id}"
@@ -161,7 +159,6 @@ class BestSellingConfigurator(GroupByConfigurator):
                 headers=self.create_headers(client_id, unique_id)
             )
             logger.info(f"Enviado selling {year_month} (ID={unique_id} para cliente {client_id})")
-            time.sleep(5)
             # Top profit
             top_profit_item = max(valid_items,
                                 key=lambda x: (x.profit_sum, -int(x.item_id) if x.item_id.isdigit() else 0))

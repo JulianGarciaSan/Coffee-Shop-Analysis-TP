@@ -16,8 +16,6 @@ class LogWriter:
         
         if not os.path.exists(self.log_path):
             print(f"[LogWriter] Archivo no existe, creando: {self.log_path}")
-            # Crear directorio si no existe
-            #os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
             open(self.log_path, 'a').close()
         else:
             print(f"[LogWriter] Archivo existe: {self.log_path}")

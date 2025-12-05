@@ -1,0 +1,16 @@
+
+BEF:1:transaction_items;
+EOF:1:transaction_items;
+END:1:transaction_items;
+BEF:0:transaction_items;
+BEF:1:transaction_items;
+EOF:0:transaction_items;
+END:0:transaction_items;
+EOF:1:transaction_items;
+END:1:transaction_items;
+BEF:1:transaction_items;
+BEF:0:transaction_items;
+EOF:1:transaction_items;
+END:1:transaction_items;
+EOF:0:transaction_items;
+END:0:transaction_items;

@@ -25,8 +25,6 @@ class GroupByNode:
 
         logger.info(f"GroupByNode inicializado en modo {self.groupby_mode}")
         
-        # self.transactions_logger = LoggerMonitor('/app/logs.txt')
-        # self.eof_logger = LoggerMonitor('/app/eof_logs.txt')
         self.is_first_message = True 
         
         self.configurator = GroupByConfiguratorFactory.create_configurator(
@@ -140,8 +138,6 @@ class GroupByNode:
 
             if self.checkpoint_handler.analyze_first_message(client_id, message_id, ch, method, body):
                 return
-
-            # self.checkpoint_handler.register_incoming_message(client_id, message_id)
 
             should_stop, should_ack = self.process_message(body, client_id, message_id)
         

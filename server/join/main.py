@@ -177,27 +177,6 @@ class JoinNode:
         if hasattr(self.output_middleware, 'shutdown'):
             self.output_middleware.shutdown = self.shutdown
 
-
-    # def start_batch_transaction(self, client_id: str, query_name: str):
-    #     current_counter = self.outgoing_counter_by_client.get(client_id, 0)
-        
-    #     op = f"{client_id},START_TRANSACTION,{current_counter},{query_name}"
-    #     self.checkpoint_handler.save_counter_update(client_id, current_counter, [op])
-
-    # def get_next_id_in_memory(self, client_id: str) -> int:
-    #     self.outgoing_counter_by_client[client_id] += 1
-    #     return int(self.extra_id) * 1_000_000 + self.outgoing_counter_by_client[client_id]
-
-    # def commit_batch_transaction(self, client_id: str, query_name: str):
-    #     current_counter = self.outgoing_counter_by_client.get(client_id, 0)
-        
-    #     ops = [
-    #         f"{client_id},COMMIT_TRANSACTION,{current_counter}",
-    #         f"{client_id},SENT,{query_name}"
-    #     ]
-    #     self.checkpoint_handler.save_counter_update(client_id, current_counter, ops)
-
-
     def _check_and_execute_joins(self, client_id: str):
         state = self.client_states[client_id]
         
